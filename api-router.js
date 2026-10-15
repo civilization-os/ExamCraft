@@ -20,7 +20,6 @@ function loadSavedConfig() {
   } catch (e) {
     console.error('Failed to read config file:', e.message);
   }
-  // Default configuration template (Official Gemini or Protocol DeepSeek)
   return {
     category: 'official',
     vendor: 'gemini',
@@ -37,16 +36,130 @@ function saveConfig(cfg) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8');
 }
 
-// In-memory active configuration
 let currentConfig = loadSavedConfig();
 
-// Helper to mask sensitive keys
 function maskKey(key) {
   if (!key || key.length < 8) return key ? '******' : '';
   return key.slice(0, 4) + '••••••••' + key.slice(-4);
 }
 
-// GET /api/model/config - Get current configuration
+// Algorithmic local parser for standard Markdown exam format
+export function parseExamMarkdown(mdText) {
+  const lines = mdText.split('\n');
+  let title = '《Markdown 智能生成测评卷》';
+  let duration = 120;
+  let totalScore = 0;
+  const questions = [];
+
+  let currentSection = '通用试题';
+  let currentQ = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+
+    if (!line) continue;
+
+    // Title parsing
+    if (line.startsWith('# ')) {
+      title = line.replace('# ', '').trim();
+      continue;
+    }
+
+    // Header metadata (e.g. - 建议时限: 120分钟)
+    if (line.startsWith('- 建议时限:') || line.startsWith('- 时限:') || line.startsWith('时限:')) {
+      const match = line.match(/(\d+)/);
+      if (match) duration = parseInt(match[1]);
+      continue;
+    }
+
+    // Section header (e.g. ## 一、单项选择题)
+    if (line.startsWith('## ')) {
+      currentSection = line.replace('## ', '').trim();
+      continue;
+    }
+
+    // Numbered question line (e.g. 1. 设函数 f(x)... 或 16. 求不定积分...)
+    const qMatch = line.match(/^(\d+)[\.、\s]\s*(.*)$/);
+    if (qMatch) {
+      if (currentQ) {
+        questions.push(currentQ);
+      }
+
+      const num = qMatch[1].padStart(2, '0');
+      const promptText = qMatch[2];
+      const isChoice = currentSection.includes('选择题') || promptText.includes('选项') || promptText.includes('正确的是');
+      const isBlank = currentSection.includes('填空题') || promptText.includes('______') || promptText.includes('下划线');
+      const isSolution = currentSection.includes('解答题') || currentSection.includes('证明题') || currentSection.includes('计算题');
+
+      const defaultScore = isChoice ? 5 : isBlank ? 4 : 10;
+      totalScore += defaultScore;
+
+      currentQ = {
+        id: parseInt(num),
+        num: num,
+        type: isChoice ? '单项选择题' : isBlank ? '填空题' : '综合计算与解答题',
+        score: defaultScore,
+        section: currentSection,
+        prompt: promptText,
+        options: isChoice ? [] : undefined,
+        userAnswer: '',
+        standardAnswer: '',
+        status: 'unanswered'
+      };
+      continue;
+    }
+
+    // Option line (e.g. - A. ... or A. ... or - A: ...)
+    if (currentQ && currentQ.options) {
+      const optMatch = line.match(/^[-*]?\s*([A-D])[\.、:：\s]\s*(.*)$/i);
+      if (optMatch) {
+        currentQ.options.push({
+          key: optMatch[1].toUpperCase(),
+          text: optMatch[2]
+        });
+        continue;
+      }
+    }
+
+    // Answer line (e.g. *答案: A* or 答案: ...)
+    if (currentQ) {
+      const ansMatch = line.match(/答案[：:]\s*(.+?)[\*\_]*$/i);
+      if (ansMatch) {
+        currentQ.standardAnswer = ansMatch[1].trim();
+        continue;
+      }
+    }
+
+    // Math formula or continuation
+    if (currentQ) {
+      if (line.startsWith('$$') || line.startsWith('\\[') || line.includes('\\int') || line.includes('\\lim')) {
+        currentQ.mathExpression = line.replace(/\$\$/g, '').trim();
+      } else {
+        currentQ.prompt += ' ' + line;
+      }
+    }
+  }
+
+  if (currentQ) {
+    questions.push(currentQ);
+  }
+
+  // If totalScore wasn't populated properly
+  if (totalScore === 0) {
+    totalScore = questions.reduce((sum, q) => sum + (q.score || 5), 0) || 100;
+  }
+
+  return {
+    title,
+    duration,
+    totalScore,
+    questionCount: questions.length,
+    questions
+  };
+}
+
+// GET /api/model/config
 apiRouter.get('/model/config', (req, res) => {
   res.json({
     success: true,
@@ -58,17 +171,13 @@ apiRouter.get('/model/config', (req, res) => {
   });
 });
 
-// POST /api/model/config - Update configuration
+// POST /api/model/config
 apiRouter.post('/model/config', (req, res) => {
   try {
     const newConfig = req.body;
-    
-    // If incoming apiKey is masked or empty and we already have a saved one, preserve the existing one
     if (newConfig.apiKey && newConfig.apiKey.includes('••••••••')) {
       newConfig.apiKey = currentConfig.apiKey;
     }
-
-    // Validate using model_core schema
     const validated = validateModelConfig(newConfig);
     currentConfig = validated;
     saveConfig(currentConfig);
@@ -90,13 +199,11 @@ apiRouter.post('/model/config', (req, res) => {
   }
 });
 
-// POST /api/model/test - Test connection using model_core
+// POST /api/model/test
 apiRouter.post('/model/test', async (req, res) => {
   const startTime = Date.now();
   try {
-    // Can test incoming config or currently saved config
     const configToTest = req.body?.modelName ? req.body : currentConfig;
-    
     if (configToTest.apiKey && configToTest.apiKey.includes('••••••••')) {
       configToTest.apiKey = currentConfig.apiKey;
     }
@@ -111,7 +218,6 @@ apiRouter.post('/model/test', async (req, res) => {
     const validated = validateModelConfig(configToTest);
     const model = createChatModel(validated);
 
-    // Ping test
     const response = await model.invoke([
       {
         role: 'user',
@@ -138,7 +244,85 @@ apiRouter.post('/model/test', async (req, res) => {
   }
 });
 
-// POST /api/model/generate-paper - Generate exam using model_core
+// POST /api/model/parse-markdown - Parse Markdown into ExamCraft schema
+apiRouter.post('/model/parse-markdown', async (req, res) => {
+  const { markdown, useAI } = req.body;
+  if (!markdown || !markdown.trim()) {
+    return res.status(400).json({ success: false, error: 'Markdown 文本内容不能为空' });
+  }
+
+  // 1. Fast algorithmic fallback/baseline parse
+  const baseline = parseExamMarkdown(markdown);
+
+  // 2. If AI enhancement requested and model_core API key is available
+  if (useAI && currentConfig.apiKey && currentConfig.apiKey.trim()) {
+    try {
+      const model = createChatModel(currentConfig);
+      const prompt = `请将以下试卷的 Markdown 文本解析并规整为符合 ExamCraft 交互规范的试卷结构。
+若有未标注分值的题目，请按标准试卷自动补齐分数；若有 LaTeX 数学公式，请保留并规范排版。
+用户输入的 Markdown 文本如下：
+"""
+${markdown}
+"""
+
+请直接输出合法 JSON，不要附带多余闲聊，格式如下：
+{
+  "title": "试卷标题",
+  "duration": 120,
+  "totalScore": 100,
+  "questionCount": 3,
+  "questions": [
+    {
+      "id": 1,
+      "num": "01",
+      "type": "单项选择题",
+      "score": 5,
+      "section": "一、选择题",
+      "prompt": "题目描述",
+      "options": [
+        { "key": "A", "text": "选项A内容" },
+        { "key": "B", "text": "选项B内容" }
+      ],
+      "standardAnswer": "A",
+      "mathExpression": ""
+    }
+  ]
+}`;
+
+      const aiResponse = await model.invoke([
+        { role: 'system', content: '你是一位精通微积分与高等数学试卷排版的数据处理专家，请以纯 JSON 形式回复。' },
+        { role: 'user', content: prompt }
+      ]);
+
+      const cleanJson = aiResponse.content.replace(/```json\n?|\n?```/g, '').trim();
+      const aiParsed = JSON.parse(cleanJson);
+      return res.json({
+        success: true,
+        mode: 'ai_enhanced',
+        provider: model.providerName,
+        data: aiParsed
+      });
+    } catch (err) {
+      console.warn('AI markdown parsing fallback to algorithmic:', err.message);
+      // Fallback to baseline
+      return res.json({
+        success: true,
+        mode: 'algorithmic_fallback',
+        warning: `AI 增强解析超时或报错，已启用算法排版: ${err.message}`,
+        data: baseline
+      });
+    }
+  }
+
+  // Pure algorithmic response (0ms)
+  return res.json({
+    success: true,
+    mode: 'algorithmic',
+    data: baseline
+  });
+});
+
+// POST /api/model/generate-paper
 apiRouter.post('/model/generate-paper', async (req, res) => {
   const { title, subject, totalScore, duration, difficulty, choicesCount, blanksCount, solutionsCount } = req.body;
 
@@ -201,7 +385,7 @@ apiRouter.post('/model/generate-paper', async (req, res) => {
   }
 });
 
-// POST /api/model/ai-scribe - AI LaTeX transcription
+// POST /api/model/ai-scribe
 apiRouter.post('/model/ai-scribe', async (req, res) => {
   const { rawDraft, mathProblem } = req.body;
 
@@ -253,7 +437,7 @@ ${rawDraft}
   }
 });
 
-// POST /api/model/variant-question - AI 举一反三同构变式
+// POST /api/model/variant-question
 apiRouter.post('/model/variant-question', async (req, res) => {
   const { questionTitle, formula, weakPoint, errorReason } = req.body;
 

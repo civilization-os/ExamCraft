@@ -1,4 +1,4 @@
-# ExamCraft AI Workbench (双入口智能组卷与在线考练工作台)
+# ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 > **ExamCraft AI Workbench** 是基于 **Google Stitch** 原型设计规范与底层统一大模型调用核心 **`@civilization/model-core`** 打造的现代化 Web 智能组卷与在线考练工作台。基于 **Node.js + React + Tailwind CSS** 架构，提供高还原度、全交互沉浸式的命题与考练一体化体验。
 
@@ -6,7 +6,23 @@
 
 ## 🌟 核心功能特色
 
-### 1. 底层大模型核心 `model_core` 深度集成
+### 1. 三入口多模态智能组卷工作台 (Triple-Engine Generator)
+- **入口一：完整真题 PDF 1:1 原样精确克隆**
+  - 支持直接拖曳上传历年期末考试试卷或考研统考真题（`.pdf` / `.docx` / `.tex` / `.md`）。
+  - 自适应多模态视觉模型，原位提炼考卷标题、排版规范、分值规则与数学公式，OCR 解析度达 99.8%。
+  - 全真还原双栏排版、分值结构（单选、填空、综合解答题占比平衡）与答题卡规范。
+- **入口二：自由规格智能生成 (Parameterized Blueprint)**
+  - 无需原题模板，自主设定试卷总分（50-150分）、考试时限、题量分布与分值权重。
+  - 试题难度梯度三档可调：基础稳固 / 进阶拓展 / 考研冲刺。
+  - 直连 `model_core`，一键根据所填参数实时由 AI 生成定制考题大纲并直通考场。
+- **入口三：Markdown 题稿即时转卷 (Markdown to Exam)** 🆕
+  - **分屏即时编辑与渲染**：左侧 Markdown 源码编辑区（带行号、语法小贴士、字符统计），右侧交互式试卷卡片即时排版渲染。
+  - **语法智能解析**：自动解析试卷标题（`#`）、考试时限（`- 建议时限:`）、题型分组（`## 一、选择题`）、题目序号（`1.`）、候选项（`- A.`）、答案（`*答案: A*`）与 LaTeX 数学公式（`$$...$$`）。
+  - **本地文件与模板一键导入**：支持一键套用高数期末统考 Markdown 模板、线代特训模板，支持直接导入本地 `.md` 文件。
+  - **AI 智能规整与分值补齐**：调用 `model_core` 自动识别松散 Markdown 题稿，自动补齐未标注分值、提取步骤赋分要点并规整为标准格式。
+  - **一键直通考场**：点击「确认此 Markdown 试卷并进入考场」，直接以该 Markdown 题集开启全功能在线倒计时实战测试！
+
+### 2. 底层大模型核心 `model_core` 深度集成
 - **全厂商与多协议统一调度**：
   - **云端官方直连 (Official)**：支持 Google Gemini（通过 `@google/genai`）、OpenAI、Anthropic Claude。
   - **协议网关与自部署 (Protocol)**：支持 OpenAI Compatible 协议，兼容 **DeepSeek**、**通义千问**、**智谱 GLM**、**OneAPI**、本地 **Ollama** / **vLLM**。
@@ -14,18 +30,6 @@
   - 在「系统设置」中提供可视化配置面板，支持 API 密钥安全掩码存储、一键预设套用、思考预算（Thinking Budget）与发散度（Temperature）调节。
   - 提供 **「测试模型连接」** 按钮，实时测试网络连通性与往返延迟（Latency）。
   - 顶部导航栏动态感知模型连接状态（未配置时高亮提示，已接入时展示当前使用的模型名）。
-
-### 2. 双入口智能组卷工作台 (Dual-Engine Generator)
-- **入口一：完整真题 PDF 1:1 原样精确克隆**
-  - 支持直接拖曳上传历年期末考试试卷或考研统考真题（`.pdf` / `.docx` / `.tex`）。
-  - 自适应多模态视觉模型，原位提炼考卷标题、排版规范、分值规则与数学公式，OCR 解析度达 99.8%。
-  - 全真还原双栏排版、分值结构（单选、填空、综合解答题占比平衡）与答题卡规范。
-- **入口二：自由规格智能生成 (Parameterized Blueprint)**
-  - 无需原题模板，自主设定试卷总分（50-150分）、考试时限、题量分布与分值权重。
-  - 试题难度梯度三档可调：基础稳固 / 进阶拓展 / 考研冲刺。
-  - 直连 `model_core`，一键根据所填参数实时由 AI 生成定制考题大纲并直通考场。
-- **近期试卷快速入口与预设蓝图**：
-  - 快速查看近期生成的试卷，一键套用教育部考试中心真题标准模版。
 
 ### 3. 专注模式在线答题考场 (Focus Mode Online Exam Room)
 - **极简顶栏状态监考**：
@@ -92,32 +96,30 @@ pnpm run dev
 
 ---
 
-## 📁 项目目录结构
+## 📝 Markdown 组卷语法规范示例
 
-```
-ExamCraft/
-├── dist/                   # 生产打包输出目录
-├── stitch_dump/            # 来自 Stitch 原型的原始 HTML 与截图资源
-├── api-router.js           # model_core 统一模型调度与接口路由
-├── examcraft-config.json   # 模型与 API Key 本地安全配置文件
-├── src/
-│   ├── components/         # 公用组件（Header 导航栏等）
-│   ├── data/               # 模拟试卷、试题与错题本数据（mockData.js）
-│   ├── views/              # 核心功能页面
-│   │   ├── DashboardView.jsx        # 控制面板概览
-│   │   ├── ExamGeneratorView.jsx    # 双入口智能组卷大厅
-│   │   ├── PaperLibraryView.jsx     # 试卷库与标签标注管理
-│   │   ├── ExamRoomView.jsx         # 专注模式在线答题考场
-│   │   ├── MistakeNotebookView.jsx  # 我的题集与错题本复盘
-│   │   └── SettingsView.jsx         # 系统设置（API Key 与模型管理）
-│   ├── App.jsx             # 路由分发与全局考场状态管理
-│   ├── index.css           # Tailwind 与 Material Symbols 基础样式
-│   └── main.jsx            # React 挂载入口
-├── index.html              # 网页主入口
-├── package.json            # 依赖配置（已软链 link:../model_core）
-├── server.js               # Node.js 生产服务器
-├── tailwind.config.js      # 完整映射 Stitch 设计规范的 Tailwind 配置
-└── vite.config.js          # Vite 构建与 API 中间件配置
+用户可在组卷大厅第三入口中编写或导入如下格式的 Markdown 文本：
+
+```markdown
+# 《2025届全国高等数学期末统考试卷B》
+- 建议时限: 120分钟
+- 设定总分: 100分
+
+## 一、单项选择题
+1. 极限 \lim_{x \to 0} \frac{\sin x}{x} 的数值等于下列哪个选项？
+   - A. 0
+   - B. 1
+   - C. 不存在
+   - D. 无穷大
+   *答案: B*
+
+## 二、填空题
+2. 定积分 \int_0^1 (3x^2 + 2x) \, dx 的计算结果为 ______。
+   *答案: 2*
+
+## 三、综合计算题
+3. 求不定积分 \int x^2 \ln(x+1) \, dx 的解析通解。
+   *答案: (1/3)x^3 \ln(x+1) - (1/9)x^3 + (1/6)x^2 - (1/3)x + (1/3)\ln(x+1) + C*
 ```
 
 ---
