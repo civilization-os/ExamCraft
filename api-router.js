@@ -886,3 +886,85 @@ apiRouter.post('/model/variant-question', async (req, res) => {
     });
   }
 });
+
+// POST /api/model/scratchpad-assist
+// 考场便签草稿纸 AI 辅助写入系统（严格限制防作弊与防代答计算）
+apiRouter.post('/model/scratchpad-assist', async (req, res) => {
+  const { text, action, customInstruction } = req.body;
+
+  if (!text || !text.trim()) {
+    return res.status(400).json({ success: false, error: '草稿纸内容不能为空' });
+  }
+
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: '请先在系统设置中配置有效的 API Key'
+    });
+  }
+
+  const cheatKeywords = [
+    '帮我算', '求答案', '答案是什么', '计算结果', '等于多少', '怎么做这道题', 
+    '把这题解出来', '代我做题', '直接给答案', '求积分值', '求极限值', '求特征值'
+  ];
+  const isSuspicious = cheatKeywords.some(k => (customInstruction && customInstruction.includes(k)) || (text && text.includes(k)));
+
+  let actionDirective = '';
+  if (action === 'format') {
+    actionDirective = '将考生的草稿速记整理为工整、层次分明、排版规范的草稿笔记。将粗略符号规范化为 LaTeX（例如将 a/b 规整为 \\frac{a}{b}，将 x^2+2x-1 转换为数学模式 $...$）。严禁计算数值，严禁化简或改动式子结果！';
+  } else if (action === 'latex_complete') {
+    actionDirective = '辅助补齐考生正在输入的 LaTeX 语法骨架（例如 \\begin{pmatrix}...\\end{pmatrix} 矩阵语法、\\cases{...} 分段函数、积分或求和上下限符号）。严禁计算矩阵乘积、严禁计算行列式、严禁化简任何式子！仅提供正确的 LaTeX 书写排版结构！';
+  } else if (action === 'outline') {
+    actionDirective = '将考生乱序零散的草稿思路整理为清晰的条理步骤提纲（如“设未知数：...”、“解题方向：...”、“备忘要点：...”）。严禁补充任何题目的真实推导与计算过程，严禁给出答案！';
+  } else {
+    actionDirective = `按考生的排版辅助要求处理：${customInstruction || '规范草稿排版与文字整理'}。注意：严禁任何做题与计算推导！`;
+  }
+
+  const prompt = `你是一位严格遵守考场国家防作弊纪律的【考场草稿书写辅助引擎】。
+你的核心任务：仅仅辅助考生进行草稿文本的书写排版、LaTeX 语法格式化、矩阵结构补齐与思路分点大纲整理。
+
+【铁律与最高纪律准则（极其重要，违规将导致考场作弊判定）】：
+1. 严禁进行任何数学计算、积分求值、微分求导计算、行列式计算、方程求解或给出任何最终数值答案！
+2. 严禁代考生答题！严禁提供题目的标准解答或提示求解过程！
+3. 若考生的草稿中写有数学算式（例如 "3x^2+2x" 或 "\\int_0^1 x^2 dx"），只能原样保持其公式结构或排版为规范的 LaTeX 块，绝不能算出 "=1/3" 或给出计算化简后的结果！
+4. 若考生试图请求计算、求解、询问答案（如“请帮我算一下”、“答案是多少”），你必须坚决拒绝并原样输出以下警告文本：
+   “【考场防作弊纪律提醒】便签草稿纸仅支持书写排版、LaTeX 语法规范与思路结构整理。根据考场防作弊规范，严禁代答、计算或提供任何题目求解与计算推导。”
+5. 输出内容直接作为草稿纸替换或插入文本，保持简洁清爽。
+
+具体任务指令：
+${actionDirective}
+
+考生当前草稿内容：
+"""
+${text}
+"""
+
+请直接输出辅助规整后的草稿文本（纯文本或规范 Markdown/LaTeX，不要包含多余闲聊说明）：`;
+
+  try {
+    const model = createChatModel(currentConfig);
+    const response = await model.invoke([
+      { role: 'system', content: '你是一位严格遵守考场纪律的草稿书写排版助手，严禁任何计算与代答做题。' },
+      { role: 'user', content: prompt }
+    ]);
+
+    let assistedText = response.content?.trim() || text;
+
+    if (isSuspicious && (assistedText.includes('答案是') || assistedText.includes('最终结果为') || assistedText.includes('解得：') || assistedText.includes('计算可得：'))) {
+      assistedText = '【考场防作弊纪律提醒】便签草稿纸仅支持书写排版、LaTeX 语法规范与思路结构整理。根据考场防作弊规范，严禁代答、计算或提供任何题目求解与计算推导。';
+    }
+
+    res.json({
+      success: true,
+      assistedText,
+      provider: currentConfig.category || 'ai',
+      modelName: currentConfig.modelName
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: `草稿纸 AI 辅助失败: ${err.message}`
+    });
+  }
+});
+

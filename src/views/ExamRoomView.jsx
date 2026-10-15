@@ -25,9 +25,67 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
     { step: "步骤 3: 逐项定常数积分与常数 C 补齐", score: "+4分 (已达成)" }
   ]);
 
-  // Scratchpad toggle
+  // Scratchpad toggle & persistent local storage
+  const scratchpadStorageKey = activePaper?.id ? `examcraft_scratchpad_${activePaper.id}` : 'examcraft_scratchpad_default';
   const [showScratchpad, setShowScratchpad] = useState(false);
-  const [scratchpadNote, setScratchpadNote] = useState('');
+  const [scratchpadNote, setScratchpadNote] = useState(() => {
+    try {
+      const key = activePaper?.id ? `examcraft_scratchpad_${activePaper.id}` : 'examcraft_scratchpad_default';
+      return localStorage.getItem(key) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [lastSavedTime, setLastSavedTime] = useState('');
+  const [isScratchpadAiLoading, setIsScratchpadAiLoading] = useState(false);
+  const [scratchpadPreviewMode, setScratchpadPreviewMode] = useState(false);
+  const [scratchpadAiMessage, setScratchpadAiMessage] = useState('');
+
+  // Auto-save scratchpad to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(scratchpadStorageKey, scratchpadNote);
+      const now = new Date();
+      setLastSavedTime(
+        `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+      );
+    } catch (e) {
+      console.warn('Scratchpad autosave error:', e);
+    }
+  }, [scratchpadNote, scratchpadStorageKey]);
+
+  // AI Assistant for Scratchpad (Strictly non-calculating / writing assistant only)
+  const handleScratchpadAssist = async (action, customInstruction = '') => {
+    if (!scratchpadNote.trim()) {
+      setScratchpadAiMessage('请先在草稿纸中输入草稿文字或算式速记。');
+      return;
+    }
+    setIsScratchpadAiLoading(true);
+    setScratchpadAiMessage('');
+    try {
+      const res = await fetch('/api/model/scratchpad-assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: scratchpadNote,
+          action,
+          customInstruction
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.assistedText) {
+        setScratchpadNote(data.assistedText);
+        setScratchpadAiMessage('✨ AI 已规整草稿书写排版（已严格遵循考场纪律，屏蔽一切计算代答）');
+      } else {
+        setScratchpadAiMessage(data.error || 'AI 辅助失败，请检查 API Key 配置。');
+      }
+    } catch (err) {
+      setScratchpadAiMessage(`AI 辅助异常: ${err.message}`);
+    } finally {
+      setIsScratchpadAiLoading(false);
+    }
+  };
+
 
   // Submit Modal
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
@@ -589,26 +647,143 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
 
       {/* Floating Scratchpad Drawer */}
       {showScratchpad && (
-        <div className="fixed bottom-6 right-6 w-80 sm:w-96 bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant/40 p-space-md z-50 animate-in slide-in-from-bottom-5">
+        <div className="fixed bottom-6 right-6 w-96 sm:w-[460px] bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant/40 p-space-md z-50 animate-in slide-in-from-bottom-5 flex flex-col gap-2.5">
+          {/* Header */}
           <div className="flex items-center justify-between pb-2 border-b border-surface-container">
-            <div className="flex items-center gap-1.5 font-semibold text-on-surface text-label-md">
-              <span className="material-symbols-outlined text-[18px] text-primary">draw</span>
-              <span>便签草稿纸 (自动本地保存)</span>
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[20px] text-primary">draw</span>
+              <span className="font-semibold text-on-surface text-label-md">便签草稿纸</span>
+              {lastSavedTime && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-secondary-container/30 text-secondary text-[11px] font-mono font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"></span>
+                  <span>{lastSavedTime} 已暂存</span>
+                </span>
+              )}
             </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setScratchpadPreviewMode(!scratchpadPreviewMode)}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
+                  scratchpadPreviewMode
+                    ? 'bg-primary text-on-primary font-semibold'
+                    : 'bg-surface-container hover:bg-surface-container-high text-on-surface'
+                }`}
+                title="切换编辑/KaTeX高保真渲染"
+              >
+                {scratchpadPreviewMode ? '源码编辑' : 'KaTeX 预览'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowScratchpad(false)}
+                className="text-outline hover:text-on-surface p-1 rounded hover:bg-surface-container cursor-pointer ml-1"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Anti-Cheating & Discipline Badge */}
+          <div className="px-2.5 py-1 rounded-lg bg-surface-container-low border border-outline-variant/25 text-[11px] text-on-surface-variant flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-secondary font-medium">
+              <span className="material-symbols-outlined text-[14px]">shield</span>
+              <span>考场防作弊生效：AI 仅辅助排版与 LaTeX，严禁计算代答</span>
+            </div>
+            {scratchpadNote && (
+              <span className="font-mono text-[10px] text-outline">
+                {scratchpadNote.length} 字
+              </span>
+            )}
+          </div>
+
+          {/* AI Message / Guardrail Alert */}
+          {scratchpadAiMessage && (
+            <div className="p-2 rounded-lg bg-secondary-container/30 border border-secondary/20 text-[12px] text-secondary flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[15px]">info</span>
+                <span>{scratchpadAiMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScratchpadAiMessage('')}
+                className="text-on-surface-variant hover:text-on-surface cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </button>
+            </div>
+          )}
+
+          {/* Editor vs KaTeX Preview */}
+          {scratchpadPreviewMode ? (
+            <div className="w-full h-48 p-3 bg-surface-container-low rounded-xl overflow-y-auto border border-outline-variant/30 text-body-sm leading-relaxed">
+              {scratchpadNote.trim() ? (
+                <MathMarkdown content={scratchpadNote} />
+              ) : (
+                <p className="text-outline text-center py-16">草稿纸暂无内容，切换回「源码编辑」输入草稿算式</p>
+              )}
+            </div>
+          ) : (
+            <textarea
+              value={scratchpadNote}
+              onChange={(e) => setScratchpadNote(e.target.value)}
+              placeholder="随时记录草稿算式、换元设项、演算步骤思路...
+（AI 仅辅助将乱草稿排版为规范 LaTeX，绝不提供计算或答案）"
+              className="w-full h-48 p-3 bg-surface-container-low rounded-xl font-mono text-body-sm focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary border border-outline-variant/30 resize-none leading-relaxed"
+            />
+          )}
+
+          {/* AI Writing Assistant Toolbar */}
+          <div className="flex items-center justify-between gap-1 pt-1 border-t border-surface-container flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => handleScratchpadAssist('format')}
+                disabled={isScratchpadAiLoading}
+                className="px-2.5 py-1 rounded-lg bg-primary-fixed hover:bg-primary-fixed-dim text-on-primary-fixed text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                title="将草稿整理为规范的 Markdown 与 LaTeX 公式，不改变原式与计算"
+              >
+                <span className={`material-symbols-outlined text-[13px] ${isScratchpadAiLoading ? 'animate-spin' : ''}`}>
+                  {isScratchpadAiLoading ? 'progress_activity' : 'auto_fix_high'}
+                </span>
+                <span>AI 排版规整</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleScratchpadAssist('latex_complete')}
+                disabled={isScratchpadAiLoading}
+                className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer disabled:opacity-50 border border-outline-variant/30"
+                title="辅助补齐矩阵、分段函数与积分上下限等常用 LaTeX 结构"
+              >
+                <span className="material-symbols-outlined text-[13px] text-primary">functions</span>
+                <span>补齐 LaTeX</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleScratchpadAssist('outline')}
+                disabled={isScratchpadAiLoading}
+                className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer disabled:opacity-50 border border-outline-variant/30"
+                title="将散乱的思路提炼为条理分明的步骤设项大纲"
+              >
+                <span className="material-symbols-outlined text-[13px] text-secondary">format_list_bulleted</span>
+                <span>思路提纲化</span>
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={() => setShowScratchpad(false)}
-              className="text-outline hover:text-on-surface cursor-pointer"
+              onClick={() => {
+                if (window.confirm('确定清空当前草稿纸内容吗？')) {
+                  setScratchpadNote('');
+                }
+              }}
+              className="text-outline hover:text-error text-[11px] px-2 py-1 rounded hover:bg-surface-container transition cursor-pointer"
+              title="清空当前草稿"
             >
-              <span className="material-symbols-outlined text-[18px]">close</span>
+              清空
             </button>
           </div>
-          <textarea
-            value={scratchpadNote}
-            onChange={(e) => setScratchpadNote(e.target.value)}
-            placeholder="随时记录草稿算式、换元设项、演算中间值..."
-            className="w-full h-44 mt-2 p-2 bg-surface-container-low rounded-lg font-mono text-body-sm focus:outline-none focus:bg-surface-container-lowest border border-outline-variant/30 resize-none"
-          />
         </div>
       )}
 
