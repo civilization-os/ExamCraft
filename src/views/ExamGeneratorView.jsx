@@ -135,16 +135,21 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
   const [showAnswers, setShowAnswers] = useState(true);
   const [expandedAnalysis, setExpandedAnalysis] = useState({}); // { [qId]: boolean }
 
-  // File upload state simulation
+  // File upload & AI Clone state
+  const [cloneRawText, setCloneRawText] = useState('');
+  const [isAiCloning, setIsAiCloning] = useState(false);
+  const [cloneStage, setCloneStage] = useState(0); // 0: idle, 1: reading, 2: parsing, 3: latex, 4: done
+  const [clonedPaperResult, setClonedPaperResult] = useState(null);
+  const [aiEnhanceMessage, setAiEnhanceMessage] = useState('');
   const [uploadedFile, setUploadedFile] = useState({
-    name: '2024届全国高等数学期末考试统考卷A.pdf',
+    name: '2025届全国高等数学期末统考真题.pdf',
     size: '2.4MB',
-    status: '解析完毕',
-    progress: 100,
-    matchedQuestions: 23,
-    choices: 8,
-    blanks: 5,
-    solutions: 4
+    status: '等待 AI 解析',
+    progress: 0,
+    matchedQuestions: 0,
+    choices: 0,
+    blanks: 0,
+    solutions: 0
   });
   const [isUploading, setIsUploading] = useState(false);
 
@@ -173,37 +178,90 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
     return () => clearTimeout(timeout);
   }, [markdownText, activeMode]);
 
+  const triggerAiCloneWithText = async (textToAnalyze, fileName = '导入试卷.pdf') => {
+    setIsAiCloning(true);
+    setCloneStage(1);
+
+    const stageTimer1 = setTimeout(() => setCloneStage(2), 800);
+    const stageTimer2 = setTimeout(() => setCloneStage(3), 2200);
+
+    try {
+      const res = await fetch('/api/model/ai-import-paper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rawContent: textToAnalyze,
+          fileName
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.paper) {
+        setCloneStage(4);
+        setClonedPaperResult(data.paper);
+        setUploadedFile({
+          name: data.paper.title,
+          size: 'AI 规整完毕',
+          status: '已由 AI 深度解析',
+          progress: 100,
+          matchedQuestions: data.paper.questionCount,
+          choices: data.paper.typeBreakdown.choices,
+          blanks: data.paper.typeBreakdown.blanks,
+          solutions: data.paper.typeBreakdown.solutions
+        });
+      } else {
+        alert(data.error || 'AI 导入解析失败，请检查 API Key 配置。');
+        setCloneStage(0);
+      }
+    } catch (err) {
+      alert(`AI 导入失败: ${err.message}`);
+      setCloneStage(0);
+    } finally {
+      clearTimeout(stageTimer1);
+      clearTimeout(stageTimer2);
+      setIsAiCloning(false);
+    }
+  };
+
   const handleSimulateUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
+      const reader = new FileReader();
       if (file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
-        const reader = new FileReader();
         reader.onload = (event) => {
-          setMarkdownText(event.target.result);
+          const content = event.target.result;
+          setMarkdownText(content);
           setActiveMode('markdown');
+          handleAIMarkdownEnhance(content);
         };
         reader.readAsText(file);
         return;
       }
 
-      setIsUploading(true);
-      setTimeout(() => {
-        setUploadedFile({
+      reader.onload = (event) => {
+        const content = event.target.result;
+        setCloneRawText(content);
+        setUploadedFile(prev => ({
+          ...prev,
           name: file.name,
-          size: (file.size / (1024 * 1024)).toFixed(1) + 'MB',
-          status: '解析完毕',
-          progress: 100,
-          matchedQuestions: 21,
-          choices: 8,
-          blanks: 5,
-          solutions: 4
-        });
-        setIsUploading(false);
-      }, 1000);
+          size: (file.size / 1024).toFixed(1) + 'KB',
+          status: '已载入文件'
+        }));
+        triggerAiCloneWithText(content, file.name);
+      };
+
+      try {
+        reader.readAsText(file);
+      } catch {
+        setUploadedFile(prev => ({ ...prev, name: file.name }));
+      }
     }
   };
 
   const handleLaunchClone = () => {
+    if (clonedPaperResult) {
+      onStartExam(clonedPaperResult);
+      return;
+    }
     const paper = papers.find(p => p.id === 'paper-math-2024a') || papers[0];
     onStartExam(paper);
   };
@@ -256,18 +314,22 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
     onStartExam(customPaper);
   };
 
-  const handleAIMarkdownEnhance = async () => {
+  const handleAIMarkdownEnhance = async (overrideText = null) => {
+    const textToParse = typeof overrideText === 'string' ? overrideText : markdownText;
     setIsParsingAI(true);
     try {
       const res = await fetch('/api/model/parse-markdown', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ markdown: markdownText, useAI: true })
+        body: JSON.stringify({ markdown: textToParse, useAI: true })
       });
       const data = await res.json();
       if (data.success && data.data) {
         setParsedExam(data.data);
-        alert('🎉 model_core 结构化规整完毕！已自动补齐试题分值、考题类型与标准 LaTeX 公式结构。');
+        if (data.data.markdown) {
+          setMarkdownText(data.data.markdown);
+        }
+        setAiEnhanceMessage(`🎉 model_core 结构化规整完毕！已自动补齐 ${data.data.questionCount || data.data.questions?.length} 道试题的分值、题型与标准 LaTeX 矩阵。`);
       } else {
         alert(data.error || '未配置有效 API Key，已切换为算法极速排版。');
       }
@@ -391,16 +453,17 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
           </button>
         </div>
 
-        {/* MODE 1: 1:1 PDF Clone */}
+        {/* MODE 1: 1:1 PDF & Raw Exam Text AI Clone */}
         {activeMode === 'clone' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-xl items-stretch">
-            <section className="relative rounded-xl bg-surface-container-lowest shadow-sm p-space-xl border border-primary ring-2 ring-primary flex flex-col justify-between">
+            {/* Left: Input (Dropzone + Direct Paste Textarea + AI Action) */}
+            <section className="relative rounded-xl bg-surface-container-lowest shadow-sm p-space-xl border border-primary ring-2 ring-primary flex flex-col justify-between space-y-space-md">
               <div className="absolute top-0 left-0 right-0 h-1 bg-primary"></div>
-              <div className="space-y-space-md">
+              <div className="space-y-space-sm">
                 <div className="flex items-center justify-between pb-space-xs">
                   <div className="inline-flex items-center gap-space-xs px-space-sm py-1 rounded bg-secondary/10 text-secondary font-label-mono text-label-mono font-medium">
                     <span className="material-symbols-outlined text-[14px]">auto_fix_high</span>
-                    <span>100% 题型排版原貌保留</span>
+                    <span>model_core 大模型全面介入分析</span>
                   </div>
                   <div className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-primary">
                     <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
@@ -409,104 +472,205 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
 
                 <div className="space-y-space-xs">
                   <h2 className="font-headline-lg text-headline-lg text-on-surface font-semibold">
-                    完整真题 PDF 1:1 原样精确克隆
+                    真题文件 / 试题草稿 1:1 AI 智能克隆
                   </h2>
                   <p className="font-body-md text-body-md text-on-surface-variant">
-                    支持上传各学期标准真题试卷。自适应多模态视觉模型，原位提炼考卷标题、排版规范、分值规则与数学公式。
+                    导入任何非规范格式的真题文件或直接粘贴考题文本。底层大模型自动识别题目边界、分值分配、将杂乱数学符号转录为标准矢量 LaTeX。
                   </p>
                 </div>
 
-                <label className="mt-space-md rounded-xl bg-surface-container-low p-space-lg text-center flex flex-col items-center justify-center transition-colors hover:bg-surface-container group/drop cursor-pointer border border-dashed border-outline-variant/60 block">
-                  <input type="file" accept=".pdf,.docx,.tex,.md" onChange={handleSimulateUpload} className="hidden" />
-                  <div className="w-12 h-12 rounded-full bg-surface-container-lowest shadow-sm flex items-center justify-center text-primary group-hover/drop:scale-105 transition-transform">
-                    <span className="material-symbols-outlined text-[26px]">cloud_upload</span>
+                {/* Upload Dropzone */}
+                <label className="rounded-xl bg-surface-container-low p-space-md text-center flex flex-col items-center justify-center transition-colors hover:bg-surface-container group/drop cursor-pointer border border-dashed border-outline-variant/60 block">
+                  <input type="file" accept=".pdf,.docx,.tex,.md,.txt" onChange={handleSimulateUpload} className="hidden" />
+                  <div className="w-10 h-10 rounded-full bg-surface-container-lowest shadow-sm flex items-center justify-center text-primary group-hover/drop:scale-105 transition-transform">
+                    <span className="material-symbols-outlined text-[22px]">cloud_upload</span>
                   </div>
-                  <p className="mt-space-sm font-headline-sm text-headline-sm text-on-surface font-semibold">
-                    拖拽试卷文件至此处，或 <span className="text-primary hover:underline">浏览本地文件</span>
+                  <p className="mt-1 font-label-md text-label-md text-on-surface font-semibold">
+                    选择或拖拽试卷文件至此处 (<span className="text-primary hover:underline">浏览本地文件</span>)
                   </p>
-                  <p className="font-label-sm text-label-sm text-on-surface-variant mt-1">支持格式：.pdf, .docx, .tex, .md (最大 35MB)</p>
+                  <p className="font-label-mono text-[11px] text-on-surface-variant">支持 .pdf, .docx, .tex, .md, .txt</p>
                 </label>
 
-                <div className="rounded-lg bg-surface-container-low p-space-md flex flex-col gap-space-sm border border-outline-variant/30">
-                  <div className="flex items-start justify-between gap-space-sm">
-                    <div className="flex items-center gap-space-sm min-w-0">
-                      <div className="w-8 h-8 rounded bg-error-container text-on-error-container flex items-center justify-center shrink-0">
-                        <span className="material-symbols-outlined text-[18px]">description</span>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-label-md text-label-md text-on-surface truncate font-semibold">{uploadedFile.name}</p>
-                        <p className="font-label-mono text-label-mono text-on-surface-variant">{uploadedFile.size} • 已完成公式向量转录</p>
-                      </div>
-                    </div>
-                    <span className="inline-flex items-center px-space-xs py-0.5 rounded bg-surface-container text-primary font-label-mono text-code-sm">
-                      {isUploading ? '解析中...' : uploadedFile.status}
-                    </span>
-                  </div>
+                {/* Direct Paste Raw Exam Textarea */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="font-label-sm text-label-sm text-on-surface-variant font-semibold flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[16px] text-primary">edit_note</span>
+                      或直接在此粘贴试卷文本/题干内容：
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setCloneRawText(`2025届全国高等数学期末统考试卷（仿真样题）
+一、选择题
+1. 当 x 趋于 0 时，极限 lim x->0 (sin 3x) / x 等于多少？
+A. 1  B. 3  C. 0  D. 不存在
+答案是B，因为等价无穷小sin3x ~ 3x。
 
-                  <div className="bg-surface-container-lowest rounded p-space-sm space-y-space-xs border border-outline-variant/20">
-                    <div className="flex justify-between font-label-mono text-code-sm">
-                      <span className="text-on-surface-variant">结构提取完成度</span>
-                      <span className="text-secondary font-semibold">100% ({uploadedFile.matchedQuestions} 题完全对齐)</span>
-                    </div>
-                    <div className="w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
-                      <div className="w-full h-full bg-secondary transition-all duration-700"></div>
-                    </div>
-                    <div className="pt-1 grid grid-cols-3 gap-space-xs text-center font-label-mono text-label-mono text-on-surface">
-                      <div className="py-1 rounded bg-surface-container-low">选择题 <span className="font-semibold text-primary">{uploadedFile.choices} 题</span></div>
-                      <div className="py-1 rounded bg-surface-container-low">填空题 <span className="font-semibold text-primary">{uploadedFile.blanks} 题</span></div>
-                      <div className="py-1 rounded bg-surface-container-low">解答题 <span className="font-semibold text-primary">{uploadedFile.solutions} 题</span></div>
-                    </div>
+二、填空题
+2. 计算定积分 ∫_0^1 (3x^2 + 2x) dx 的值。
+答案是 2。原式 = [x^3 + x^2]_0^1 = 2。
+
+三、综合计算解答题
+3. 求矩阵 H 使得 A = G H，设 A 为 3 阶对称矩阵：
+A = [1 0 0; 0 -1 -1; -1 0 1]
+求该矩阵的特征值与特征向量，并证明 α1, α2 是极大无关组。`)}
+                      className="text-primary hover:underline font-label-sm text-[12px] cursor-pointer"
+                    >
+                      填入示例样题测试
+                    </button>
                   </div>
+                  <textarea
+                    value={cloneRawText}
+                    onChange={(e) => setCloneRawText(e.target.value)}
+                    placeholder="可在此粘贴从 Word、PDF、网页或其他渠道复制的任意非结构化试卷文本..."
+                    className="w-full h-32 p-space-sm bg-surface-container-low rounded-lg font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 resize-none leading-relaxed"
+                  />
                 </div>
+
+                {/* AI Multi-stage Progress Strip */}
+                {isAiCloning && (
+                  <div className="p-space-sm bg-secondary-container/30 border border-secondary/30 rounded-xl space-y-1.5 animate-in fade-in">
+                    <div className="flex items-center justify-between text-secondary font-label-sm font-semibold">
+                      <span className="flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
+                        <span>AI 智能格式深度解析中...</span>
+                      </span>
+                      <span className="font-mono">{cloneStage * 25}%</span>
+                    </div>
+                    <div className="w-full bg-surface-container h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-secondary h-full rounded-full transition-all duration-500"
+                        style={{ width: `${cloneStage * 25}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant font-label-mono">
+                      {cloneStage === 1 && '正在读取文本并进行语义结构预切分...'}
+                      {cloneStage === 2 && 'model_core 正在分析题型结构并自动推算合理分值...'}
+                      {cloneStage === 3 && '正在将高等数学公式转录为标准矢量 LaTeX 矩阵并生成标答...'}
+                      {cloneStage >= 4 && '解析完毕！已生成标准交互试卷。'}
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <div className="pt-space-lg">
+              {/* Primary AI Trigger Button */}
+              <div className="pt-space-md">
                 <button
                   type="button"
-                  onClick={handleLaunchClone}
-                  className="w-full h-11 px-space-lg rounded-lg bg-primary-container hover:bg-primary text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer"
+                  onClick={() => triggerAiCloneWithText(cloneRawText.trim() || undefined, uploadedFile.name)}
+                  disabled={isAiCloning}
+                  className="w-full h-11 px-space-lg rounded-lg bg-primary-container hover:bg-primary text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
                 >
-                  <span className="material-symbols-outlined text-[20px]">play_circle</span>
-                  <span>确认此试卷并进入考场</span>
+                  <span className={`material-symbols-outlined text-[20px] ${isAiCloning ? 'animate-spin' : ''}`}>
+                    {isAiCloning ? 'progress_activity' : 'bolt'}
+                  </span>
+                  <span>{isAiCloning ? '正在调用 model_core 深度解析中...' : '⚡ 启动 model_core AI 深度解析并克隆生成'}</span>
                 </button>
               </div>
             </section>
 
-            <div className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 flex flex-col justify-between space-y-space-lg">
+            {/* Right: AI Output Preview Card & Quick Actions */}
+            <div className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 flex flex-col justify-between space-y-space-md">
               <div className="space-y-space-md">
-                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
-                  1:1 克隆技术特性
-                </h3>
-                <div className="space-y-space-sm">
-                  <div className="p-space-md rounded-lg bg-surface-container-low flex items-start gap-space-sm">
-                    <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">format_shapes</span>
-                    <div>
-                      <p className="font-semibold text-label-md text-on-surface">双栏排版与题号答题卡映射</p>
-                      <p className="text-body-sm text-on-surface-variant">严格保留教育部与各高校期末统考真题的原貌布局。</p>
-                    </div>
+                <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-secondary text-[20px]">verified</span>
+                    <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
+                      {clonedPaperResult ? 'AI 试卷模型解析生成成果' : '1:1 克隆技术特性'}
+                    </h3>
                   </div>
-                  <div className="p-space-md rounded-lg bg-surface-container-low flex items-start gap-space-sm">
-                    <span className="material-symbols-outlined text-secondary text-[20px] mt-0.5">functions</span>
-                    <div>
-                      <p className="font-semibold text-label-md text-on-surface">复杂高等数学 LaTeX 向量化</p>
-                      <p className="text-body-sm text-on-surface-variant">对多重积分、偏导数、矩阵与级数公式原位高保真提取并结合 KaTeX 渲染。</p>
-                    </div>
-                  </div>
+                  {clonedPaperResult && (
+                    <span className="px-2 py-0.5 rounded bg-secondary/15 text-secondary font-label-mono text-code-sm font-semibold">
+                      就绪可开考
+                    </span>
+                  )}
                 </div>
+
+                {clonedPaperResult ? (
+                  <div className="space-y-space-md">
+                    {/* Header info */}
+                    <div className="p-space-md bg-surface-container-low rounded-xl space-y-1 border border-outline-variant/20">
+                      <h4 className="font-headline-sm text-on-surface font-bold">
+                        {clonedPaperResult.title}
+                      </h4>
+                      <div className="flex items-center gap-3 text-body-sm text-on-surface-variant font-label-mono flex-wrap">
+                        <span className="text-secondary font-semibold">总题量: {clonedPaperResult.questionCount} 题</span>
+                        <span>·</span>
+                        <span className="text-primary font-semibold">总分值: {clonedPaperResult.totalScore} 分</span>
+                        <span>·</span>
+                        <span>时限: {clonedPaperResult.duration} 分钟</span>
+                      </div>
+                      <div className="pt-1 flex gap-2 font-label-mono text-[11px] text-on-surface">
+                        <span className="px-2 py-0.5 rounded bg-surface-container">选择: {clonedPaperResult.typeBreakdown?.choices || 0}</span>
+                        <span className="px-2 py-0.5 rounded bg-surface-container">填空: {clonedPaperResult.typeBreakdown?.blanks || 0}</span>
+                        <span className="px-2 py-0.5 rounded bg-surface-container">解答: {clonedPaperResult.typeBreakdown?.solutions || 0}</span>
+                      </div>
+                    </div>
+
+                    {/* Preview Questions */}
+                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                      {clonedPaperResult.questions.map((q, idx) => (
+                        <div key={idx} className="p-2.5 rounded-lg bg-surface-container-low border border-outline-variant/20 space-y-1 text-body-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-primary font-label-mono">第 {q.num || idx + 1} 题 ({q.type} · {q.score}分)</span>
+                            <span className="text-secondary font-semibold font-mono">标答: {q.standardAnswer}</span>
+                          </div>
+                          <MathMarkdown content={q.prompt} className="text-on-surface font-medium" />
+                          {q.analysis && (
+                            <div className="p-2 rounded bg-surface-container text-[12px] text-on-surface-variant">
+                              <span className="font-semibold text-primary">解析: </span>
+                              <MathMarkdown content={q.analysis} />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-space-sm">
+                    <div className="p-space-md rounded-lg bg-surface-container-low flex items-start gap-space-sm">
+                      <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">format_shapes</span>
+                      <div>
+                        <p className="font-semibold text-label-md text-on-surface">全格式自适应大模型解析</p>
+                        <p className="text-body-sm text-on-surface-variant">无需手动修改排版，大模型自动识别题干、选项 A/B/C/D 与分步标答。</p>
+                      </div>
+                    </div>
+                    <div className="p-space-md rounded-lg bg-surface-container-low flex items-start gap-space-sm">
+                      <span className="material-symbols-outlined text-secondary text-[20px] mt-0.5">functions</span>
+                      <div>
+                        <p className="font-semibold text-label-md text-on-surface">复杂高等数学 LaTeX 向量化</p>
+                        <p className="text-body-sm text-on-surface-variant">对多重积分、偏导数、特征值矩阵与微积分展开式原位提取并完成 KaTeX 渲染。</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="p-space-md bg-primary/5 rounded-xl border border-primary/20 flex items-center justify-between">
-                <div>
-                  <span className="font-label-mono text-label-sm text-primary font-semibold">快速体验</span>
-                  <p className="font-body-sm text-on-surface">已有预置《2024届全国高等数学期末统考试卷A》</p>
-                </div>
+              {/* Action buttons */}
+              <div className="space-y-2 pt-2 border-t border-surface-container">
                 <button
                   type="button"
                   onClick={handleLaunchClone}
-                  className="px-3 py-1.5 bg-primary text-on-primary rounded-lg font-label-sm font-semibold shadow-xs cursor-pointer"
+                  className="w-full h-10 px-space-lg rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer"
                 >
-                  立即开考
+                  <span className="material-symbols-outlined text-[18px]">play_circle</span>
+                  <span>{clonedPaperResult ? '🚀 立即以此 AI 克隆试卷进入考场' : '直接进入预置考场'}</span>
                 </button>
+                {clonedPaperResult && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (clonedPaperResult.markdown) {
+                        setMarkdownText(clonedPaperResult.markdown);
+                      }
+                      setActiveMode('markdown');
+                    }}
+                    className="w-full h-9 px-space-md rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md flex items-center justify-center gap-space-xs transition-colors cursor-pointer border border-outline-variant/30"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">edit</span>
+                    <span>导入至 Markdown 工作台进行微调</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -664,6 +828,23 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                 </button>
               </div>
             </div>
+
+            {/* AI Enhancement Notice Banner */}
+            {aiEnhanceMessage && (
+              <div className="p-3 bg-secondary-container/40 border border-secondary/30 rounded-xl text-secondary text-body-sm flex items-center justify-between animate-in fade-in">
+                <div className="flex items-center gap-2 font-medium">
+                  <span className="material-symbols-outlined text-[18px]">verified</span>
+                  <span>{aiEnhanceMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAiEnhanceMessage('')}
+                  className="text-on-surface-variant hover:text-on-surface cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+            )}
 
             {/* Split Screen: Editor on Left, KaTeX Live Preview on Right */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-lg items-stretch">

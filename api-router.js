@@ -41,6 +41,28 @@ function maskKey(key) {
   return key.slice(0, 4) + '••••••••' + key.slice(-4);
 }
 
+function extractJsonFromAiResponse(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {}
+
+  let clean = text.replace(/```json\s*|```\s*$/g, '').trim();
+  try {
+    return JSON.parse(clean);
+  } catch {}
+
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = text.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch {}
+  }
+  return null;
+}
+
 // Advanced robust parser for Chinese national exams & course markdown papers
 export function parseExamMarkdown(mdText) {
   const lines = mdText.split('\n');
@@ -287,56 +309,65 @@ apiRouter.post('/model/parse-markdown', async (req, res) => {
   if (useAI && currentConfig.apiKey && currentConfig.apiKey.trim()) {
     try {
       const model = createChatModel(currentConfig);
-      const prompt = `请将以下试卷的 Markdown 文本解析并规整为符合 ExamCraft 交互规范的试卷结构。
-若有未标注分值的题目，请按标准试卷自动补齐分数；若有 LaTeX 数学公式，请保留并规范排版。
-用户输入的 Markdown 文本如下：
+      const prompt = `你是一位精通中国高校期末统考与国家考研数学命题规范的 AI 数据处理专家。
+请对以下试卷的文本/Markdown 内容进行深度格式分析与结构化提取：
+1. 自动提取或推断试卷规范标题、建议时限与总分。
+2. 识别提取所有题目，自动识别题号（如 01, 02...）、分值（选择题默认5分、填空题5分、大题10分）。
+3. 数学公式规范化：将所有数学符号转换为标准 LaTeX（行内用 $...$，大公式/矩阵用 $$...$$）。
+4. 提取选择题选项列表（A/B/C/D），提取标准答案，并生成详细数学分步推导解析。
+5. 生成格式工整清晰的标准 Markdown 字符串（字段名为 "markdown"）。
+
+用户输入的试卷文本如下：
 """
 ${markdown}
 """
 
-请直接输出合法 JSON，不要附带多余闲聊，格式如下：
+必须直接输出合法 JSON，不要包含任何闲聊文字，JSON 格式如下：
 {
   "title": "试卷标题",
   "duration": 120,
   "totalScore": 100,
   "questionCount": 3,
+  "markdown": "完整规整的标准 Markdown 文本",
   "questions": [
     {
       "id": 1,
       "num": "01",
       "type": "单项选择题",
       "score": 5,
-      "section": "一、选择题",
-      "prompt": "题目描述",
+      "section": "一、单项选择题",
+      "prompt": "题目描述（包含 $LaTeX$ 公式）",
       "options": [
         { "key": "A", "text": "选项A内容" },
         { "key": "B", "text": "选项B内容" }
       ],
       "standardAnswer": "A",
-      "analysis": "详细解析"
+      "analysis": "详细分步解析与证明（包含 $$LaTeX$$）"
     }
   ]
 }`;
 
       const aiResponse = await model.invoke([
-        { role: 'system', content: '你是一位精通微积分与高等数学试卷排版的数据处理专家，请以纯 JSON 形式回复。' },
+        { role: 'system', content: '你是一位精通数学试卷排版与大模型结构化提取的专家，必须返回纯合法 JSON。' },
         { role: 'user', content: prompt }
       ]);
 
-      const cleanJson = aiResponse.content.replace(/```json\n?|\n?```/g, '').trim();
-      const aiParsed = JSON.parse(cleanJson);
-      return res.json({
-        success: true,
-        mode: 'ai_enhanced',
-        provider: model.providerName,
-        data: aiParsed
-      });
+      const aiParsed = extractJsonFromAiResponse(aiResponse.content);
+      if (aiParsed && aiParsed.questions && aiParsed.questions.length > 0) {
+        return res.json({
+          success: true,
+          mode: 'ai_enhanced',
+          provider: model.providerName,
+          modelName: currentConfig.modelName,
+          data: aiParsed
+        });
+      }
     } catch (err) {
       console.warn('AI markdown parsing fallback to algorithmic:', err.message);
       return res.json({
         success: true,
         mode: 'algorithmic_fallback',
-        warning: `AI 增强解析超时或报错，已启用算法排版: ${err.message}`,
+        warning: `AI 增强解析超时或异常: ${err.message}`,
         data: baseline
       });
     }
@@ -347,6 +378,199 @@ ${markdown}
     mode: 'algorithmic',
     data: baseline
   });
+});
+
+// POST /api/model/ai-import-paper
+// 深度使用 model_core 大模型全面介入分析任意非标准文档、PDF文本、Word或杂乱题卷
+apiRouter.post('/model/ai-import-paper', async (req, res) => {
+  const { rawContent, fileName, duration, totalScore } = req.body;
+
+  if (!rawContent || !rawContent.trim()) {
+    return res.status(400).json({ success: false, error: '导入的试卷文本内容不能为空' });
+  }
+
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: '请先在「系统设置」中配置有效的 API Key（例如 DeepSeek 或 Gemini）后再使用 AI 导入功能。'
+    });
+  }
+
+  try {
+    const model = createChatModel(currentConfig);
+    const prompt = `你是一位精通中国高校期末考试与国家考研命题规范的专家。用户上传导入了一份试卷文件或原题内容（文件名：${fileName || '待解析试卷.pdf'}）。
+请对以下原始文本进行深度语义分析、格式规整、公式向量化与完整试卷结构生成。
+
+原始试卷内容如下：
+"""
+${rawContent}
+"""
+
+核心任务要求：
+1. 识别并提炼出正式规范的试卷标题（如《2025届高等数学期末统考仿真卷》）、建议时限（默认120分钟）与试卷总分（默认100分）。
+2. 识别拆解所有试题，标注所属大类（单选题、填空题、综合计算与解答题）。
+3. 为每道题分配合理的分值，确保总分自洽。
+4. 数学公式全面规范化为标准 LaTeX（行内使用 $...$，大公式或矩阵使用 $$...$$）。
+5. 针对选择题提取 A/B/C/D 选项；针对各题提供标准答案与详细的分步推导解析。
+6. 生成可直接在工作台展示的高清格式化 Markdown。
+
+请务必直接输出标准合法 JSON，严禁添加任何前后说明文字，格式如下：
+{
+  "title": "试卷标题",
+  "duration": 120,
+  "totalScore": 100,
+  "questionCount": 3,
+  "difficulty": 4,
+  "tags": ["#AI导入", "#高等数学", "#深度解析"],
+  "markdown": "完整规整的标准 Markdown 文本",
+  "questions": [
+    {
+      "id": 1,
+      "num": "01",
+      "type": "单项选择题",
+      "score": 5,
+      "section": "一、单项选择题",
+      "prompt": "题目描述（包含 $LaTeX$ 公式）",
+      "options": [
+        { "key": "A", "text": "选项A内容" },
+        { "key": "B", "text": "选项B内容" }
+      ],
+      "standardAnswer": "A",
+      "analysis": "详细分步解析与证明（包含 $$LaTeX$$）"
+    }
+  ]
+}`;
+
+    const response = await model.invoke([
+      { role: 'system', content: '你是一位精通数学试卷排版与大模型结构化提取的专家，必须返回纯合法 JSON。' },
+      { role: 'user', content: prompt }
+    ]);
+
+    const parsed = extractJsonFromAiResponse(response.content);
+    if (!parsed || !parsed.questions || parsed.questions.length === 0) {
+      throw new Error('AI 未能从输入文本中解析出有效的试卷题目');
+    }
+
+    const paperId = 'imported-' + Date.now();
+    const paper = {
+      id: paperId,
+      title: parsed.title || fileName?.replace(/\.[^/.]+$/, '') || 'AI 导入解析试卷',
+      source: `AI 深度导入解析 (${currentConfig.modelName})`,
+      sourceType: 'ai-imported',
+      date: '刚刚',
+      questionCount: parsed.questions.length,
+      totalScore: parsed.totalScore || parsed.questions.reduce((sum, q) => sum + (q.score || 5), 0) || 100,
+      duration: parsed.duration || 120,
+      difficulty: parsed.difficulty || 4,
+      tags: parsed.tags || ['#AI导入', '#model_core', '#全真规整'],
+      status: '未作答 (AI解析完毕)',
+      typeBreakdown: {
+        choices: parsed.questions.filter(q => q.type.includes('选择')).length,
+        blanks: parsed.questions.filter(q => q.type.includes('填空')).length,
+        solutions: parsed.questions.filter(q => q.type.includes('解答') || q.type.includes('计算')).length
+      },
+      markdown: parsed.markdown || '',
+      questions: parsed.questions
+    };
+
+    res.json({
+      success: true,
+      paper,
+      provider: model.providerName,
+      modelName: currentConfig.modelName
+    });
+  } catch (err) {
+    console.error('ai-import-paper error:', err);
+    res.status(500).json({
+      success: false,
+      error: `AI 试卷导入解析失败: ${err.message}`
+    });
+  }
+});
+
+// POST /api/model/ai-import-mistake
+// 深度使用 model_core 大模型分析错因、定位考纲并规范排版
+apiRouter.post('/model/ai-import-mistake', async (req, res) => {
+  const { rawContent, folderTitle } = req.body;
+  if (!rawContent || !rawContent.trim()) {
+    return res.status(400).json({ success: false, error: '错题内容不能为空' });
+  }
+
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: '请先在「系统设置」中配置有效的 API Key'
+    });
+  }
+
+  try {
+    const model = createChatModel(currentConfig);
+    const prompt = `你是一位高等数学考研与高校名师，专门负责错题诊断与知识点深度归因。
+用户输入了一道错题的草稿或笔记（所属题集：${folderTitle || '典型错题集'}）：
+"""
+${rawContent}
+"""
+
+请对该错题进行深度 AI 解析，提取：
+1. 题目题干与核心公式（转为规范 LaTeX）。
+2. 考生错因自核剖析（分析典型的思维误区或计算疏漏）。
+3. 关联的考纲核心知识点。
+4. 考生的典型错解与标准答案。
+5. AI 命题组深度归因解析与提分建议。
+
+请直接返回合法 JSON，格式如下：
+{
+  "title": "错题简述标题",
+  "type": "综合计算与解答题",
+  "score": 10,
+  "myDeduction": "-4",
+  "formula": "核心数学公式或方程（LaTeX）",
+  "errorReason": "典型错因自核分析",
+  "weakPoint": "关联知识点考纲",
+  "userWrongAnswer": "考生典型错解",
+  "standardAnswer": "标准解答与结果（包含 LaTeX）",
+  "aiInsight": "AI 命题组深度归因解析与针对性提分建议"
+}`;
+
+    const response = await model.invoke([
+      { role: 'system', content: '你是一位精通数学错题剖析的名师，必须返回纯合法 JSON。' },
+      { role: 'user', content: prompt }
+    ]);
+
+    const parsed = extractJsonFromAiResponse(response.content);
+    if (!parsed) {
+      throw new Error('AI 未能返回合法的错题解析数据');
+    }
+
+    const mistakeItem = {
+      id: 'mistake-' + Date.now(),
+      num: '错题 ' + Math.floor(Math.random() * 90 + 10),
+      title: parsed.title || '高等数学典型易错题',
+      type: parsed.type || '综合计算与解答题',
+      score: parsed.score || 10,
+      myDeduction: parsed.myDeduction || '-4',
+      formula: parsed.formula || '',
+      errorReason: parsed.errorReason || '典型错因归因分析',
+      weakPoint: parsed.weakPoint || '考纲重点概念',
+      userWrongAnswer: parsed.userWrongAnswer || '草稿推导未化简',
+      standardAnswer: parsed.standardAnswer || '详见标准证明步骤',
+      aiInsight: parsed.aiInsight || '建议加强该考点的变式练习',
+      source: `AI 智能导入录入 (${currentConfig.modelName})`
+    };
+
+    res.json({
+      success: true,
+      mistake: mistakeItem,
+      provider: model.providerName,
+      modelName: currentConfig.modelName
+    });
+  } catch (err) {
+    console.error('ai-import-mistake error:', err);
+    res.status(500).json({
+      success: false,
+      error: `AI 错题解析失败: ${err.message}`
+    });
+  }
 });
 
 // POST /api/model/generate-paper

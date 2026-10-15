@@ -14,6 +14,51 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate }) {
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [noteText, setNoteText] = useState('');
 
+  // AI Import Paper State
+  const [importRawText, setImportRawText] = useState('');
+  const [importFileName, setImportFileName] = useState('2025届高数期末测试卷.pdf');
+  const [isAiImporting, setIsAiImporting] = useState(false);
+  const [importSuccessPaper, setImportSuccessPaper] = useState(null);
+
+  const handleAiImportPaper = async () => {
+    const textToParse = importRawText.trim() || `2025届高等数学期末统考真题
+一、单项选择题
+1. 当 x 趋于 0 时，极限 lim x->0 (sin 3x) / x 等于多少？
+A. 1  B. 3  C. 0  D. 不存在
+答案是B，因为等价无穷小sin3x ~ 3x。
+
+二、填空题
+2. 计算定积分 ∫_0^1 (3x^2 + 2x) dx 的值。
+答案是 2。原式 = [x^3 + x^2]_0^1 = 2。
+
+三、综合计算解答题
+3. 求不定积分 ∫ x^2 ln(x+1) dx 的解析通解。
+解析: 采用分部积分法，设 u = ln(x+1), dv = x^2 dx。`;
+
+    setIsAiImporting(true);
+    try {
+      const res = await fetch('/api/model/ai-import-paper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rawContent: textToParse,
+          fileName: importFileName
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.paper) {
+        setPaperList(prev => [data.paper, ...prev]);
+        setImportSuccessPaper(data.paper);
+      } else {
+        alert(data.error || 'AI 导入解析失败，请检查 API Key 配置。');
+      }
+    } catch (err) {
+      alert(`AI 导入异常: ${err.message}`);
+    } finally {
+      setIsAiImporting(false);
+    }
+  };
+
   // Toggle star
   const handleToggleStar = (id) => {
     setPaperList(prev => prev.map(p => p.id === id ? { ...p, starred: !p.starred } : p));
@@ -493,52 +538,156 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate }) {
         </div>
       )}
 
-      {/* Modal 3: 导入试卷 Modal */}
+      {/* Modal 3: AI 智能导入试卷 Modal */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest rounded-2xl max-w-lg w-full p-space-xl shadow-xl border border-outline-variant/40 space-y-space-md">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-xl w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in zoom-in-95 duration-150">
             <div className="flex items-start justify-between pb-space-xs border-b border-surface-container">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">
-                导入新试卷 (PDF / Word)
-              </h3>
+              <div>
+                <span className="px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container font-label-mono text-label-mono font-semibold">
+                  model_core 驱动 · AI 格式深度分析
+                </span>
+                <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mt-1">
+                  导入试卷 (PDF / Word / 文本大模型解析)
+                </h3>
+              </div>
               <button
                 type="button"
-                onClick={() => setIsImportModalOpen(false)}
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportSuccessPaper(null);
+                }}
                 className="text-outline hover:text-on-surface p-1 rounded-full hover:bg-surface-container cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
 
-            <div className="p-space-xl border-2 border-dashed border-primary-fixed-dim hover:border-primary rounded-xl text-center bg-surface-container-low transition-colors cursor-pointer">
-              <span className="material-symbols-outlined text-[40px] text-primary">upload_file</span>
-              <p className="mt-2 font-headline-sm text-headline-sm font-semibold text-on-surface">
-                点击选择试卷或直接拖曳文件
-              </p>
-              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
-                支持 PDF、Word (.docx)、LaTeX (.tex)
-              </p>
-            </div>
+            {importSuccessPaper ? (
+              <div className="p-space-md bg-secondary/10 border border-secondary/30 rounded-xl space-y-space-sm text-body-md animate-in fade-in">
+                <div className="flex items-center gap-2 text-secondary font-semibold font-headline-sm">
+                  <span className="material-symbols-outlined text-[24px]">verified</span>
+                  <span>AI 解析完成！试卷已成功入库</span>
+                </div>
+                <div className="bg-surface-container-lowest p-space-sm rounded-lg space-y-1 text-on-surface">
+                  <p className="font-bold text-headline-sm">{importSuccessPaper.title}</p>
+                  <p className="text-body-sm text-on-surface-variant font-label-mono">
+                    总分: <span className="font-bold text-primary">{importSuccessPaper.totalScore}</span> 分 · 
+                    总题量: <span className="font-bold text-secondary">{importSuccessPaper.questionCount}</span> 题 · 
+                    建议时限: {importSuccessPaper.duration} 分钟
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2 pt-2 border-t border-secondary/20">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsImportModalOpen(false);
+                      setImportSuccessPaper(null);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer"
+                  >
+                    留在试卷库
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const p = importSuccessPaper;
+                      setIsImportModalOpen(false);
+                      setImportSuccessPaper(null);
+                      onStartExam(p);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md shadow-sm cursor-pointer"
+                  >
+                    🚀 立即进入该考场开考
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-space-sm">
+                {/* File Dropzone */}
+                <label className="p-space-md border-2 border-dashed border-primary-fixed-dim hover:border-primary rounded-xl text-center bg-surface-container-low transition-colors cursor-pointer block">
+                  <input
+                    type="file"
+                    accept=".pdf,.docx,.tex,.md,.txt"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setImportFileName(file.name);
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          setImportRawText(ev.target.result);
+                        };
+                        try {
+                          reader.readAsText(file);
+                        } catch {}
+                      }
+                    }}
+                    className="hidden"
+                  />
+                  <span className="material-symbols-outlined text-[32px] text-primary">upload_file</span>
+                  <p className="mt-1 font-label-md font-semibold text-on-surface">
+                    点击选择试卷文件或拖拽至此
+                  </p>
+                  <p className="font-label-mono text-[11px] text-on-surface-variant">
+                    已选: {importFileName} (支持 PDF, Word, TXT, Markdown)
+                  </p>
+                </label>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
-              <button
-                type="button"
-                onClick={() => setIsImportModalOpen(false)}
-                className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  alert('试卷导入成功！已加入试卷库并完成 OCR 公式与排版解析。');
-                  setIsImportModalOpen(false);
-                }}
-                className="px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md shadow-sm cursor-pointer"
-              >
-                开始解析并导入
-              </button>
-            </div>
+                {/* Direct Paste Raw Textarea */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="font-label-sm text-label-sm text-on-surface-variant font-semibold">
+                      或者直接粘贴试卷题目/整卷文本：
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setImportRawText(`2025届高数期末考试仿真卷
+一、单项选择题
+1. 极限 lim x->0 (sin 3x)/x 等于多少？
+A. 1  B. 3  C. 0  D. 不存在
+答案是B，因为等价无穷小。
+
+二、填空题
+2. 计算定积分 ∫_0^1 (3x^2 + 2x) dx 的值。
+答案是 2。
+
+三、解答题
+3. 求不定积分 ∫ x^2 ln(x+1) dx 的解析通解。`)}
+                      className="text-primary hover:underline font-label-sm text-[12px] cursor-pointer"
+                    >
+                      填入示例考题测试
+                    </button>
+                  </div>
+                  <textarea
+                    value={importRawText}
+                    onChange={(e) => setImportRawText(e.target.value)}
+                    placeholder="可在此粘贴非结构化试卷文本，大模型将自动提取标题、题干、选项、分值与 LaTeX 公式..."
+                    className="w-full h-32 p-space-sm bg-surface-container-low rounded-lg font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 resize-none leading-relaxed"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+                  <button
+                    type="button"
+                    onClick={() => setIsImportModalOpen(false)}
+                    className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md cursor-pointer"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isAiImporting}
+                    onClick={handleAiImportPaper}
+                    className="px-5 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <span className={`material-symbols-outlined text-[18px] ${isAiImporting ? 'animate-spin' : ''}`}>
+                      {isAiImporting ? 'progress_activity' : 'bolt'}
+                    </span>
+                    <span>{isAiImporting ? 'model_core 解析中...' : '⚡ 启动 AI 深度解析并入库'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

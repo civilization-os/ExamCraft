@@ -10,10 +10,48 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
 
+  // AI Mistake Import State
+  const [isImportMistakeModalOpen, setIsImportMistakeModalOpen] = useState(false);
+  const [mistakeRawText, setMistakeRawText] = useState('');
+  const [isAiParsingMistake, setIsAiParsingMistake] = useState(false);
+
   // AI Variant Generation State
   const [variantModal, setVariantModal] = useState(null); // { item, loading, data, error }
 
   const activeCol = collections.find((c) => c.id === activeColId) || collections[1];
+
+  const handleAiImportMistake = async () => {
+    if (!mistakeRawText.trim()) return;
+    setIsAiParsingMistake(true);
+    try {
+      const res = await fetch('/api/model/ai-import-mistake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rawContent: mistakeRawText,
+          folderTitle: activeCol.title
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.mistake) {
+        setMistakes((prev) => [data.mistake, ...prev]);
+        setCollections((prev) =>
+          prev.map((c) =>
+            c.id === activeColId ? { ...c, count: (c.count || 0) + 1 } : c
+          )
+        );
+        setIsImportMistakeModalOpen(false);
+        setMistakeRawText('');
+        alert('🎉 错题已由 model_core 完成深度归因解析并录入本集！');
+      } else {
+        alert(data.error || 'AI 错题解析失败，请检查 API Key 配置。');
+      }
+    } catch (err) {
+      alert(`AI 错题解析异常: ${err.message}`);
+    } finally {
+      setIsAiParsingMistake(false);
+    }
+  };
 
   const handleCreateFolder = () => {
     if (!newFolderName.trim()) return;
@@ -258,11 +296,11 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
               </button>
               <button
                 type="button"
-                onClick={() => alert('智能错题导入已就绪：支持直接扫描拍照试卷或 PDF 导入错题。')}
+                onClick={() => setIsImportMistakeModalOpen(true)}
                 className="w-full h-8 px-space-md rounded-lg bg-surface-tint/10 hover:bg-surface-tint/20 text-primary font-label-md text-label-md flex items-center justify-center gap-space-xs transition-colors cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[16px]">auto_read_pause</span>
-                智能导入错题 (OCR / PDF)
+                智能导入错题 (model_core AI 分析)
               </button>
             </div>
           </div>
@@ -502,6 +540,88 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md cursor-pointer"
               >
                 关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Import Mistake Modal */}
+      {isImportMistakeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-lg w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container">
+              <div>
+                <span className="px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container font-label-mono text-label-mono font-semibold">
+                  model_core 错因深度诊断
+                </span>
+                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface mt-1">
+                  AI 智能错题录入并归因
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportMistakeModalOpen(false);
+                  setMistakeRawText('');
+                }}
+                className="text-outline hover:text-on-surface p-1 rounded-full hover:bg-surface-container cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-space-sm">
+              <div className="flex items-center justify-between">
+                <label className="block text-label-sm font-label-sm text-on-surface-variant font-semibold">
+                  错题草稿 / 题目原题 / 错因说明：
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setMistakeRawText(`在求不定积分 ∫ x^2 ln(x+1) dx 时，我直接算成了 (x^3/3) ln(x+1) + C，完全漏掉了分部积分后半部分的积分项 -∫ (x^3/3) * (1/(x+1)) dx，最终结果相差多个项。`)}
+                  className="text-primary hover:underline font-label-sm text-[12px] cursor-pointer"
+                >
+                  填入经典错题示例
+                </button>
+              </div>
+
+              <textarea
+                value={mistakeRawText}
+                onChange={(e) => setMistakeRawText(e.target.value)}
+                placeholder="在此粘贴错题原题、考生草稿推导或做错的原因（支持手机拍照 OCR 识别文字直接粘贴）..."
+                className="w-full h-36 p-space-sm bg-surface-container-low rounded-lg font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 resize-none leading-relaxed"
+                autoFocus
+              />
+
+              <div className="p-2.5 bg-surface-container-low rounded-lg text-[12px] text-on-surface-variant flex items-start gap-1.5">
+                <span className="material-symbols-outlined text-[16px] text-primary shrink-0 mt-0.5">psychology</span>
+                <span>
+                  大模型将自动提取标准矢量 LaTeX 公式、深度剖析错因认知盲区、提取考纲知识点，并自动编排归入当前题集《{activeCol.title}》。
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportMistakeModalOpen(false);
+                  setMistakeRawText('');
+                }}
+                className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={isAiParsingMistake || !mistakeRawText.trim()}
+                onClick={handleAiImportMistake}
+                className="px-5 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-[18px] ${isAiParsingMistake ? 'animate-spin' : ''}`}>
+                  {isAiParsingMistake ? 'progress_activity' : 'auto_fix_high'}
+                </span>
+                <span>{isAiParsingMistake ? '大模型诊断归因中...' : '⚡ 启动 AI 深度诊断并录入'}</span>
               </button>
             </div>
           </div>
