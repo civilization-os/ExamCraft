@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import MathMarkdown from '../components/MathMarkdown';
 import { MISTAKE_COLLECTIONS, MISTAKE_ITEMS } from '../data/mockData';
 
 export default function MistakeNotebookView({ onStartExamWithMistakes }) {
@@ -351,12 +352,17 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
 
                 {/* Prompt & Formula */}
                 <div className="space-y-1.5">
-                  <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">
-                    {item.title}
-                  </h3>
-                  <div className="p-space-md bg-surface-container-low rounded-lg font-mono text-code-md text-primary font-semibold overflow-x-auto border border-outline-variant/20">
-                    {item.formula}
-                  </div>
+                  <MathMarkdown
+                    content={item.title}
+                    className="font-headline-sm text-headline-sm text-on-surface font-semibold"
+                  />
+                  {item.formula && (
+                    <div className="p-space-md bg-surface-container-low rounded-lg text-primary overflow-x-auto border border-outline-variant/20">
+                      <MathMarkdown
+                        content={item.formula.startsWith('$') ? item.formula : `$$${item.formula}$$`}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Weak Point & Error Reason */}
@@ -366,7 +372,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                       <span className="material-symbols-outlined text-[16px]">error</span>
                       典型错因自核：
                     </div>
-                    <p className="font-body-sm text-body-sm text-on-surface">{item.errorReason}</p>
+                    <MathMarkdown content={item.errorReason} className="font-body-sm text-body-sm text-on-surface" />
                   </div>
 
                   <div className="p-space-sm rounded-lg bg-surface-container-lowest border border-outline-variant/30 space-y-1">
@@ -374,23 +380,23 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                       <span className="material-symbols-outlined text-[16px]">school</span>
                       关联知识点考纲：
                     </div>
-                    <p className="font-body-sm text-body-sm text-on-surface">{item.weakPoint}</p>
+                    <MathMarkdown content={item.weakPoint} className="font-body-sm text-body-sm text-on-surface" />
                   </div>
                 </div>
 
                 {/* Answer Comparison */}
-                <div className="p-space-md bg-surface-container-low rounded-xl space-y-space-xs font-mono text-code-sm border border-outline-variant/30">
+                <div className="p-space-md bg-surface-container-low rounded-xl space-y-space-xs text-code-sm border border-outline-variant/30">
                   <div className="flex items-start gap-2">
                     <span className="px-1.5 py-0.5 rounded bg-error-container text-on-error-container font-sans text-label-sm font-bold shrink-0">
                       考生错解
                     </span>
-                    <span className="text-on-surface-variant">{item.userWrongAnswer}</span>
+                    <MathMarkdown content={item.userWrongAnswer} className="text-on-surface-variant font-mono text-code-sm" />
                   </div>
                   <div className="flex items-start gap-2 pt-1 border-t border-surface-container">
                     <span className="px-1.5 py-0.5 rounded bg-secondary-container text-on-secondary-container font-sans text-label-sm font-bold shrink-0">
                       标准答案
                     </span>
-                    <span className="text-secondary font-semibold">{item.standardAnswer}</span>
+                    <MathMarkdown content={item.standardAnswer} className="text-secondary font-semibold font-mono text-code-sm" />
                   </div>
                 </div>
 
@@ -400,7 +406,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                     <span className="material-symbols-outlined text-[18px]">psychology</span>
                     <span>AI 命题组深度归因解析与提分建议：</span>
                   </div>
-                  <p className="text-body-sm text-on-surface leading-relaxed">{item.aiInsight}</p>
+                  <MathMarkdown content={item.aiInsight} className="text-body-sm text-on-surface leading-relaxed" />
                 </div>
 
                 {/* Action Buttons */}
@@ -467,15 +473,18 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                       <span className="font-semibold text-primary font-label-md">{v.title}</span>
                       <span className="text-[11px] font-label-mono px-2 py-0.5 rounded bg-surface-container text-on-surface-variant">同构变式</span>
                     </div>
-                    <p className="font-body-md text-on-surface font-medium">{v.prompt}</p>
-                    <div className="p-2 bg-surface-container-lowest rounded font-mono text-code-sm text-primary">
-                      {v.formula}
-                    </div>
+                    <MathMarkdown content={v.prompt} className="font-body-md text-on-surface font-medium" />
+                    {v.formula && (
+                      <div className="p-2 bg-surface-container-lowest rounded text-primary">
+                        <MathMarkdown content={v.formula.startsWith('$') ? v.formula : `$$${v.formula}$$`} />
+                      </div>
+                    )}
                     <div className="text-body-sm text-on-surface-variant">
                       <span className="font-semibold text-on-surface">攻关要点：</span> {v.keyPoint}
                     </div>
-                    <div className="text-body-sm p-2 bg-secondary/10 text-on-surface rounded border border-secondary/20">
-                      <span className="font-semibold text-secondary">参考答案：</span> {v.standardAnswer}
+                    <div className="text-body-sm p-2 bg-secondary/10 text-on-surface rounded border border-secondary/20 flex items-start gap-1">
+                      <span className="font-semibold text-secondary shrink-0">参考答案：</span>
+                      <MathMarkdown content={v.standardAnswer} className="text-secondary font-semibold" />
                     </div>
                   </div>
                 ))}

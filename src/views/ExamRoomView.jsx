@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import MathMarkdown from '../components/MathMarkdown';
 
 export default function ExamRoomView({ activePaper, questions, onExit, onOpenMistakes }) {
   const [currentQIndex, setCurrentQIndex] = useState(15);
@@ -276,13 +277,17 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
 
           {/* Mathematical Prompt Description */}
           <div className="py-space-md">
-            <h2 className="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm font-semibold">
-              {currentQ.prompt}
-            </h2>
+            <MathMarkdown
+              content={currentQ.prompt}
+              className="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm font-semibold"
+            />
             {currentQ.mathExpression && (
               <div className="bg-surface-container-low px-space-xl py-space-lg rounded-lg border-l-4 border-primary flex items-center justify-between overflow-x-auto my-2">
-                <div className="flex items-center space-x-3 font-mono text-headline-md text-primary font-semibold">
-                  <span className="tracking-wide">{currentQ.mathExpression}</span>
+                <div className="flex items-center space-x-3 text-primary font-semibold">
+                  <MathMarkdown
+                    content={currentQ.mathExpression.startsWith('$') ? currentQ.mathExpression : `$$${currentQ.mathExpression}$$`}
+                    className="text-headline-md"
+                  />
                   {currentQ.condition && (
                     <span className="text-body-md text-on-surface-variant font-sans font-normal ml-4">
                       {currentQ.condition}
@@ -316,13 +321,13 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                     }`}
                   >
                     <span
-                      className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-label-md ${
+                      className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-label-md shrink-0 ${
                         isSelected ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'
                       }`}
                     >
                       {opt.key}
                     </span>
-                    <span className="font-body-md text-body-md">{opt.text}</span>
+                    <MathMarkdown content={opt.text} className="font-body-md text-body-md" />
                   </button>
                 );
               })}
@@ -470,13 +475,11 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                       </div>
 
                       {/* Mathematical Render Container */}
-                      <div className="mt-space-sm p-space-md bg-surface-container-low rounded-lg font-mono text-code-md space-y-space-sm border border-outline-variant/30 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                      <div className="mt-space-sm p-space-md bg-surface-container-low rounded-lg space-y-space-sm border border-outline-variant/30 overflow-x-auto leading-relaxed">
                         {scribedLatex ? (
-                          <div className="text-on-surface font-mono">
-                            {scribedLatex}
-                          </div>
+                          <MathMarkdown content={scribedLatex} className="text-on-surface" />
                         ) : (
-                          <div className="text-on-surface-variant italic">
+                          <div className="text-on-surface-variant italic font-sans text-body-sm">
                             在左侧输入草稿推导后，点击「调用 model_core 规范转录」即可在此生成整洁的 LaTeX 数学推导卷面。
                           </div>
                         )}

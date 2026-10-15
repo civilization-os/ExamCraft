@@ -1,42 +1,79 @@
 import React, { useState, useEffect } from 'react';
+import MathMarkdown from '../components/MathMarkdown';
 
-const SAMPLE_MATH_MD = `# 《2025届全国高等数学期末统考试卷B》
-- 建议时限: 120分钟
-- 设定总分: 100分
+const SAMPLE_MATH_MD = `# 2026年全国硕士研究生入学统一考试（数学二）试题与解析
+- 建议时限: 180分钟
+- 设定总分: 150分
 
-## 一、单项选择题 (每题 5 分，共 40 分)
-1. 极限 lim_{x -> 0} (sin x / x) 的数值等于下列哪个选项？
-   - A. 0
-   - B. 1
-   - C. 不存在
-   - D. 无穷大
-   *答案: B*
+## 一、选择题：1～10小题，每小题5分，共50分。下列每题给出的四个选项中，只有一个选项是符合题目要求的。
 
-2. 设函数 f(x) = x^3 - 3x + 1，则其极小值点为：
-   - A. x = -1
-   - B. x = 0
-   - C. x = 1
-   - D. x = 2
-   *答案: C*
+### 1
+当 $x \\to 0$ 时，若 $ax^2 + bx + \\arcsin x$ 与 $\\sqrt[3]{1+x^2} - 1$ 是等价无穷小，则
+(A) $a=1, b=0$
+(B) $a=\\frac{1}{3}, b=-1$
+(C) $a=-\\frac{1}{3}, b=1$
+(D) $a=0, b=1$
 
-3. 下列微分方程中，属于一阶线性微分方程的是：
-   - A. y' + y^2 = x
-   - B. y' + x y = x^2
-   - C. y'' + y = 0
-   - D. (y')^2 + y = 1
-   *答案: B*
+**答案: ** B
 
-## 二、填空题 (每题 4 分，共 20 分)
-4. 定积分 ∫₀¹ (3x² + 2x) dx 的几何积分结果为 ______。
-   *答案: 2*
+**解析**
+当 $x \\to 0$ 时，
+$$
+\\sqrt[3]{1+x^2} - 1 \\sim \\frac{1}{3} x^2, \\qquad \\arcsin x = x + o(x^2).
+$$
+故
+$$
+ax^2 + bx + \\arcsin x = (b+1)x + ax^2 + o(x^2).
+$$
+与 $\\frac{1}{3} x^2$ 等价，必有
+$$
+b+1 = 0, \\qquad a = \\frac{1}{3}.
+$$
+故选 **B**。
 
-5. 幂级数 ∑_{n=1}^∞ (x - 1)^n / n 的收敛区间为 ______。
-   *答案: [0, 2)*
+::: info :bulb:深度讲解
+等价无穷小代换的核心是高阶展开阶数保持一致。本题通过麦克劳林展开立即可得 $b=-1, a=1/3$。
+:::
 
-## 三、综合计算与解答证明题 (每题 10 分，共 40 分)
-6. 求不定积分 ∫ x² · ln(x + 1) dx 的解析通解。
-   *答案: (1/3)x³ ln(x+1) - (1/9)x³ + (1/6)x² - (1/3)x + (1/3)ln(x+1) + C*
-   *解析要点: 采用分部积分法设 u = ln(x+1), dv = x² dx，假分式分解为多项式长除。*
+### 2
+设函数 $f(x)$ 满足 $\\lim_{x \\to 0} \\frac{f(x)}{x} = 2$，且 $f(0)=0$，则曲线 $y=f(x)$ 在点 $(0,0)$ 处的切线方程为：
+(A) $y = 2x$
+(B) $y = -2x$
+(C) $y = x$
+(D) $y = 0$
+
+**答案: ** A
+
+**解析**
+由导数定义，$f'(0) = \\lim_{x \\to 0} \\frac{f(x)-f(0)}{x-0} = \\lim_{x \\to 0} \\frac{f(x)}{x} = 2$。
+切线方程为 $y - 0 = f'(0)(x - 0)$，即 $y = 2x$。选 **A**。
+
+## 二、填空题：11～16小题，每小题5分，共30分。
+
+### 11
+定积分 $\\int_0^1 (3x^2 + 2x) \\, dx$ 的计算结果为 ______。
+
+**答案: ** 2
+
+**解析**
+原式 $= [x^3 + x^2]_0^1 = (1 + 1) - 0 = 2$。
+
+## 三、解答证明题：17～22小题，共70分。
+
+### 17
+求矩阵 $\\boldsymbol{H}$ 使得 $\\boldsymbol{A} = \\boldsymbol{G} \\boldsymbol{H}$，并求 $\\boldsymbol{A}^{10}$。
+证明：$\\boldsymbol{\\alpha}_1, \\boldsymbol{\\alpha}_2$ 是极大线性无关组。
+
+**解析**
+**（1）证明：** 将 $\\boldsymbol{A}$ 进行初等行变换化简:
+$$
+\\boldsymbol{A} = \\begin{pmatrix} 1 & 0 & 0 \\\\ 0 & -1 & -1 \\\\ -1 & 0 & 1 \\\\ -1 & -2 & -1 \\end{pmatrix} \\sim \\begin{pmatrix} 1 & 0 & -1 \\\\ 0 & 1 & -1 \\\\ 0 & 0 & 0 \\\\ 0 & 0 & 0 \\end{pmatrix}
+$$
+故 $r(\\boldsymbol{A}) = 2$。而 $\\boldsymbol{\\alpha}_1, \\boldsymbol{\\alpha}_2$ 显然线性无关，所以它们构成一个极大线性无关组。
+另外由化简结果可直接读出:
+$$
+\\boldsymbol{\\alpha}_3 = -\\boldsymbol{\\alpha}_1 + \\boldsymbol{\\alpha}_2
+$$
 `;
 
 const SAMPLE_LINALG_MD = `# 《线性代数矩阵特征值专项强化卷》
@@ -44,32 +81,45 @@ const SAMPLE_LINALG_MD = `# 《线性代数矩阵特征值专项强化卷》
 - 设定总分: 100分
 
 ## 一、单项选择题
-1. 设 3 阶方阵 A 的特征值为 1, -1, 2，则行列式 |A*| 等于：
-   - A. -2
-   - B. 2
-   - C. 4
-   - D. -4
-   *答案: C*
+### 1
+设 3 阶方阵 $A$ 的特征值为 $1, -1, 2$，则伴随矩阵的行列式 $|A^*|$ 等于：
+(A) -2
+(B) 2
+(C) 4
+(D) -4
 
-2. 若向量组 α₁, α₂, α₃ 线性无关，则下列向量组中线性无关的是：
-   - A. α₁ - α₂, α₂ - α₃, α₃ - α₁
-   - B. α₁ + α₂, α₂ + α₃, α₃ + α₁
-   - C. α₁ + α₂ + α₃, 2α₁ + 2α₂ + 2α₃
-   - D. 0, α₁, α₂
-   *答案: B*
+**答案: ** C
 
-## 二、填空题
-3. 设二次型 f(x₁, x₂, x₃) = x₁² + 2x₂² + t x₃² 正定，则参数 t 的取值范围是 ______。
-   *答案: t > 0*
+**解析**
+因为 $|A| = 1 \\times (-1) \\times 2 = -2$。
+根据伴随矩阵行列式性质，$|A^*| = |A|^{n-1} = (-2)^{3-1} = (-2)^2 = 4$。选 **C**。
 
-## 三、综合计算题
-4. 已知矩阵 A 的特征多项式为 |λE - A| = λ(λ - 1)(λ - 2)，求矩阵多项式 A³ - 3A² + 2A 的所有特征值。
-   *答案: 全为 0*
+### 2
+若向量组 $\\boldsymbol{\\alpha}_1, \\boldsymbol{\\alpha}_2, \\boldsymbol{\\alpha}_3$ 线性无关，则下列向量组中线性无关的是：
+(A) $\\boldsymbol{\\alpha}_1 - \\boldsymbol{\\alpha}_2, \\boldsymbol{\\alpha}_2 - \\boldsymbol{\\alpha}_3, \\boldsymbol{\\alpha}_3 - \\boldsymbol{\\alpha}_1$
+(B) $\\boldsymbol{\\alpha}_1 + \\boldsymbol{\\alpha}_2, \\boldsymbol{\\alpha}_2 + \\boldsymbol{\\alpha}_3, \\boldsymbol{\\alpha}_3 + \\boldsymbol{\\alpha}_1$
+(C) $\\boldsymbol{\\alpha}_1 + \\boldsymbol{\\alpha}_2 + \\boldsymbol{\\alpha}_3, 2\\boldsymbol{\\alpha}_1 + 2\\boldsymbol{\\alpha}_2 + 2\\boldsymbol{\\alpha}_3$
+(D) $\\mathbf{0}, \\boldsymbol{\\alpha}_1, \\boldsymbol{\\alpha}_2$
+
+**答案: ** B
+
+## 二、解答题
+### 3
+求下列矩阵的特征值与特征向量：
+$$
+A = \\begin{pmatrix} 2 & 1 \\\\ 1 & 2 \\end{pmatrix}
+$$
+
+**解析**
+计算特征方程：
+$$
+|\\lambda E - A| = \\begin{vmatrix} \\lambda - 2 & -1 \\\\ -1 & \\lambda - 2 \\end{vmatrix} = (\\lambda - 2)^2 - 1 = (\\lambda - 1)(\\lambda - 3) = 0
+$$
+解得特征值为 $\\lambda_1 = 1, \\lambda_2 = 3$。
 `;
 
 export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
-  // Modes: 'clone' | 'custom' | 'markdown'
-  const [activeMode, setActiveMode] = useState('clone');
+  const [activeMode, setActiveMode] = useState('markdown'); // Default to markdown to showcase the new renderer
   
   // Custom Spec State
   const [customTitle, setCustomTitle] = useState('《概率论与数理统计阶段模拟测验》');
@@ -83,6 +133,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
   const [parsedExam, setParsedExam] = useState(null);
   const [isParsingAI, setIsParsingAI] = useState(false);
   const [showAnswers, setShowAnswers] = useState(true);
+  const [expandedAnalysis, setExpandedAnalysis] = useState({}); // { [qId]: boolean }
 
   // File upload state simulation
   const [uploadedFile, setUploadedFile] = useState({
@@ -97,7 +148,12 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
   });
   const [isUploading, setIsUploading] = useState(false);
 
-  // Parse markdown whenever text changes
+  // Toggle analysis visibility for a question
+  const toggleAnalysis = (id) => {
+    setExpandedAnalysis(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  // Parse markdown on change
   useEffect(() => {
     if (activeMode !== 'markdown') return;
     const timeout = setTimeout(() => {
@@ -113,7 +169,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
           }
         })
         .catch(() => {});
-    }, 250);
+    }, 200);
     return () => clearTimeout(timeout);
   }, [markdownText, activeMode]);
 
@@ -200,7 +256,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
     onStartExam(customPaper);
   };
 
-  // Trigger AI Markdown enhancement via model_core
   const handleAIMarkdownEnhance = async () => {
     setIsParsingAI(true);
     try {
@@ -223,7 +278,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
     }
   };
 
-  // Launch exam from Markdown
   const handleLaunchMarkdownExam = () => {
     if (!parsedExam || !parsedExam.questions || parsedExam.questions.length === 0) {
       alert('未能从 Markdown 中解析到有效试题，请检查文本格式。');
@@ -240,7 +294,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
       totalScore: parsedExam.totalScore || 100,
       duration: parsedExam.duration || 120,
       difficulty: 4,
-      tags: ['#Markdown录入', '#实时解析', '#即时开考'],
+      tags: ['#Markdown录入', '#KaTeX公式渲染', '#即时开考'],
       status: '未作答 (全新排版完毕)',
       questions: parsedExam.questions
     };
@@ -250,7 +304,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
 
   return (
     <div className="flex flex-col w-full relative min-h-full pb-16">
-      {/* Subtle Technical Matrix Background Layer */}
+      {/* Background Matrix */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden select-none">
         <div className="absolute -top-32 left-1/4 w-[640px] h-[360px] bg-primary/5 rounded-full blur-[120px]"></div>
         <div className="absolute top-48 right-10 w-[420px] h-[300px] bg-secondary-container/30 rounded-full blur-[100px]"></div>
@@ -271,25 +325,25 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
           <div className="space-y-space-xs max-w-2xl">
             <div className="inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container text-primary font-label-mono text-label-mono tracking-wider">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
-              <span>INTELLIGENT TRIPLE-ENGINE WORKSPACE · MODEL_CORE</span>
+              <span>INTELLIGENT TRIPLE-ENGINE WORKSPACE · KATEX READY</span>
             </div>
             <h1 className="font-headline-xl text-headline-xl text-on-surface tracking-tight font-semibold">
               多模态智能组卷工作台
             </h1>
             <p className="font-body-lg text-body-lg text-on-surface-variant">
-              支持「1:1 历年真题 PDF 克隆」、「自由参数规格蓝图」与全新的「Markdown 题稿即时转卷」，一键生成交互式真实考场。
+              支持「1:1 历年真题 PDF 克隆」、「自由参数规格蓝图」与全新的「Markdown 题稿即时转卷」，全量支持 KaTeX 高等数学矩阵与分式排版。
             </p>
           </div>
 
-          {/* Quick Telemetry Chips */}
+          {/* Telemetry Chips */}
           <div className="flex items-center gap-space-md font-label-mono text-label-mono flex-wrap">
             <div className="px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface border border-outline-variant/30">
               <span className="material-symbols-outlined text-secondary text-[16px]">verified</span>
-              <span>OCR 排版解析度 99.8%</span>
+              <span>KaTeX 数学公式渲染器: 就绪</span>
             </div>
             <div className="px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface border border-outline-variant/30">
               <span className="material-symbols-outlined text-primary text-[16px]">bolt</span>
-              <span>Markdown 极速向量化 &lt; 0.3s</span>
+              <span>Markdown 即时结构化 &lt; 0.2s</span>
             </div>
           </div>
         </section>
@@ -333,11 +387,11 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
           >
             <span className="material-symbols-outlined text-[18px]">markdown</span>
             <span>入口三 · Markdown 题稿即时转卷</span>
-            <span className="text-[10px] font-label-mono px-1.5 py-0.2 rounded bg-secondary-container text-on-secondary-container font-bold">NEW</span>
+            <span className="text-[10px] font-label-mono px-1.5 py-0.2 rounded bg-secondary-container text-on-secondary-container font-bold">KaTeX</span>
           </button>
         </div>
 
-        {/* MODE 1: 1:1 True Exam PDF Clone */}
+        {/* MODE 1: 1:1 PDF Clone */}
         {activeMode === 'clone' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-xl items-stretch">
             <section className="relative rounded-xl bg-surface-container-lowest shadow-sm p-space-xl border border-primary ring-2 ring-primary flex flex-col justify-between">
@@ -362,7 +416,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                   </p>
                 </div>
 
-                {/* Drag & Drop Zone */}
                 <label className="mt-space-md rounded-xl bg-surface-container-low p-space-lg text-center flex flex-col items-center justify-center transition-colors hover:bg-surface-container group/drop cursor-pointer border border-dashed border-outline-variant/60 block">
                   <input type="file" accept=".pdf,.docx,.tex,.md" onChange={handleSimulateUpload} className="hidden" />
                   <div className="w-12 h-12 rounded-full bg-surface-container-lowest shadow-sm flex items-center justify-center text-primary group-hover/drop:scale-105 transition-transform">
@@ -374,7 +427,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                   <p className="font-label-sm text-label-sm text-on-surface-variant mt-1">支持格式：.pdf, .docx, .tex, .md (最大 35MB)</p>
                 </label>
 
-                {/* Parsed File Preview */}
                 <div className="rounded-lg bg-surface-container-low p-space-md flex flex-col gap-space-sm border border-outline-variant/30">
                   <div className="flex items-start justify-between gap-space-sm">
                     <div className="flex items-center gap-space-sm min-w-0">
@@ -420,7 +472,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
               </div>
             </section>
 
-            {/* Side Highlights Guide */}
             <div className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 flex flex-col justify-between space-y-space-lg">
               <div className="space-y-space-md">
                 <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
@@ -438,7 +489,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                     <span className="material-symbols-outlined text-secondary text-[20px] mt-0.5">functions</span>
                     <div>
                       <p className="font-semibold text-label-md text-on-surface">复杂高等数学 LaTeX 向量化</p>
-                      <p className="text-body-sm text-on-surface-variant">对多重积分、偏导数、矩阵与级数公式原位高保真提取。</p>
+                      <p className="text-body-sm text-on-surface-variant">对多重积分、偏导数、矩阵与级数公式原位高保真提取并结合 KaTeX 渲染。</p>
                     </div>
                   </div>
                 </div>
@@ -452,7 +503,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                 <button
                   type="button"
                   onClick={handleLaunchClone}
-                  className="px-3 py-1.5 bg-primary text-on-primary rounded-lg font-label-sm font-semibold shadow-xs"
+                  className="px-3 py-1.5 bg-primary text-on-primary rounded-lg font-label-sm font-semibold shadow-xs cursor-pointer"
                 >
                   立即开考
                 </button>
@@ -483,7 +534,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
               </p>
             </div>
 
-            {/* Exam Meta Config */}
             <div className="space-y-space-sm">
               <div>
                 <label className="block font-label-sm text-label-sm text-on-surface-variant mb-1">测验标题命名</label>
@@ -536,75 +586,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
               </div>
             </div>
 
-            {/* Matrix Breakdown */}
-            <div className="bg-surface-container-low rounded-lg p-space-md space-y-space-sm border border-outline-variant/30">
-              <div className="flex items-center justify-between">
-                <span className="font-label-md text-label-md text-on-surface font-semibold">题型分布与单题分值分配表</span>
-                <span className="px-space-xs py-0.5 rounded bg-secondary/15 text-secondary font-label-mono text-label-mono flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
-                  已分配 {totalScore}/{totalScore} 分 (平衡)
-                </span>
-              </div>
-
-              <div className="space-y-space-xs font-label-mono text-label-mono">
-                <div className="bg-surface-container-lowest rounded p-space-sm flex items-center justify-between shadow-xs">
-                  <div className="flex items-center gap-space-sm">
-                    <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center text-[11px]">1</span>
-                    <span className="text-on-surface font-medium">单选题</span>
-                  </div>
-                  <div className="flex items-center gap-space-md text-on-surface-variant">
-                    <span>8 题 × 5 分</span>
-                    <span className="text-on-surface font-semibold">= 40 分</span>
-                    <span className="px-1.5 py-0.5 rounded bg-surface-container text-primary">40%</span>
-                  </div>
-                </div>
-
-                <div className="bg-surface-container-lowest rounded p-space-sm flex items-center justify-between shadow-xs">
-                  <div className="flex items-center gap-space-sm">
-                    <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center text-[11px]">2</span>
-                    <span className="text-on-surface font-medium">填空题</span>
-                  </div>
-                  <div className="flex items-center gap-space-md text-on-surface-variant">
-                    <span>5 题 × 4 分</span>
-                    <span className="text-on-surface font-semibold">= 20 分</span>
-                    <span className="px-1.5 py-0.5 rounded bg-surface-container text-primary">20%</span>
-                  </div>
-                </div>
-
-                <div className="bg-surface-container-lowest rounded p-space-sm flex items-center justify-between shadow-xs">
-                  <div className="flex items-center gap-space-sm">
-                    <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center text-[11px]">3</span>
-                    <span className="text-on-surface font-medium">计算解答题</span>
-                  </div>
-                  <div className="flex items-center gap-space-md text-on-surface-variant">
-                    <span>4 题 × 10 分</span>
-                    <span className="text-on-surface font-semibold">= 40 分</span>
-                    <span className="px-1.5 py-0.5 rounded bg-surface-container text-primary">40%</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-1">
-                <label className="block font-label-sm text-label-sm text-on-surface-variant mb-1.5">试题难度梯度倾向</label>
-                <div className="grid grid-cols-3 gap-space-xs font-label-md text-label-md text-center">
-                  {['基础稳固', '进阶拓展', '考研冲刺'].map((diff) => (
-                    <button
-                      key={diff}
-                      type="button"
-                      onClick={() => setDifficulty(diff)}
-                      className={`py-1.5 rounded transition-all cursor-pointer ${
-                        difficulty === diff
-                          ? 'bg-primary text-on-primary font-semibold shadow-sm'
-                          : 'bg-surface-container-lowest text-on-surface-variant hover:text-on-surface'
-                      }`}
-                    >
-                      {diff}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
             <div className="pt-2">
               <button
                 type="button"
@@ -621,30 +602,30 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
           </section>
         )}
 
-        {/* MODE 3: Markdown Generation Workbench */}
+        {/* MODE 3: Markdown Generation Workbench with Full KaTeX UI Rendering */}
         {activeMode === 'markdown' && (
           <div className="flex flex-col gap-space-lg">
             {/* Quick Presets & AI Action Toolbar */}
             <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex items-center justify-between gap-space-md flex-wrap">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-label-sm text-label-sm text-on-surface-variant font-semibold">快速载入 Markdown 范本:</span>
+                <span className="font-label-sm text-label-sm text-on-surface-variant font-semibold">快速套用真题/练习 Markdown:</span>
                 <button
                   type="button"
                   onClick={() => setMarkdownText(SAMPLE_MATH_MD)}
                   className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm font-semibold transition-colors cursor-pointer border border-primary/20"
                 >
-                  高等数学期末统考卷
+                  2026考研数学二真题与解析
                 </button>
                 <button
                   type="button"
                   onClick={() => setMarkdownText(SAMPLE_LINALG_MD)}
                   className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-secondary font-label-sm font-semibold transition-colors cursor-pointer border border-secondary/20"
                 >
-                  线性代数特征值专练
+                  线性代数矩阵特征值专练
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMarkdownText('# 《自拟测试卷》\n- 建议时限: 60分钟\n\n## 一、选择题\n1. 题目描述...\n   - A. 选项A\n   - B. 选项B\n   *答案: A*')}
+                  onClick={() => setMarkdownText('# 《自拟测试卷》\n- 建议时限: 60分钟\n\n## 一、选择题\n### 1\n当 $x \\to 0$ 时，下列选项正确的是：\n(A) 选项A\n(B) 选项B\n\n**答案: ** A')}
                   className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm transition-colors cursor-pointer border border-outline-variant/30"
                 >
                   空白简要模板
@@ -655,7 +636,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                 <label className="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm transition-colors cursor-pointer border border-outline-variant/30 flex items-center gap-1">
                   <span className="material-symbols-outlined text-[16px]">upload_file</span>
                   <span>导入本地 .md</span>
-                  <input type="file" accept=".md,.markdown" onChange={handleSimulateUpload} className="hidden" />
+                  <input type="file" accept=".md,.markdown,.txt" onChange={handleSimulateUpload} className="hidden" />
                 </label>
 
                 <button
@@ -674,17 +655,17 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                 <button
                   type="button"
                   onClick={() => setShowAnswers(!showAnswers)}
-                  className="px-2.5 py-1.5 rounded-lg bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm transition-colors cursor-pointer"
-                  title="切换答案显示"
+                  className="px-3 py-1.5 rounded-lg bg-surface-container text-on-surface hover:text-primary font-label-sm transition-colors cursor-pointer flex items-center gap-1 border border-outline-variant/30"
                 >
                   <span className="material-symbols-outlined text-[16px]">
                     {showAnswers ? 'visibility' : 'visibility_off'}
                   </span>
+                  <span>{showAnswers ? '隐藏标答/解析' : '显示标答/解析'}</span>
                 </button>
               </div>
             </div>
 
-            {/* Split Screen: Editor on Left, Live Preview on Right */}
+            {/* Split Screen: Editor on Left, KaTeX Live Preview on Right */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-lg items-stretch">
               {/* Left: Markdown Source Editor */}
               <div className="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 p-space-lg flex flex-col justify-between space-y-space-sm">
@@ -703,36 +684,39 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                     value={markdownText}
                     onChange={(e) => setMarkdownText(e.target.value)}
                     placeholder="在此编写或粘贴 Markdown 试卷文本，例如：
-# 《期末测试》
+# 2026年考研数学真题
 ## 一、选择题
-1. 极限 lim_{x->0}...
-   - A. 0
-   - B. 1
-   *答案: B*"
-                    className="w-full h-[520px] mt-2 p-3 bg-surface-container-low rounded-lg font-mono text-code-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 leading-relaxed resize-none"
+### 1
+当 $x \to 0$ 时...
+(A) $a=1$
+(B) $a=2$
+**答案: ** A
+**解析**
+因为..."
+                    className="w-full h-[620px] mt-2 p-3.5 bg-surface-container-low rounded-lg font-mono text-code-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 leading-relaxed resize-none"
                   />
                 </div>
 
                 {/* Markdown format tips */}
                 <div className="p-space-sm bg-surface-container-low rounded-lg text-[11px] text-on-surface-variant space-y-1 font-mono">
-                  <span className="font-semibold text-on-surface font-sans">💡 语法速记：</span>
-                  <p>• 试卷标题：以 <code># 《试卷名称》</code> 开头</p>
-                  <p>• 题型大纲：以 <code>## 一、单项选择题</code> 或 <code>## 二、填空题</code> 标记</p>
-                  <p>• 题目序号：以 <code>1. </code> 或 <code>2. </code> 标记；选项以 <code>- A. </code> 换行缩进</p>
-                  <p>• 答案注解：以 <code>*答案: A*</code> 标记，支持内嵌 LaTeX 公式 <code>$$...$$</code></p>
+                  <span className="font-semibold text-on-surface font-sans">💡 语法与 KaTeX 速记：</span>
+                  <p>• 题号：支持 <code>### 1</code>、<code>### 题 1</code>、<code>1. </code> 或 <code>## 1</code></p>
+                  <p>• 选项：支持 <code>(A) $...$</code>、<code>- A. $...$</code> 或 <code>A. $...$</code></p>
+                  <p>• 标答与解析：以 <code>**答案: ** A</code> 与 <code>**解析**</code> 分隔，解析支持 LaTeX 矩阵与推导</p>
+                  <p>• 矩阵格式：<code>\begin&#123;pmatrix&#125; 1 & 0 \\ 0 & 1 \end&#123;pmatrix&#125;</code></p>
                 </div>
               </div>
 
-              {/* Right: Real-time Live Exam Paper Preview */}
+              {/* Right: Real-time KaTeX Live Exam Paper Preview */}
               <div className="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 p-space-lg flex flex-col justify-between space-y-space-md">
                 <div className="space-y-space-md">
                   <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
                     <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-secondary text-[18px]">preview</span>
-                      <span className="font-label-md text-label-md font-semibold text-on-surface">实时排版与考卷结构预览</span>
+                      <span className="material-symbols-outlined text-secondary text-[18px]">functions</span>
+                      <span className="font-label-md text-label-md font-semibold text-on-surface">KaTeX 数学高保真排版预览</span>
                     </div>
                     <span className="px-2 py-0.5 rounded bg-secondary/15 text-secondary font-label-mono text-code-sm font-semibold">
-                      即时渲染
+                      实时矢量渲染
                     </span>
                   </div>
 
@@ -743,7 +727,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                         {parsedExam.title}
                       </h3>
                       <div className="flex items-center gap-3 text-body-sm text-on-surface-variant font-label-mono flex-wrap">
-                        <span>共 {parsedExam.questionCount} 道题</span>
+                        <span className="text-secondary font-semibold">共 {parsedExam.questionCount} 道题</span>
                         <span>·</span>
                         <span className="text-primary font-semibold">测验满分: {parsedExam.totalScore} 分</span>
                         <span>·</span>
@@ -752,61 +736,103 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                     </div>
                   )}
 
-                  {/* Rendered Questions Stream */}
-                  <div className="h-[400px] overflow-y-auto space-y-space-md pr-1">
+                  {/* Rendered Questions Stream with MathMarkdown */}
+                  <div className="h-[520px] overflow-y-auto space-y-space-md pr-1.5">
                     {parsedExam && parsedExam.questions && parsedExam.questions.length > 0 ? (
-                      parsedExam.questions.map((q, idx) => (
-                        <div
-                          key={idx}
-                          className="p-space-md rounded-xl bg-surface-container-lowest border border-outline-variant/30 space-y-2 shadow-xs"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded bg-primary-fixed text-primary font-label-mono text-label-mono font-semibold">
-                                {q.num || idx + 1}
-                              </span>
-                              <span className="text-label-sm font-semibold text-on-surface">{q.type}</span>
-                              <span className="text-on-surface-variant text-[11px]">({q.score} 分)</span>
+                      parsedExam.questions.map((q, idx) => {
+                        const isAnalysisExpanded = expandedAnalysis[q.id || idx];
+                        return (
+                          <div
+                            key={idx}
+                            className="p-space-md rounded-xl bg-surface-container-lowest border border-outline-variant/30 space-y-2.5 shadow-xs transition-all hover:border-primary/40"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 rounded bg-primary-fixed text-primary font-label-mono text-label-mono font-semibold">
+                                  {q.num || idx + 1}
+                                </span>
+                                <span className="text-label-sm font-semibold text-on-surface">{q.type}</span>
+                                <span className="text-on-surface-variant text-[11px]">({q.score} 分)</span>
+                              </div>
+                              <span className="text-[11px] font-label-mono text-outline">{q.section}</span>
                             </div>
-                            <span className="text-[11px] font-label-mono text-outline">{q.section}</span>
-                          </div>
 
-                          <p className="font-body-md text-on-surface font-medium leading-relaxed">{q.prompt}</p>
-
-                          {q.mathExpression && (
-                            <div className="p-2 bg-surface-container-low rounded font-mono text-code-sm text-primary">
-                              {q.mathExpression}
+                            {/* Question statement rendered via MathMarkdown */}
+                            <div className="font-body-md text-on-surface font-medium leading-relaxed">
+                              <MathMarkdown content={q.prompt} />
                             </div>
-                          )}
 
-                          {q.options && q.options.length > 0 && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
-                              {q.options.map((opt) => (
-                                <div
-                                  key={opt.key}
-                                  className="p-1.5 px-2.5 rounded-lg bg-surface-container-low text-body-sm flex items-center gap-2 border border-outline-variant/20"
-                                >
-                                  <span className="font-bold text-primary font-mono text-label-sm">{opt.key}.</span>
-                                  <span>{opt.text}</span>
+                            {q.mathExpression && (
+                              <div className="p-2 bg-surface-container-low rounded font-mono text-code-sm text-primary">
+                                <MathMarkdown content={q.mathExpression} />
+                              </div>
+                            )}
+
+                            {/* Options rendered via MathMarkdown */}
+                            {q.options && q.options.length > 0 && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                {q.options.map((opt) => (
+                                  <div
+                                    key={opt.key}
+                                    className="p-2 px-3 rounded-lg bg-surface-container-low text-body-sm flex items-start gap-2 border border-outline-variant/20 hover:border-primary/30 transition-colors"
+                                  >
+                                    <span className="font-bold text-primary font-mono text-label-sm shrink-0 mt-0.5">
+                                      ({opt.key})
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <MathMarkdown content={opt.text} />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Standard Answer */}
+                            {showAnswers && q.standardAnswer && (
+                              <div className="pt-2 border-t border-surface-container text-body-sm flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-1.5 py-0.5 rounded bg-secondary-container text-on-secondary-container text-[11px] font-bold">
+                                    标准答案
+                                  </span>
+                                  <span className="font-mono text-secondary font-bold text-label-md">
+                                    {q.standardAnswer}
+                                  </span>
                                 </div>
-                              ))}
-                            </div>
-                          )}
 
-                          {showAnswers && q.standardAnswer && (
-                            <div className="pt-1 border-t border-surface-container text-body-sm flex items-center gap-2">
-                              <span className="px-1.5 py-0.2 rounded bg-secondary-container text-on-secondary-container text-[11px] font-bold">
-                                标准答案
-                              </span>
-                              <span className="font-mono text-secondary font-semibold">{q.standardAnswer}</span>
-                            </div>
-                          )}
-                        </div>
-                      ))
+                                {q.analysis && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleAnalysis(q.id || idx)}
+                                    className="text-primary hover:underline text-[12px] flex items-center gap-0.5 cursor-pointer"
+                                  >
+                                    <span>{isAnalysisExpanded ? '收起解析' : '展开名师详细解析'}</span>
+                                    <span className="material-symbols-outlined text-[14px]">
+                                      {isAnalysisExpanded ? 'expand_less' : 'expand_more'}
+                                    </span>
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Detailed Analysis / Proof Block */}
+                            {showAnswers && q.analysis && isAnalysisExpanded && (
+                              <div className="mt-2 p-space-md bg-surface-container-low rounded-xl border border-primary/20 space-y-1 animate-in fade-in duration-150">
+                                <div className="flex items-center gap-1 font-semibold text-primary text-label-sm mb-1">
+                                  <span className="material-symbols-outlined text-[16px]">school</span>
+                                  <span>真题推导与分步解析：</span>
+                                </div>
+                                <div className="text-body-sm text-on-surface leading-relaxed">
+                                  <MathMarkdown content={q.analysis} />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
                     ) : (
-                      <div className="py-20 text-center text-on-surface-variant space-y-2">
+                      <div className="py-24 text-center text-on-surface-variant space-y-2">
                         <span className="material-symbols-outlined text-[36px] opacity-40">description</span>
-                        <p className="font-label-md">在左侧输入 Markdown 题目即可实时在此生成互动试卷卡片</p>
+                        <p className="font-label-md">在左侧输入 Markdown 题目即可实时在此生成 KaTeX 交互试卷卡片</p>
                       </div>
                     )}
                   </div>

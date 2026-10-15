@@ -1,3 +1,4 @@
+@import 'katex/dist/katex.min.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -38,6 +39,19 @@
   ::-webkit-scrollbar-thumb:hover {
     background: #777587;
   }
+}
+
+/* KaTeX custom sizing tweaks */
+.math-markdown .katex-display {
+  margin: 0.5rem 0 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+.math-markdown .katex {
+  font-size: 1.05em;
+  text-rendering: auto;
 }
 
 /* Print Styles */

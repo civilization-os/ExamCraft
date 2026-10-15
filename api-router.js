@@ -10,7 +10,6 @@ const CONFIG_FILE = path.join(__dirname, 'examcraft-config.json');
 
 export const apiRouter = express.Router();
 
-// Helper: load config
 function loadSavedConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
@@ -31,7 +30,6 @@ function loadSavedConfig() {
   };
 }
 
-// Helper: save config
 function saveConfig(cfg) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8');
 }
@@ -43,7 +41,7 @@ function maskKey(key) {
   return key.slice(0, 4) + '••••••••' + key.slice(-4);
 }
 
-// Algorithmic local parser for standard Markdown exam format
+// Advanced robust parser for Chinese national exams & course markdown papers
 export function parseExamMarkdown(mdText) {
   const lines = mdText.split('\n');
   let title = '《Markdown 智能生成测评卷》';
@@ -53,99 +51,132 @@ export function parseExamMarkdown(mdText) {
 
   let currentSection = '通用试题';
   let currentQ = null;
+  let state = 'prompt'; // 'prompt' | 'options' | 'analysis'
+
+  const finishCurrentQ = () => {
+    if (!currentQ) return;
+    if (currentQ.prompt) currentQ.prompt = currentQ.prompt.trim();
+    if (currentQ.analysis) currentQ.analysis = currentQ.analysis.trim();
+    questions.push(currentQ);
+    currentQ = null;
+    state = 'prompt';
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
     const line = rawLine.trim();
 
-    if (!line) continue;
+    if (!line) {
+      if (currentQ && state === 'analysis' && currentQ.analysis) {
+        currentQ.analysis += '\n\n';
+      }
+      continue;
+    }
 
-    // Title parsing
+    // 1. Title (# ...)
     if (line.startsWith('# ')) {
-      title = line.replace('# ', '').trim();
+      title = line.replace(/^#\s+/, '').trim();
       continue;
     }
 
-    // Header metadata (e.g. - 建议时限: 120分钟)
-    if (line.startsWith('- 建议时限:') || line.startsWith('- 时限:') || line.startsWith('时限:')) {
-      const match = line.match(/(\d+)/);
-      if (match) duration = parseInt(match[1]);
+    // 2. Metadata (- 建议时限: 120分钟)
+    if (line.match(/^[-*]?\s*(建议时限|时限|时间)[:：]\s*(\d+)/)) {
+      const m = line.match(/(\d+)/);
+      if (m) duration = parseInt(m[1]);
       continue;
     }
 
-    // Section header (e.g. ## 一、单项选择题)
-    if (line.startsWith('## ')) {
-      currentSection = line.replace('## ', '').trim();
+    // 3. Section header (## 一、选择题 ...)
+    if (line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || (line.startsWith('## ') && !line.match(/^##\s+\d+$/))) {
+      finishCurrentQ();
+      currentSection = line.replace(/^##\s+/, '').trim();
       continue;
     }
 
-    // Numbered question line (e.g. 1. 设函数 f(x)... 或 16. 求不定积分...)
-    const qMatch = line.match(/^(\d+)[\.、\s]\s*(.*)$/);
-    if (qMatch) {
-      if (currentQ) {
-        questions.push(currentQ);
+    // 4. Question start:
+    // Matches:
+    // - ### 1 or ### 1. or ### 题 1 or ### 01
+    // - ## 1 or ## 1.
+    // - 1. or 1、 or (1)
+    const qHeaderMatch = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
+                         line.match(/^(\d+)[\.、\s]\s*(.*)$/);
+
+    if (qHeaderMatch) {
+      finishCurrentQ();
+      const numInt = parseInt(qHeaderMatch[1], 10);
+      const numStr = String(numInt).padStart(2, '0');
+      const rest = qHeaderMatch[2] ? qHeaderMatch[2].trim() : '';
+
+      const isChoice = currentSection.includes('选择') || rest.includes('选项') || (numInt >= 1 && numInt <= 10 && currentSection.includes('选择'));
+      const isBlank = currentSection.includes('填空') || (numInt >= 11 && numInt <= 16 && currentSection.includes('填空'));
+      const isSolution = currentSection.includes('解答') || currentSection.includes('证明') || numInt >= 17;
+
+      let score = 5;
+      if (isBlank) score = 5;
+      else if (isSolution) score = 10;
+      else if (currentSection.includes('每小题') || currentSection.includes('分')) {
+        const sm = currentSection.match(/每(?:小)?题\s*(\d+)\s*分/);
+        if (sm) score = parseInt(sm[1]);
       }
 
-      const num = qMatch[1].padStart(2, '0');
-      const promptText = qMatch[2];
-      const isChoice = currentSection.includes('选择题') || promptText.includes('选项') || promptText.includes('正确的是');
-      const isBlank = currentSection.includes('填空题') || promptText.includes('______') || promptText.includes('下划线');
-      const isSolution = currentSection.includes('解答题') || currentSection.includes('证明题') || currentSection.includes('计算题');
-
-      const defaultScore = isChoice ? 5 : isBlank ? 4 : 10;
-      totalScore += defaultScore;
-
+      totalScore += score;
       currentQ = {
-        id: parseInt(num),
-        num: num,
+        id: numInt,
+        num: numStr,
         type: isChoice ? '单项选择题' : isBlank ? '填空题' : '综合计算与解答题',
-        score: defaultScore,
+        score: score,
         section: currentSection,
-        prompt: promptText,
+        prompt: rest,
         options: isChoice ? [] : undefined,
         userAnswer: '',
         standardAnswer: '',
+        analysis: '',
         status: 'unanswered'
       };
+      state = 'prompt';
       continue;
     }
 
-    // Option line (e.g. - A. ... or A. ... or - A: ...)
-    if (currentQ && currentQ.options) {
-      const optMatch = line.match(/^[-*]?\s*([A-D])[\.、:：\s]\s*(.*)$/i);
+    if (!currentQ) continue;
+
+    // 5. Answer identifier: **答案** A or **答案: ** A or 答案: A
+    const ansMatch = line.match(/(?:\*\*答案[:：\s]*\*\*|答案[:：])\s*(.+?)(?:\*\*|$)/i);
+    if (ansMatch) {
+      currentQ.standardAnswer = ansMatch[1].trim().replace(/\*/g, '');
+      continue;
+    }
+
+    // 6. Analysis identifier: **解析** or **证明** or 【解析】
+    if (line.match(/(?:\*\*解析[:：\s]*\*\*|【解析】|解析[:：]|\*\*证明[:：\s]*\*\*|【证明】)/)) {
+      state = 'analysis';
+      const afterTag = line.replace(/(?:\*\*解析[:：\s]*\*\*|【解析】|解析[:：]|\*\*证明[:：\s]*\*\*|【证明】)/, '').trim();
+      if (afterTag) currentQ.analysis = afterTag;
+      continue;
+    }
+
+    // 7. Options: (A) ... or - A. ... or A. ...
+    if (currentQ.options && state === 'prompt') {
+      const optMatch = line.match(/^[-*]?\s*(?:\(?([A-D])\)[\.、:：\s]?|([A-D])[\.、:：\s])\s*(.*)$/i);
       if (optMatch) {
+        const key = (optMatch[1] || optMatch[2]).toUpperCase();
         currentQ.options.push({
-          key: optMatch[1].toUpperCase(),
-          text: optMatch[2]
+          key,
+          text: optMatch[3].trim()
         });
         continue;
       }
     }
 
-    // Answer line (e.g. *答案: A* or 答案: ...)
-    if (currentQ) {
-      const ansMatch = line.match(/答案[：:]\s*(.+?)[\*\_]*$/i);
-      if (ansMatch) {
-        currentQ.standardAnswer = ansMatch[1].trim();
-        continue;
-      }
-    }
-
-    // Math formula or continuation
-    if (currentQ) {
-      if (line.startsWith('$$') || line.startsWith('\\[') || line.includes('\\int') || line.includes('\\lim')) {
-        currentQ.mathExpression = line.replace(/\$\$/g, '').trim();
-      } else {
-        currentQ.prompt += ' ' + line;
-      }
+    // 8. Accumulate content based on current section
+    if (state === 'analysis') {
+      currentQ.analysis = (currentQ.analysis ? currentQ.analysis + '\n' : '') + rawLine;
+    } else {
+      currentQ.prompt = (currentQ.prompt ? currentQ.prompt + '\n' : '') + rawLine;
     }
   }
 
-  if (currentQ) {
-    questions.push(currentQ);
-  }
+  finishCurrentQ();
 
-  // If totalScore wasn't populated properly
   if (totalScore === 0) {
     totalScore = questions.reduce((sum, q) => sum + (q.score || 5), 0) || 100;
   }
@@ -244,17 +275,15 @@ apiRouter.post('/model/test', async (req, res) => {
   }
 });
 
-// POST /api/model/parse-markdown - Parse Markdown into ExamCraft schema
+// POST /api/model/parse-markdown
 apiRouter.post('/model/parse-markdown', async (req, res) => {
   const { markdown, useAI } = req.body;
   if (!markdown || !markdown.trim()) {
     return res.status(400).json({ success: false, error: 'Markdown 文本内容不能为空' });
   }
 
-  // 1. Fast algorithmic fallback/baseline parse
   const baseline = parseExamMarkdown(markdown);
 
-  // 2. If AI enhancement requested and model_core API key is available
   if (useAI && currentConfig.apiKey && currentConfig.apiKey.trim()) {
     try {
       const model = createChatModel(currentConfig);
@@ -284,7 +313,7 @@ ${markdown}
         { "key": "B", "text": "选项B内容" }
       ],
       "standardAnswer": "A",
-      "mathExpression": ""
+      "analysis": "详细解析"
     }
   ]
 }`;
@@ -304,7 +333,6 @@ ${markdown}
       });
     } catch (err) {
       console.warn('AI markdown parsing fallback to algorithmic:', err.message);
-      // Fallback to baseline
       return res.json({
         success: true,
         mode: 'algorithmic_fallback',
@@ -314,7 +342,6 @@ ${markdown}
     }
   }
 
-  // Pure algorithmic response (0ms)
   return res.json({
     success: true,
     mode: 'algorithmic',
