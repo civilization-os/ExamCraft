@@ -58,7 +58,27 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
     }
   }, [collections, mistakes]);
 
-  const activeCol = collections.find((c) => c.id === activeColId) || collections[1];
+  // Modal States
+  const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+
+  // AI Mistake Import State
+  const [isImportMistakeModalOpen, setIsImportMistakeModalOpen] = useState(false);
+  const [mistakeRawText, setMistakeRawText] = useState('');
+  const [isAiParsingMistake, setIsAiParsingMistake] = useState(false);
+
+  // AI Variant Generation State
+  const [variantModal, setVariantModal] = useState(null); // { item, loading, data, error }
+
+  const activeCol = (collections || []).find((c) => c.id === activeColId) || (collections && collections[0]) || {
+    id: 'col-default',
+    title: '综合考点易错集',
+    code: 'MATH-COLLECTION',
+    count: mistakes.length,
+    updated: '刚刚',
+    priority: '重点关注',
+    desc: '收录历次模考与练习中的核心题目与错因深度归因。'
+  };
 
   const handleAiImportMistake = async () => {
     if (!mistakeRawText.trim()) return;
@@ -69,7 +89,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rawContent: mistakeRawText,
-          folderTitle: activeCol.title
+          folderTitle: activeCol?.title || '专项题集'
         })
       });
       const data = await res.json();
@@ -355,20 +375,20 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
               <div className="flex flex-col gap-space-xs">
                 <div className="flex items-center gap-space-sm flex-wrap">
                   <span className="px-space-sm py-0.5 rounded bg-primary-fixed text-primary font-label-mono text-label-mono font-semibold">
-                    {activeCol.code || 'MATH-COLLECTION'}
+                    {activeCol?.code || 'MATH-COLLECTION'}
                   </span>
                   <span className="text-on-surface-variant font-label-mono text-label-mono">
-                    更新于 {activeCol.updated || '刚刚'}
+                    更新于 {activeCol?.updated || '刚刚'}
                   </span>
                   <span className="px-space-sm py-0.5 rounded bg-secondary-container text-on-secondary-container font-label-mono text-label-mono font-medium">
-                    {activeCol.priority || '重点关注'}
+                    {activeCol?.priority || '重点关注'}
                   </span>
                 </div>
                 <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-semibold">
-                  {activeCol.title}
+                  {activeCol?.title || '我的题集'}
                 </h1>
                 <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
-                  {activeCol.desc || '针对典型易错点与阶段薄弱计算项进行深度归因与自适应变式练习。'}
+                  {activeCol?.desc || '针对典型易错点与阶段薄弱计算项进行深度归因与自适应变式练习。'}
                 </p>
               </div>
 
@@ -392,7 +412,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => onStartExamWithMistakes(activeCol.title)}
+                  onClick={() => onStartExamWithMistakes(activeCol?.title || '专项题集')}
                   className="h-8.5 px-space-md rounded-lg bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md flex items-center gap-space-xs transition-all shadow-sm active:scale-95 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[16px]">bolt</span>
