@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
+import { extractExamMeta, sliceMarkdownIntoChunks } from '../utils/examChunker';
 
 const SAMPLE_MATH_MD = `# 2026 年全国硕士研究生入学统一考试（数学二）试题与解析
 - 建议时限: 180分钟
@@ -239,6 +240,8 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
   });
 
   const debounceTimerRef = useRef(null);
+  const activeJobIdRef = useRef(0);
+  const [chunkProgress, setChunkProgress] = useState({ current: 0, total: 0, summary: '' });
 
   // Toggle analysis visibility for a question
   const toggleAnalysis = (id) => {
@@ -250,42 +253,106 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
     setExpandedPassages(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
+  // Progressive Chunked AI Parser
+  // Cuts long texts into lightweight passage-aware batches, preventing HTTP 413 and LLM output token overflows
+  const runProgressiveChunkParser = async (mdText) => {
+    if (!mdText || !mdText.trim()) return;
+
+    const currentJobId = ++activeJobIdRef.current;
+    setIsParsingAI(true);
+
+    // 1. Instantly parse metadata in client
+    const meta = extractExamMeta(mdText);
+    setParsedExam(prev => ({
+      title: meta.title,
+      duration: meta.duration,
+      totalScore: meta.totalScore,
+      questionCount: prev?.questions?.length || 0,
+      questions: prev?.questions || []
+    }));
+
+    // 2. Slice into lightweight passage-aware chunks
+    const chunks = sliceMarkdownIntoChunks(mdText);
+    setChunkProgress({ current: 0, total: chunks.length, summary: chunks[0]?.summary || '准备切片解析...' });
+
+    const accumulatedQuestions = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      if (activeJobIdRef.current !== currentJobId) {
+        return; // Aborted by newer user input
+      }
+
+      const ch = chunks[i];
+      setChunkProgress({
+        current: i + 1,
+        total: chunks.length,
+        summary: ch.summary
+      });
+
+      try {
+        const res = await fetch('/api/model/parse-chunk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chunk: {
+              section: ch.section,
+              passageTitle: ch.passageTitle,
+              passage: ch.passage,
+              rawQuestionsText: ch.rawQuestionsText
+            },
+            useAI: true
+          })
+        });
+
+        if (activeJobIdRef.current !== currentJobId) return;
+
+        const data = await res.json();
+        if (data.success && data.questions && data.questions.length > 0) {
+          accumulatedQuestions.push(...data.questions);
+
+          // Progressive live stream update into KaTeX preview
+          setParsedExam(prev => {
+            const sorted = [...accumulatedQuestions];
+            sorted.sort((a, b) => {
+              const numA = parseInt(String(a.num || a.id).replace(/\D/g, ''), 10) || 0;
+              const numB = parseInt(String(b.num || b.id).replace(/\D/g, ''), 10) || 0;
+              return numA - numB;
+            });
+            return {
+              ...prev,
+              title: prev?.title || meta.title,
+              duration: prev?.duration || meta.duration,
+              totalScore: prev?.totalScore || meta.totalScore,
+              questionCount: sorted.length,
+              questions: sorted
+            };
+          });
+        }
+      } catch (err) {
+        console.warn(`[Chunk ${i + 1} parse error]:`, err.message);
+      }
+    }
+
+    if (activeJobIdRef.current === currentJobId) {
+      setChunkProgress({ current: chunks.length, total: chunks.length, summary: '切片解析完成' });
+      setIsParsingAI(false);
+      setAiEnhanceMessage(`🎉 model_core 分篇章切片解析完毕！已完成 ${chunks.length} 个任务批次，成功规整 ${accumulatedQuestions.length} 道试题，杜绝了超长文本溢出。`);
+    }
+  };
+
   // Automatic AI parse triggered when markdownText changes with debounce
   // No manual button needed: all parsing defaults to AI with seamless KaTeX loading state
   useEffect(() => {
     if (activeMode !== 'markdown') return;
     if (!markdownText || !markdownText.trim()) return;
 
-    setIsParsingAI(true);
-
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
 
     debounceTimerRef.current = setTimeout(() => {
-      fetch('/api/model/parse-markdown', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ markdown: markdownText, useAI: true })
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success && data.data) {
-            setParsedExam(data.data);
-            if (data.mode === 'ai_enhanced') {
-              setAiEnhanceMessage(`✨ model_core 大模型已自动规整完成！识别 ${data.data.questionCount || data.data.questions?.length} 道试题，规范 KaTeX 与分值。`);
-            } else if (data.warning) {
-              setAiEnhanceMessage(data.warning);
-            }
-          }
-        })
-        .catch((err) => {
-          console.warn('Auto AI markdown parse notice:', err.message);
-        })
-        .finally(() => {
-          setIsParsingAI(false);
-        });
-    }, 850);
+      runProgressiveChunkParser(markdownText);
+    }, 600);
 
     return () => {
       if (debounceTimerRef.current) {
@@ -412,45 +479,86 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
 
   // Trigger 1:1 AI Clone
   const triggerAiCloneWithText = async (textToAnalyze, fileName = '导入试卷.pdf') => {
+    if (!textToAnalyze || !textToAnalyze.trim()) {
+      alert('请先输入或粘贴试卷内容');
+      return;
+    }
     setIsAiCloning(true);
     setCloneStage(1);
 
-    const stageTimer1 = setTimeout(() => setCloneStage(2), 800);
-    const stageTimer2 = setTimeout(() => setCloneStage(3), 2200);
-
     try {
-      const res = await fetch('/api/model/ai-import-paper', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rawContent: textToAnalyze,
-          fileName
-        })
-      });
-      const data = await res.json();
-      if (data.success && data.paper) {
-        setCloneStage(4);
-        setClonedPaperResult(data.paper);
-        setUploadedFile({
-          name: data.paper.title,
-          size: 'AI 规整完毕',
-          status: '已由 AI 深度解析',
-          progress: 100,
-          matchedQuestions: data.paper.questionCount,
-          choices: data.paper.typeBreakdown.choices,
-          blanks: data.paper.typeBreakdown.blanks,
-          solutions: data.paper.typeBreakdown.solutions
+      const meta = extractExamMeta(textToAnalyze);
+      const chunks = sliceMarkdownIntoChunks(textToAnalyze);
+      setCloneStage(2);
+
+      const allQuestions = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const ch = chunks[i];
+        setCloneStage(Math.min(3, 2 + ((i + 1) / chunks.length)));
+        const res = await fetch('/api/model/parse-chunk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chunk: {
+              section: ch.section,
+              passageTitle: ch.passageTitle,
+              passage: ch.passage,
+              rawQuestionsText: ch.rawQuestionsText
+            },
+            useAI: true
+          })
         });
-      } else {
-        alert(data.error || 'AI 导入解析失败，请检查 API Key 配置。');
-        setCloneStage(0);
+        const data = await res.json();
+        if (data.success && data.questions) {
+          allQuestions.push(...data.questions);
+        }
       }
+
+      setCloneStage(3);
+
+      allQuestions.sort((a, b) => {
+        const numA = parseInt(String(a.num || a.id).replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(String(b.num || b.id).replace(/\D/g, ''), 10) || 0;
+        return numA - numB;
+      });
+
+      const paper = {
+        id: 'cloned-' + Date.now(),
+        title: meta.title || fileName.replace(/\.[^/.]+$/, '') || '1:1 AI 智能克隆试卷',
+        source: '真题克隆 (篇章切片 AI 解析)',
+        sourceType: 'ai-imported',
+        date: '刚刚',
+        questionCount: allQuestions.length,
+        totalScore: meta.totalScore || 100,
+        duration: meta.duration || 120,
+        difficulty: 4,
+        tags: ['#AI克隆', '#篇章切片', '#KaTeX高保真'],
+        status: '未作答 (全新排版完毕)',
+        typeBreakdown: {
+          choices: allQuestions.filter(q => q.type.includes('选择')).length,
+          blanks: allQuestions.filter(q => q.type.includes('填空')).length,
+          solutions: allQuestions.filter(q => q.type.includes('解答') || q.type.includes('计算') || q.type.includes('证明')).length
+        },
+        markdown: textToAnalyze,
+        questions: allQuestions
+      };
+
+      setCloneStage(4);
+      setClonedPaperResult(paper);
+      setUploadedFile({
+        name: paper.title,
+        size: '篇章切片解析完毕',
+        status: '已由 AI 深度解析',
+        progress: 100,
+        matchedQuestions: paper.questionCount,
+        choices: paper.typeBreakdown.choices,
+        blanks: paper.typeBreakdown.blanks,
+        solutions: paper.typeBreakdown.solutions
+      });
     } catch (err) {
-      alert(`AI 导入失败: ${err.message}`);
+      alert(`AI 导入切片解析失败: ${err.message}`);
       setCloneStage(0);
     } finally {
-      clearTimeout(stageTimer1);
-      clearTimeout(stageTimer2);
       setIsAiCloning(false);
     }
   };
@@ -1280,6 +1388,31 @@ D. a=2/3, b=1
                           总计: {parsedExam.questions?.length || parsedExam.questionCount} 道试题
                         </span>
                         <span>可点击任意卡片上的「✏️ 编辑本题」或「✨ AI 辅助微调」</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Progressive Chunk Parsing Progress Strip */}
+                  {isParsingAI && chunkProgress.total > 0 && (
+                    <div className="p-3 rounded-xl bg-secondary-container/25 border border-secondary/30 space-y-1.5 animate-in fade-in">
+                      <div className="flex items-center justify-between text-[12px] font-semibold text-secondary">
+                        <span className="flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                          <span>篇章切片解析中: {chunkProgress.summary}</span>
+                        </span>
+                        <span className="font-mono text-[11px] bg-secondary/15 px-2 py-0.5 rounded text-secondary font-bold">
+                          {Math.round((chunkProgress.current / chunkProgress.total) * 100)}% ({chunkProgress.current}/{chunkProgress.total} 批次)
+                        </span>
+                      </div>
+                      <div className="w-full bg-surface-container h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-secondary h-full rounded-full transition-all duration-300"
+                          style={{ width: `${Math.max(5, (chunkProgress.current / chunkProgress.total) * 100)}%` }}
+                        ></div>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-on-surface-variant font-label-mono">
+                        <span>轻量分段请求 · 规避 413 与 Token 溢出</span>
+                        <span>每批仅处理当前篇章与 3~5 题</span>
                       </div>
                     </div>
                   )}

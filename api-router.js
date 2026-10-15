@@ -682,6 +682,92 @@ apiRouter.post('/model/test', async (req, res) => {
   }
 });
 
+// POST /api/model/parse-chunk
+// 接收前端切片后的单批/单篇章试题，每次仅解析 3~5 道试题，彻底杜绝大请求体与 Token 溢出
+apiRouter.post('/model/parse-chunk', async (req, res) => {
+  const { chunk, useAI } = req.body;
+  if (!chunk || !chunk.rawQuestionsText) {
+    return res.status(400).json({ success: false, error: '切片试题内容不能为空' });
+  }
+
+  const { section, passageTitle, passage, rawQuestionsText } = chunk;
+
+  // 1. 如果启用了 AI 并且有 API key
+  if (useAI && currentConfig.apiKey && currentConfig.apiKey.trim()) {
+    try {
+      const model = createChatModel(currentConfig);
+      const passageSnippet = passage
+        ? `【关联阅读篇章 / 材料】：\n${passageTitle ? '### ' + passageTitle + '\n' : ''}${passage}\n\n`
+        : '';
+
+      const prompt = `你是一位精通中国国家考研、高考与高校期末命题规范的高校命题专家。
+请将以下【试题切片】精确解析为结构化 JSON 数组。
+
+【排版纪律】：
+1. prompt 字段必须且只能包含纯题目描述（含公式 LaTeX），严禁将“解：”、“证明：”或任何解答推导混入 prompt！
+2. 若题目中含有（本题满分 X 分）或类似分值说明，必须将其数值提取至 score 字段，并从 prompt 中彻底清除！
+3. 若存在关联篇章，请保留 passage 字段。
+4. standardAnswer 存放标准答案或精炼结论；选择题填字母（如 A），填空题填结果，长解答题写“详见分步解答与证明”。
+5. analysis 字段必须完整包含解答推导过程与 LaTeX 格式。
+
+待解析切片：
+${passageSnippet}【试题内容】：
+${rawQuestionsText}
+
+请直接输出合法 JSON 数组：
+[
+  {
+    "id": 1,
+    "num": "01",
+    "type": "单项选择题",
+    "score": 5,
+    "section": "${section || '通用试题'}",
+    "passage": ${passage ? JSON.stringify(passage) : 'undefined'},
+    "passageTitle": ${passageTitle ? JSON.stringify(passageTitle) : 'undefined'},
+    "prompt": "题干描述",
+    "options": [
+      { "key": "A", "text": "选项A" },
+      { "key": "B", "text": "选项B" }
+    ],
+    "standardAnswer": "A",
+    "analysis": "分步解析"
+  }
+]`;
+
+      const response = await model.invoke([
+        { role: 'system', content: '你是一位精通试卷结构化的大模型命题专家，必须返回纯合法 JSON 数组。' },
+        { role: 'user', content: prompt }
+      ]);
+
+      const parsed = extractJsonArray(response.content);
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+        const sanitized = parsed.map(q => {
+          if (!q.passage && passage) q.passage = passage;
+          if (!q.passageTitle && passageTitle) q.passageTitle = passageTitle;
+          if (!q.section && section) q.section = section;
+          return sanitizeQuestion(q);
+        });
+        return res.json({
+          success: true,
+          mode: 'ai_enhanced',
+          questions: sanitized
+        });
+      }
+    } catch (err) {
+      console.warn('[parse-chunk AI error fallback]:', err.message);
+    }
+  }
+
+  // 2. 算法降级解析单切片
+  const fakeDoc = `# 临时\n## ${section || '试题'}\n${passage ? (passageTitle ? '#### ' + passageTitle + '\n' : '') + passage + '\n' : ''}${rawQuestionsText}`;
+  const baseline = parseExamMarkdown(fakeDoc);
+  return res.json({
+    success: true,
+    mode: 'algorithmic',
+    questions: (baseline.questions || []).map(sanitizeQuestion)
+  });
+});
+
 // POST /api/model/parse-markdown
 apiRouter.post('/model/parse-markdown', async (req, res) => {
   const { markdown, useAI } = req.body;
