@@ -68,8 +68,27 @@ export function sanitizeQuestion(q) {
   if (!q) return q;
   if (!q.prompt) q.prompt = '';
 
+  // 1. Clean HTML details if leaked into prompt
+  const detailsMatch = q.prompt.match(/<details>[\s\S]*?<\/details>/i);
+  if (detailsMatch) {
+    const rawDetails = detailsMatch[0];
+    const cleanAnalysis = rawDetails.replace(/<\/?details>|<\/?summary>/gi, '').trim();
+    q.analysis = q.analysis ? cleanAnalysis + '\n\n' + q.analysis : cleanAnalysis;
+    q.prompt = q.prompt.replace(/<details>[\s\S]*?<\/details>/gi, '').trim();
+  }
+
+  // 2. Clean blockquote answers like > **答案**：D
+  const quoteAnsMatch = q.prompt.match(/>?\s*(?:\*\*答案[:：\s]*\*\*|答案[:：]|【答案】)\s*([A-D0-9a-z\u4e00-\u9fa5]+)/i);
+  if (quoteAnsMatch) {
+    if (!q.standardAnswer) q.standardAnswer = quoteAnsMatch[1].trim().replace(/\*/g, '');
+    q.prompt = q.prompt.replace(/>?\s*(?:\*\*答案[:：\s]*\*\*|答案[:：]|【答案】)\s*([A-D0-9a-z\u4e00-\u9fa5]+)/gi, '').trim();
+  }
+
+  // 3. Remove leading question numbers in prompt (e.g. **1.**, 1.)
+  q.prompt = q.prompt.replace(/^\*\*?\d+[\.、\s]*\*\*?\s*/, '').trim();
+
   // Pattern for solution/proof headers that should NEVER be in prompt
-  const splitPattern = /(?:\n\s*|\A\s*)(?:\*\*解[:：\s]*\*\*|【解】|解[:：]|\*\*证明[:：\s]*\*\*|【证明】|证明[:：]|\*\*（\d+）(?:证明|解)[:：\s]*\*\*|\*\*\((\d+)\)(?:证明|解)[:：\s]*\*\*|\*\*解析[:：\s]*\*\*|【解析】|解析[:：])/;
+  const splitPattern = /(?:\n\s*|\A\s*)(?:\*\*解[:：\s]*\*\*|【解】|解[:：]|\*\*证明[:：\s]*\*\*|【证明】|证明[:：]|\*\*（\d+）(?:证明|解)[:：\s]*\*\*|\*\*\((\d+)\)(?:证明|解)[:：\s]*\*\*|\*\*解析[:：\s]*\*\*|【解析】|解析[:：]|\*\*答案精解\*\*)/;
   
   const match = q.prompt.search(splitPattern);
   if (match !== -1) {
@@ -84,14 +103,9 @@ export function sanitizeQuestion(q) {
   // Remove score declarations from prompt like （本题满分 10 分）
   q.prompt = q.prompt.replace(/^[（\(]本题满分\s*`?(\d+)`?\s*分[）\)]\s*/gm, '').trim();
 
-  // If answer leaked in prompt
-  const ansMatch = q.prompt.match(/(?:\*\*答案[:：\s]*\*\*|答案[:：]|【答案】)\s*(.+?)(?:\*\*|$)/);
-  if (ansMatch) {
-    if (!q.standardAnswer) q.standardAnswer = ansMatch[1].trim().replace(/\*/g, '');
-    q.prompt = q.prompt.replace(/(?:\*\*答案[:：\s]*\*\*|答案[:：]|【答案】)\s*(.+?)(?:\*\*|$)/g, '').trim();
+  if (q.analysis) {
+    q.analysis = q.analysis.replace(/<\/?details>|<\/?summary>/gi, '').trim();
   }
-
-  if (q.analysis) q.analysis = q.analysis.trim();
   if (q.standardAnswer) q.standardAnswer = q.standardAnswer.trim().replace(/\*/g, '');
 
   const numVal = parseInt(String(q.num || q.id).replace(/\D/g, ''), 10);
@@ -113,6 +127,7 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
   let currentPassage = '';
   let passageBuffer = [];
   let isCollectingPassage = false;
+  let inDetails = false;
 
   const flushPassage = () => {
     if (passageBuffer.length > 0) {
@@ -123,8 +138,6 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
       passageBuffer = [];
     }
   };
-
-  const hasMarkdownQuestionHeaders = lines.some(l => l.trim().match(/^###\s*(?:题\s*)?\d+/));
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
@@ -137,8 +150,10 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
       continue;
     }
 
+    if (line.includes('<details>')) inDetails = true;
+
     // Section header (## ...)
-    if ((line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
+    if (!inDetails && (line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
       flushPassage();
       currentSection = line.replace(/^##\s+/, '').trim();
       currentPassage = '';
@@ -147,8 +162,8 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
       continue;
     }
 
-    // Passage header (#### Text 1, #### Passage A, #### 阅读篇章 A, etc.)
-    const passageMatch = line.match(/^#{3,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇)/i);
+    // Passage header (### Text 1, #### Text 1, etc.)
+    const passageMatch = !inDetails && line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇)/i);
     if (passageMatch) {
       flushPassage();
       currentPassageTitle = passageMatch[1].trim();
@@ -163,25 +178,31 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
     let qNum = null;
     let rest = '';
 
-    if (hasMarkdownQuestionHeaders) {
-      const m = line.match(/^###\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
-                line.match(/^##\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
-      if (m) {
+    if (!inDetails) {
+      const mBold = line.match(/^\*\*(\d+)[\.、\s]*\*\*\s*(.*)$/);
+      const mHash = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
+      const mNum = line.match(/^(\d+)[\.、]\s+([^\d%].*)$/);
+
+      if (mBold) {
         isQHeader = true;
-        qNum = parseInt(m[1], 10);
-        rest = m[2];
-      }
-    } else {
-      const m = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
-                line.match(/^(\d+)[\.、\s]\s*(.*)$/);
-      if (m) {
+        qNum = parseInt(mBold[1], 10);
+        rest = mBold[2];
+      } else if (mHash && !passageMatch) {
         isQHeader = true;
-        qNum = parseInt(m[1], 10);
-        rest = m[2];
+        qNum = parseInt(mHash[1], 10);
+        rest = mHash[2];
+      } else if (mNum && !line.includes('%') && !isCollectingPassage && blocks.length > 0) {
+        const candidateNum = parseInt(mNum[1], 10);
+        const lastNum = blocks[blocks.length - 1].qNum || 0;
+        if (candidateNum === lastNum + 1) {
+          isQHeader = true;
+          qNum = candidateNum;
+          rest = mNum[2];
+        }
       }
     }
 
-    if (isQHeader) {
+    if (isQHeader && qNum >= 1 && qNum <= 150) {
       flushPassage();
       isCollectingPassage = false;
       blocks.push({
@@ -199,6 +220,8 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
     } else {
       passageBuffer.push(rawLine);
     }
+
+    if (line.includes('</details>')) inDetails = false;
   }
 
   flushPassage();
@@ -224,6 +247,7 @@ export function parseExamMarkdown(mdText) {
   let currentPassageTitle = '';
   let passageBuffer = [];
   let isCollectingPassage = false;
+  let inDetails = false;
   let currentQ = null;
   let state = 'prompt'; // 'prompt' | 'options' | 'analysis'
 
@@ -247,15 +271,13 @@ export function parseExamMarkdown(mdText) {
         currentQ.standardAnswer = matchChoice[1].toUpperCase();
       }
     }
-    if (!currentQ.standardAnswer && (currentQ.type.includes('解答') || currentQ.type.includes('证明') || currentQ.type.includes('计算'))) {
-      currentQ.standardAnswer = '详见分步解答与证明';
+    if (!currentQ.standardAnswer && (currentQ.type.includes('解答') || currentQ.type.includes('证明') || currentQ.type.includes('计算') || currentQ.type.includes('写作') || currentQ.type.includes('翻译'))) {
+      currentQ.standardAnswer = '详见分步解答与参考范文';
     }
     questions.push(currentQ);
     currentQ = null;
     state = 'prompt';
   };
-
-  const hasMarkdownQuestionHeaders = lines.some(l => l.trim().match(/^###\s*(?:题\s*)?\d+/));
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
@@ -272,10 +294,22 @@ export function parseExamMarkdown(mdText) {
       continue;
     }
 
+    if (line.includes('<details>')) {
+      inDetails = true;
+      state = 'analysis';
+      continue;
+    }
+    if (line.includes('</details>')) {
+      inDetails = false;
+      continue;
+    }
+
     // 1. Title (# ...)
     if (line.startsWith('# ') && !line.startsWith('### ')) {
       title = line.replace(/^#\s+/, '').trim();
       if (title.includes('数学') && (title.includes('硕士') || title.includes('考研') || title.includes('统考'))) {
+        duration = 180;
+      } else if (title.includes('英语') && (title.includes('硕士') || title.includes('考研'))) {
         duration = 180;
       }
       continue;
@@ -289,7 +323,7 @@ export function parseExamMarkdown(mdText) {
     }
 
     // 3. Section header (## 一、选择题 ... or ## Section I ...)
-    if ((line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
+    if (!inDetails && (line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
       finishCurrentQ();
       flushPassage();
       currentSection = line.replace(/^##\s+/, '').trim();
@@ -300,7 +334,7 @@ export function parseExamMarkdown(mdText) {
     }
 
     // 4. Passage header (#### Text 1, #### Passage A, etc.)
-    const passageMatch = line.match(/^#{3,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇)/i);
+    const passageMatch = !inDetails && line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇)/i);
     if (passageMatch) {
       finishCurrentQ();
       flushPassage();
@@ -317,39 +351,66 @@ export function parseExamMarkdown(mdText) {
     }
 
     // 6. Question start:
-    let qHeaderMatch = null;
-    if (hasMarkdownQuestionHeaders) {
-      qHeaderMatch = line.match(/^###\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
-                     line.match(/^##\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
-    } else {
-      qHeaderMatch = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
-                     line.match(/^(\d+)[\.、\s]\s*(.*)$/);
+    let isQHeader = false;
+    let qNum = null;
+    let rest = '';
+
+    if (!inDetails) {
+      const mBold = line.match(/^\*\*(\d+)[\.、\s]*\*\*\s*(.*)$/);
+      const mHash = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
+      const mNum = line.match(/^(\d+)[\.、]\s+([^\d%].*)$/);
+
+      if (mBold) {
+        isQHeader = true;
+        qNum = parseInt(mBold[1], 10);
+        rest = mBold[2];
+      } else if (mHash && !passageMatch) {
+        isQHeader = true;
+        qNum = parseInt(mHash[1], 10);
+        rest = mHash[2];
+      } else if (mNum && !line.includes('%') && !isCollectingPassage && questions.length > 0) {
+        const candidateNum = parseInt(mNum[1], 10);
+        const lastNum = questions[questions.length - 1].id || 0;
+        if (candidateNum === lastNum + 1) {
+          isQHeader = true;
+          qNum = candidateNum;
+          rest = mNum[2];
+        }
+      }
     }
 
-    if (qHeaderMatch) {
+    if (isQHeader && qNum >= 1 && qNum <= 150) {
       finishCurrentQ();
       flushPassage();
       isCollectingPassage = false;
-      const numInt = parseInt(qHeaderMatch[1], 10);
-      const numStr = String(numInt).padStart(2, '0');
-      const rest = qHeaderMatch[2] ? qHeaderMatch[2].trim() : '';
 
-      const isChoice = currentSection.includes('选择') || currentSection.includes('Use of English') || currentSection.includes('Reading') || rest.includes('选项') || (numInt >= 1 && numInt <= 10 && currentSection.includes('选择'));
-      const isBlank = currentSection.includes('填空') || (numInt >= 11 && numInt <= 16 && currentSection.includes('填空'));
-      const isSolution = currentSection.includes('解答') || currentSection.includes('证明') || currentSection.includes('计算') || currentSection.includes('Writing') || currentSection.includes('Translation') || numInt >= 17;
+      const isChoice = currentSection.includes('选择') || currentSection.includes('Use of English') || currentSection.includes('Reading') || (qNum >= 1 && qNum <= 40);
+      const isBlank = currentSection.includes('填空') || (qNum >= 11 && qNum <= 16 && currentSection.includes('填空'));
+      const isWriting = currentSection.includes('Writing') || qNum >= 47;
+      const isTrans = currentSection.includes('Translation') || qNum === 46;
+      const isSolution = currentSection.includes('解答') || currentSection.includes('证明') || currentSection.includes('计算') || isWriting || isTrans;
 
       let score = 5;
-      if (isBlank) score = 5;
-      else if (isSolution) score = 10;
-      else if (currentSection.includes('每小题') || currentSection.includes('分')) {
-        const sm = currentSection.match(/每(?:小)?题\s*(\d+)\s*分/);
-        if (sm) score = parseInt(sm[1]);
+      if (currentSection.includes('Use of English') || (qNum >= 1 && qNum <= 20)) {
+        score = 0.5;
+      } else if (currentSection.includes('Reading') || (qNum >= 21 && qNum <= 45)) {
+        score = 2;
+      } else if (qNum === 46) {
+        score = 15;
+      } else if (qNum === 47) {
+        score = 10;
+      } else if (qNum === 48) {
+        score = 15;
+      } else if (isBlank) {
+        score = 5;
+      } else if (isSolution) {
+        score = 10;
       }
 
       currentQ = {
-        id: numInt,
-        num: numStr,
-        type: isChoice ? '单项选择题' : isBlank ? '填空题' : '综合计算与解答题',
+        id: qNum,
+        num: String(qNum).padStart(2, '0'),
+        type: isChoice ? '单项选择题' : isWriting ? '写作题' : isTrans ? '英译汉翻译' : isBlank ? '填空题' : '综合计算与解答题',
         score: score,
         section: currentSection,
         passage: currentPassage || undefined,
@@ -381,15 +442,15 @@ export function parseExamMarkdown(mdText) {
     }
 
     // 8. Analysis & Solution identifier
-    const isAnalysisTag = line.match(/^(?:\*\*解析[:：\s]*\*\*|【解析】|解析[:：]|\*\*证明[:：\s]*\*\*|【证明】|证明[:：]|\*\*解[:：\s]*\*\*|【解】|解[:：]|\*\*[（\(]\d+[）\)](?:证明|解)[:：\s]*\*\*)/);
+    const isAnalysisTag = line.match(/^(?:\*\*解析[:：\s]*\*\*|【解析】|解析[:：]|\*\*证明[:：\s]*\*\*|【证明】|证明[:：]|\*\*解[:：\s]*\*\*|【解】|解[:：]|\*\*[（\(]\d+[）\)](?:证明|解)[:：\s]*\*\*|\*\*答案精解\*\*)/);
     if (isAnalysisTag) {
       state = 'analysis';
       currentQ.analysis = (currentQ.analysis ? currentQ.analysis + '\n' : '') + rawLine;
       continue;
     }
 
-    // 9. Answer identifier
-    const ansMatch = line.match(/^(?:\*\*答案[:：\s]*\*\*|答案[:：]|【答案】)\s*(.+?)(?:\*\*|$)/i);
+    // 9. Answer identifier (including > **答案**：D)
+    const ansMatch = line.match(/^(?:>|\s)*(?:\*\*答案[:：\s]*\*\*|答案[:：]|【答案】)\s*([A-D0-9a-z\u4e00-\u9fa5]+)/i);
     if (ansMatch) {
       currentQ.standardAnswer = ansMatch[1].trim().replace(/\*/g, '');
       continue;

@@ -41,6 +41,7 @@ export function sliceMarkdownIntoChunks(mdText) {
   let currentPassage = '';
   let passageBuffer = [];
   let isCollectingPassage = false;
+  let inDetails = false;
 
   const flushPassage = () => {
     if (passageBuffer.length > 0) {
@@ -51,8 +52,6 @@ export function sliceMarkdownIntoChunks(mdText) {
       passageBuffer = [];
     }
   };
-
-  const hasMarkdownQuestionHeaders = lines.some(l => l.trim().match(/^###\s*(?:题\s*)?\d+/));
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
@@ -65,8 +64,10 @@ export function sliceMarkdownIntoChunks(mdText) {
       continue;
     }
 
+    if (line.includes('<details>')) inDetails = true;
+
     // Section header (## ...)
-    if ((line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
+    if (!inDetails && (line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
       flushPassage();
       currentSection = line.replace(/^##\s+/, '').trim();
       currentPassage = '';
@@ -75,8 +76,8 @@ export function sliceMarkdownIntoChunks(mdText) {
       continue;
     }
 
-    // Passage header (#### Text 1, #### Passage A, #### 阅读材料, etc.)
-    const passageMatch = line.match(/^#{3,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*)/i);
+    // Passage header (### Text 1, #### Text 1, ### Passage A, #### 阅读材料, etc.)
+    const passageMatch = !inDetails && line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*)/i);
     if (passageMatch) {
       flushPassage();
       currentPassageTitle = passageMatch[1].trim();
@@ -86,27 +87,35 @@ export function sliceMarkdownIntoChunks(mdText) {
       continue;
     }
 
-    // Question start:
+    // Question start (Robust detection for **1.**, ### 1, 1., etc.):
     let isQHeader = false;
     let qNum = null;
 
-    if (hasMarkdownQuestionHeaders) {
-      const m = line.match(/^###\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
-                line.match(/^##\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
-      if (m) {
+    if (!inDetails) {
+      // 1. Bold numbers like **1.**, **21.**, **48.**, **1**
+      const mBold = line.match(/^\*\*(\d+)[\.、\s]*\*\*\s*(.*)$/);
+      // 2. Hash headers like ### 1, ## 21
+      const mHash = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
+      // 3. Sequential numbers like 1., 21. (exclude lines with % or bullet points)
+      const mNum = line.match(/^(\d+)[\.、]\s+([^\d%].*)$/);
+
+      if (mBold) {
         isQHeader = true;
-        qNum = parseInt(m[1], 10);
-      }
-    } else {
-      const m = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
-                line.match(/^(\d+)[\.、\s]\s*(.*)$/);
-      if (m) {
+        qNum = parseInt(mBold[1], 10);
+      } else if (mHash && !passageMatch) {
         isQHeader = true;
-        qNum = parseInt(m[1], 10);
+        qNum = parseInt(mHash[1], 10);
+      } else if (mNum && !line.includes('%') && !isCollectingPassage && questionBlocks.length > 0) {
+        const candidateNum = parseInt(mNum[1], 10);
+        const lastNum = questionBlocks[questionBlocks.length - 1].qNum || 0;
+        if (candidateNum === lastNum + 1) {
+          isQHeader = true;
+          qNum = candidateNum;
+        }
       }
     }
 
-    if (isQHeader) {
+    if (isQHeader && qNum >= 1 && qNum <= 150) {
       flushPassage();
       isCollectingPassage = false;
       questionBlocks.push({
@@ -124,12 +133,13 @@ export function sliceMarkdownIntoChunks(mdText) {
     } else {
       passageBuffer.push(rawLine);
     }
+
+    if (line.includes('</details>')) inDetails = false;
   }
 
   flushPassage();
 
   if (questionBlocks.length === 0) {
-    // If no distinct questions found, wrap whole text as single fallback chunk
     return [{
       chunkIndex: 0,
       section: currentSection,
