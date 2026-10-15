@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { apiRouter } from './api-router.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,30 +11,8 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// API: Health check & engine status
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    engine: 'ExamCraft AI Core v2.4-pro',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// API: Mock OCR Parse paper
-app.post('/api/parse-paper', (req, res) => {
-  const { fileName } = req.body;
-  res.json({
-    success: true,
-    fileName: fileName || '2024届全国高等数学期末考试统考卷A.pdf',
-    accuracy: '99.8%',
-    matchedQuestions: 23,
-    typeBreakdown: {
-      choices: 8,
-      blanks: 5,
-      solutions: 4
-    }
-  });
-});
+// Mount model_core API router
+app.use('/api', apiRouter);
 
 // Serve static frontend in production
 const distPath = path.join(__dirname, 'dist');

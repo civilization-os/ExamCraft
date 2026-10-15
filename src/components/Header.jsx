@@ -1,6 +1,23 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function Header({ currentPath, setCurrentPath, onOpenExam }) {
+  const [modelStatus, setModelStatus] = useState({ hasApiKey: false, modelName: '未配置', vendor: '' });
+
+  useEffect(() => {
+    fetch('/api/model/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.config) {
+          setModelStatus({
+            hasApiKey: data.config.hasApiKey,
+            modelName: data.config.modelName || 'gemini-2.5-flash',
+            vendor: data.config.vendor || data.config.protocol || 'model_core'
+          });
+        }
+      })
+      .catch(() => {});
+  }, [currentPath]); // refresh when navigating
+
   const navItems = [
     { path: 'dashboard', label: '控制面板', icon: 'dashboard' },
     { path: 'exam-generator', label: '智能组卷', icon: 'auto_fix_high' },
@@ -50,11 +67,23 @@ export default function Header({ currentPath, setCurrentPath, onOpenExam }) {
 
         {/* Right Telemetry & Actions */}
         <div className="flex items-center gap-space-md">
-          {/* Engine indicator */}
-          <div className="hidden sm:flex items-center gap-space-xs px- space-sm py-1 px-2.5 bg-surface-container-low rounded-lg text-on-surface-variant font-label-mono text-code-sm border border-outline-variant/30">
-            <span className="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-            <span>引擎就绪 · v2.4-pro</span>
-          </div>
+          {/* Model Core Engine Status Indicator */}
+          <button
+            onClick={() => setCurrentPath('settings')}
+            title="点击前往设置模型与 API Key"
+            className={`hidden sm:flex items-center gap-space-xs py-1 px-3 rounded-lg font-label-mono text-code-sm border transition-all cursor-pointer ${
+              modelStatus.hasApiKey
+                ? 'bg-secondary/10 border-secondary/30 text-secondary hover:bg-secondary/20'
+                : 'bg-tertiary/10 border-tertiary/30 text-tertiary hover:bg-tertiary/20 animate-pulse'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${modelStatus.hasApiKey ? 'bg-secondary' : 'bg-tertiary'}`}></span>
+            <span>
+              {modelStatus.hasApiKey
+                ? `model_core 就绪 · ${modelStatus.modelName}`
+                : '未输入 API Key (点击配置)'}
+            </span>
+          </button>
 
           {/* Quick Enter Exam Room Button */}
           <button

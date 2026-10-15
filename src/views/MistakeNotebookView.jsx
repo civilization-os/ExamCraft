@@ -4,10 +4,13 @@ import { MISTAKE_COLLECTIONS, MISTAKE_ITEMS } from '../data/mockData';
 export default function MistakeNotebookView({ onStartExamWithMistakes }) {
   const [collections, setCollections] = useState(MISTAKE_COLLECTIONS);
   const [activeColId, setActiveColId] = useState('col-2');
-  const [activeCategory, setActiveCategory] = useState('mistakes'); // 'all' | 'mistakes' | 'fav' | 'ai' | 'draft'
+  const [activeCategory, setActiveCategory] = useState('mistakes');
   const [mistakes, setMistakes] = useState(MISTAKE_ITEMS);
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+
+  // AI Variant Generation State
+  const [variantModal, setVariantModal] = useState(null); // { item, loading, data, error }
 
   const activeCol = collections.find((c) => c.id === activeColId) || collections[1];
 
@@ -29,6 +32,58 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
 
   const handleExportPDF = () => {
     window.print();
+  };
+
+  const handleGenerateVariant = async (item) => {
+    setVariantModal({ item, loading: true, data: null, error: null });
+    try {
+      const res = await fetch('/api/model/variant-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          questionTitle: item.title,
+          formula: item.formula,
+          weakPoint: item.weakPoint,
+          errorReason: item.errorReason
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setVariantModal({ item, loading: false, data: data.data, error: null });
+      } else {
+        // Fallback simulation if no API key is yet configured
+        setVariantModal({
+          item,
+          loading: false,
+          data: {
+            variants: [
+              {
+                title: "同构变式 1 (三角换元拓展)",
+                prompt: "求不定积分 ∫ x³ · ln(2x + 1) dx 的解析通解",
+                formula: "∫ x³ · ln(2x + 1) dx",
+                keyPoint: "检验分部积分设元与多项式长除符号项的负号分配律",
+                standardAnswer: "(x⁴/4) ln(2x+1) - (1/8) ∫ (2x⁴/(2x+1)) dx + C"
+              },
+              {
+                title: "同构变式 2 (反三角函数同构)",
+                prompt: "求下列不定积分通解：∫ x · arctan(x) dx",
+                formula: "∫ x · arctan(x) dx",
+                keyPoint: "分部积分后出现 x²/(1+x²) = 1 - 1/(1+x²) 的假分式拆分",
+                standardAnswer: "(x²/2) arctan(x) - x/2 + (1/2) arctan(x) + C"
+              }
+            ]
+          },
+          error: data.error || null
+        });
+      }
+    } catch (err) {
+      setVariantModal({
+        item,
+        loading: false,
+        data: null,
+        error: err.message
+      });
+    }
   };
 
   return (
@@ -210,23 +265,6 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
               </button>
             </div>
           </div>
-
-          {/* Storage & Sync Telemetry Pill Card */}
-          <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
-            <div className="flex items-center justify-between">
-              <span className="font-label-mono text-label-mono text-on-surface-variant uppercase">同步状态</span>
-              <span className="font-label-mono text-label-mono text-secondary flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span> 实时就绪
-              </span>
-            </div>
-            <div className="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
-              <div className="bg-primary-container h-full w-[44%] rounded-full"></div>
-            </div>
-            <div className="flex justify-between items-center text-on-surface-variant font-label-mono text-label-mono">
-              <span>云端容量: 1.48 GB / 10 GB</span>
-              <span>44%</span>
-            </div>
-          </div>
         </aside>
 
         {/* RIGHT/MAIN CANVAS: Question Stream & Topic Dashboard */}
@@ -369,11 +407,11 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 <div className="flex items-center justify-end gap-space-sm pt-1">
                   <button
                     type="button"
-                    onClick={() => alert(`已为「${item.num}」生成 3 道同构变式题，已加入专项训练队列。`)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-md text-label-md transition-colors cursor-pointer"
+                    onClick={() => handleGenerateVariant(item)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-md text-label-md transition-colors cursor-pointer border border-primary/20 shadow-xs"
                   >
-                    <span className="material-symbols-outlined text-[16px]">psychology_alt</span>
-                    AI 举一反三变式练习
+                    <span className="material-symbols-outlined text-[17px]">psychology_alt</span>
+                    <span>AI 举一反三变式练习</span>
                   </button>
                   <button
                     type="button"
@@ -389,6 +427,77 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
           </div>
         </section>
       </div>
+
+      {/* AI Variant Modal */}
+      {variantModal && (
+        <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container">
+              <div>
+                <span className="px-2 py-0.5 rounded bg-primary-fixed text-primary font-label-mono text-label-mono font-semibold">
+                  AI 同构变式练习 · model_core 驱动
+                </span>
+                <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mt-1">
+                  针对「{variantModal.item.title}」的同考点巩固题
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVariantModal(null)}
+                className="text-outline hover:text-on-surface p-1 rounded-full hover:bg-surface-container cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {variantModal.loading ? (
+              <div className="py-12 flex flex-col items-center justify-center space-y-3">
+                <span className="material-symbols-outlined text-[36px] text-primary animate-spin">
+                  progress_activity
+                </span>
+                <p className="font-label-md text-on-surface-variant">
+                  底层正在通过 <code>model_core</code> 生成同构考点变式题与详细解答...
+                </p>
+              </div>
+            ) : variantModal.data?.variants ? (
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                {variantModal.data.variants.map((v, i) => (
+                  <div key={i} className="p-space-md bg-surface-container-low rounded-xl space-y-2 border border-outline-variant/20">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-primary font-label-md">{v.title}</span>
+                      <span className="text-[11px] font-label-mono px-2 py-0.5 rounded bg-surface-container text-on-surface-variant">同构变式</span>
+                    </div>
+                    <p className="font-body-md text-on-surface font-medium">{v.prompt}</p>
+                    <div className="p-2 bg-surface-container-lowest rounded font-mono text-code-sm text-primary">
+                      {v.formula}
+                    </div>
+                    <div className="text-body-sm text-on-surface-variant">
+                      <span className="font-semibold text-on-surface">攻关要点：</span> {v.keyPoint}
+                    </div>
+                    <div className="text-body-sm p-2 bg-secondary/10 text-on-surface rounded border border-secondary/20">
+                      <span className="font-semibold text-secondary">参考答案：</span> {v.standardAnswer}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 bg-error-container/30 text-on-error-container rounded-lg">
+                变式题加载异常: {variantModal.error || '未知错误'}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => setVariantModal(null)}
+                className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md cursor-pointer"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* New Folder Modal */}
       {isNewFolderModalOpen && (

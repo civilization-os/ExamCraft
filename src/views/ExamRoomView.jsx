@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 
 export default function ExamRoomView({ activePaper, questions, onExit, onOpenMistakes }) {
-  const [currentQIndex, setCurrentQIndex] = useState(15); // Default to Q16 (index 15) to showcase the comprehensive math question
+  const [currentQIndex, setCurrentQIndex] = useState(15);
   const [questionList, setQuestionList] = useState(questions);
   
-  // Timer state (starts at 1 hour 28 mins 45 secs = 5325 seconds)
+  // Timer state
   const [secondsLeft, setSecondsLeft] = useState(5325);
   const [isTimerRunning, setIsTimerRunning] = useState(true);
 
@@ -14,6 +14,15 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
   // Candidate draft input for current question
   const currentQ = questionList[currentQIndex] || questionList[0];
   const [candidateDraft, setCandidateDraft] = useState(currentQ.userAnswer || '');
+  
+  // Real AI Scribe result state
+  const [isScribing, setIsScribing] = useState(false);
+  const [scribedLatex, setScribedLatex] = useState(currentQ.aiTranscription || '');
+  const [stepScores, setStepScores] = useState(currentQ.stepScores || [
+    { step: "步骤 1: 准确应用分部积分设元与通式展开", score: "+3分 (已达成)" },
+    { step: "步骤 2: 假分式化简长除法分解拆项", score: "+3分 (已达成)" },
+    { step: "步骤 3: 逐项定常数积分与常数 C 补齐", score: "+4分 (已达成)" }
+  ]);
 
   // Scratchpad toggle
   const [showScratchpad, setShowScratchpad] = useState(false);
@@ -26,19 +35,14 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
   // Sync draft when switching question
   useEffect(() => {
     setCandidateDraft(questionList[currentQIndex]?.userAnswer || '');
+    setScribedLatex(questionList[currentQIndex]?.aiTranscription || '');
   }, [currentQIndex]);
 
   // Countdown timer effect
   useEffect(() => {
     if (!isTimerRunning) return;
     const interval = setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
+      setSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
     return () => clearInterval(interval);
   }, [isTimerRunning]);
@@ -61,6 +65,38 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
           : q
       )
     );
+  };
+
+  // Call real model_core AI scribe
+  const handleTriggerAIScribe = async () => {
+    if (!candidateDraft.trim()) {
+      alert('请先在左侧输入考生的速记或草稿内容。');
+      return;
+    }
+    setIsScribing(true);
+    try {
+      const res = await fetch('/api/model/ai-scribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rawDraft: candidateDraft,
+          mathProblem: `${currentQ.prompt} ${currentQ.mathExpression || ''}`
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        if (data.data.latex) setScribedLatex(data.data.latex);
+        if (data.data.stepScores && data.data.stepScores.length > 0) {
+          setStepScores(data.data.stepScores);
+        }
+      } else {
+        alert(data.error || '未检测到配置的 API Key，已保留当前预设规范排版。请前往「系统设置」输入 API Key。');
+      }
+    } catch (err) {
+      alert(`AI 代笔调用失败: ${err.message}`);
+    } finally {
+      setIsScribing(false);
+    }
   };
 
   const handleToggleFullscreen = () => {
@@ -163,7 +199,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
 
       {/* Main Focus Runner Layout */}
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-margin-tablet lg:px-margin-desktop py-space-xl flex flex-col space-y-space-xl pb-24">
-        {/* Navigation Sheet Pill Bar (答题卡横向快速切换) */}
+        {/* Navigation Sheet Pill Bar */}
         <section className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex items-center justify-between gap-space-md overflow-x-auto">
           <div className="flex items-center gap-space-sm shrink-0">
             <span className="font-label-mono text-label-mono text-on-surface-variant font-semibold">答题卡矩阵:</span>
@@ -365,7 +401,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                   </span>
                   <div className="flex-1 text-body-sm font-body-sm leading-relaxed">
                     <span className="font-semibold text-tertiary">作答诚信与监考边界声明：</span>
-                    本工作台开启的「AI 规范代笔」仅将考生的口述演录、凌乱草稿与简写符号转录为标准的 LaTeX 数学推导与分步排版。系统内嵌模型已被强制切断题目解答、逻辑修正与作弊引导能力，任何逻辑错误均会被原样忠实保留，确保考核客观性与独立性。
+                    本工作台开启的「AI 规范代笔」由底层 <code>model_core</code> 调度。仅将考生的口述演录、凌乱草稿与简写符号转录为标准的 LaTeX 数学推导与分步排版。系统内嵌模型已被强制切断题目解答、逻辑修正与作弊引导能力，任何逻辑错误均会被原样忠实保留。
                   </div>
                 </div>
 
@@ -396,10 +432,18 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                     />
 
                     <div className="flex items-center justify-between pt-2">
-                      <div className="flex items-center space-x-2 text-on-surface-variant font-label-sm text-label-sm">
-                        <span className="material-symbols-outlined text-[16px] text-secondary">sync</span>
-                        <span>智能引擎自检排印中，实时对应分步赋分标签</span>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={handleTriggerAIScribe}
+                        disabled={isScribing}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary text-on-primary font-label-md rounded-lg shadow-xs hover:bg-primary-container transition cursor-pointer disabled:opacity-50"
+                      >
+                        <span className={`material-symbols-outlined text-[16px] ${isScribing ? 'animate-spin' : ''}`}>
+                          {isScribing ? 'progress_activity' : 'auto_fix_high'}
+                        </span>
+                        <span>{isScribing ? 'AI 转录排版中...' : '⚡ 调用 model_core 规范转录'}</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => handleUpdateAnswer('')}
@@ -426,15 +470,16 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                       </div>
 
                       {/* Mathematical Render Container */}
-                      <div className="mt-space-sm p-space-md bg-surface-container-low rounded-lg font-mono text-code-md space-y-space-sm border border-outline-variant/30 overflow-x-auto">
-                        <div className="text-primary font-semibold">
-                          ∫ x² ln(x+1) dx
-                        </div>
-                        <div className="text-on-surface pl-4 border-l-2 border-primary/30 space-y-1">
-                          <p>= (x³/3) ln(x+1) - (1/3) ∫ [x³ / (x+1)] dx</p>
-                          <p>= (x³/3) ln(x+1) - (1/3) ∫ (x² - x + 1 - 1/(x+1)) dx</p>
-                          <p>= (x³/3) ln(x+1) - (x³/9) + (x²/6) - (x/3) + (1/3) ln(x+1) + C</p>
-                        </div>
+                      <div className="mt-space-sm p-space-md bg-surface-container-low rounded-lg font-mono text-code-md space-y-space-sm border border-outline-variant/30 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                        {scribedLatex ? (
+                          <div className="text-on-surface font-mono">
+                            {scribedLatex}
+                          </div>
+                        ) : (
+                          <div className="text-on-surface-variant italic">
+                            在左侧输入草稿推导后，点击「调用 model_core 规范转录」即可在此生成整洁的 LaTeX 数学推导卷面。
+                          </div>
+                        )}
                       </div>
 
                       {/* Step-by-Step Scoring Checklist */}
@@ -442,11 +487,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                         <span className="font-label-sm text-label-sm text-on-surface-variant font-semibold">
                           AI 阅卷踩分点预估自核：
                         </span>
-                        {(currentQ.stepScores || [
-                          { step: "步骤 1: 准确应用分部积分设元与通式展开", score: "+3分 (已达成)" },
-                          { step: "步骤 2: 假分式化简长除法分解拆项", score: "+3分 (已达成)" },
-                          { step: "步骤 3: 逐项定常数积分与常数 C 补齐", score: "+4分 (已达成)" }
-                        ]).map((item, idx) => (
+                        {stepScores.map((item, idx) => (
                           <div
                             key={idx}
                             className="flex items-center justify-between p-2 rounded bg-surface-container-lowest border border-outline-variant/20 font-label-sm text-label-sm"
@@ -464,7 +505,8 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                     <div className="pt-2 flex justify-end">
                       <button
                         type="button"
-                        onClick={() => alert('公式变量与符号渲染格式已优化微调。')}
+                        onClick={handleTriggerAIScribe}
+                        disabled={isScribing}
                         className="inline-flex items-center gap-1 px-space-md py-1 bg-surface text-primary border border-primary-fixed-dim hover:bg-surface-container font-label-md text-label-md rounded transition cursor-pointer"
                       >
                         <span className="material-symbols-outlined text-[16px]">tune</span>
