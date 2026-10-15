@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@100..900&display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"primary-fixed-dim":"#c3c0ff","inverse-surface":"#283044","surface-container":"#eaedff","tertiary-fixed-dim":"#ffb3b6","secondary-container":"#82f5c1","outline":"#777587","surface-container-lowest":"#ffffff","on-tertiary-fixed":"#40000c","on-tertiary-fixed-variant":"#920028","on-primary-fixed-variant":"#3323cc","secondary-fixed":"#85f8c4","secondary":"#006c4a","surface-bright":"#faf8ff","on-background":"#131b2e","error":"#ba1a1a","on-error-container":"#93000a","surface-container-high":"#e2e7ff","tertiary-fixed":"#ffdada","surface-container-highest":"#dae2fd","primary":"#3525cd","surface-variant":"#dae2fd","secondary-fixed-dim":"#68dba9","surface-tint":"#4d44e3","on-surface-variant":"#464555","on-tertiary-container":"#ffd0d2","on-primary-fixed":"#0f0069","background":"#faf8ff","on-tertiary":"#ffffff","on-surface":"#131b2e","on-secondary-fixed":"#002114","tertiary-container":"#c20038","on-secondary":"#ffffff","on-error":"#ffffff","primary-fixed":"#e2dfff","outline-variant":"#c7c4d8","tertiary":"#950029","error-container":"#ffdad6","surface-container-low":"#f2f3ff","inverse-on-surface":"#eef0ff","primary-container":"#4f46e5","inverse-primary":"#c3c0ff","surface-dim":"#d2d9f4","on-secondary-fixed-variant":"#005137","on-primary-container":"#dad7ff","on-primary":"#ffffff","surface":"#faf8ff","on-secondary-container":"#00714e"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"margin-tablet":"1.5rem","space-xs":"0.25rem","space-xl":"1.5rem","space-md":"0.75rem","gutter-desktop":"1.5rem","space-lg":"1rem","margin-desktop":"2rem","gutter":"1rem","space-2xl":"2rem","space-sm":"0.5rem","margin":"1rem"},"fontFamily":{"headline-xl":["Geist"],"label-mono":["JetBrains Mono"],"label-md":["Geist"],"code-md":["JetBrains Mono"],"body-lg":["Geist"],"headline-xl-mobile":["Geist"],"body-sm":["Geist"],"code-sm":["JetBrains Mono"],"headline-md":["Geist"],"label-sm":["Geist"],"headline-lg":["Geist"],"headline-sm":["Geist"],"body-md":["Geist"]},"fontSize":{"headline-xl":["32px",{"lineHeight":"40px","letterSpacing":"-0.025em","fontWeight":"600"}],"label-mono":["11px",{"lineHeight":"14px","letterSpacing":"0.03em","fontWeight":"500"}],"label-md":["13px",{"lineHeight":"18px","letterSpacing":"0em","fontWeight":"500"}],"code-md":["13px",{"lineHeight":"20px","letterSpacing":"-0.01em","fontWeight":"400"}],"body-lg":["15px",{"lineHeight":"24px","letterSpacing":"-0.005em","fontWeight":"400"}],"headline-xl-mobile":["26px",{"lineHeight":"34px","letterSpacing":"-0.02em","fontWeight":"600"}],"body-sm":["12px",{"lineHeight":"18px","letterSpacing":"0em","fontWeight":"400"}],"code-sm":["11px",{"lineHeight":"16px","letterSpacing":"0.02em","fontWeight":"500"}],"headline-md":["20px",{"lineHeight":"28px","letterSpacing":"-0.015em","fontWeight":"600"}],"label-sm":["11px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"500"}],"headline-lg":["24px",{"lineHeight":"32px","letterSpacing":"-0.02em","fontWeight":"600"}],"headline-sm":["16px",{"lineHeight":"24px","letterSpacing":"-0.01em","fontWeight":"600"}],"body-md":["13px",{"lineHeight":"20px","letterSpacing":"0em","fontWeight":"400"}]}}}}</script></head><body class="bg-surface font-body-md text-body-md text-on-surface antialiased min-h-screen flex flex-col justify-between"><header class="fixed top-0 w-full z-50 bg-surface-container-lowest/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-14 w-full px-margin-desktop flex items-center justify-between"><div class="flex items-center gap-space-2xl"><a class="flex items-center gap-space-sm group" data-path="dashboard" href="#"><div class="w-7 h-7 rounded bg-primary-container flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">neurology</span></div><span class="font-headline-sm text-headline-sm text-on-surface tracking-tight font-semibold">ExamCraft <span class="text-primary-container">AI</span></span></a><nav class="hidden md:flex items-center gap-space-xs" data-active-classes="bg-surface-container text-primary font-semibold rounded-lg"><a class="px-space-md py-space-xs rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors" data-path="dashboard" href="#">控制面板</a><a aria-current="page" class="px-space-md py-space-xs transition-colors bg-surface-container text-primary font-semibold rounded-lg" data-path="exam-generator" href="#">智能组卷</a><a class="px-space-md py-space-xs rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors" data-path="paper-library" href="#">试卷库</a><a class="px-space-md py-space-xs rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors" data-path="question-bank" href="#">我的题集</a><a class="px-space-md py-space-xs rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors" data-path="settings" href="#">系统设置</a></nav></div><div class="flex items-center gap-space-lg"><div class="hidden sm:flex items-center gap-space-xs px-space-sm py-1 bg-surface-container-low rounded text-on-surface-variant font-label-mono text-label-mono"><span>WORKSTATION v2.4</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="w-full pt-14 bg-surface flex-1"><div class="flex flex-col w-full relative min-h-full">
+<!-- Subtle Technical Matrix Background Layer -->
+<div class="absolute inset-0 pointer-events-none overflow-hidden select-none">
+<div class="absolute -top-32 left-1/4 w-[640px] h-[360px] bg-primary/5 rounded-full blur-[120px]"></div>
+<div class="absolute top-48 right-10 w-[420px] h-[300px] bg-secondary-container/30 rounded-full blur-[100px]"></div>
+<svg class="w-full h-full opacity-[0.035]" height="100%" width="100%" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<pattern height="32" id="workbench-grid" patternunits="userSpaceOnUse" width="32">
+<circle cx="2" cy="2" fill="#3525cd" r="1"></circle>
+<path d="M 32 0 L 0 0 0 32" fill="none" stroke="#131b2e" stroke-dasharray="2,6" stroke-width="0.5"></path>
+</pattern>
+</defs>
+<rect fill="url(#workbench-grid)" height="100%" width="100%"></rect>
+</svg>
+</div>
+<div class="relative z-10 w-full max-w-[1400px] mx-auto px-margin-desktop py-space-xl flex flex-col gap-space-2xl">
+<!-- Top Header & Workstation Telemetry -->
+<section class="flex flex-col lg:flex-row lg:items-end justify-between gap-space-lg">
+<div class="space-y-space-xs max-w-2xl">
+<div class="inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container text-primary font-label-mono text-label-mono tracking-wider">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+<span>INTELLIGENT DUAL-ENGINE WORKSPACE</span>
+</div>
+<h1 class="font-headline-xl text-headline-xl text-on-surface tracking-tight font-semibold">
+          双入口智能组卷工作台
+        </h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant">
+          选择组卷方式，即刻开启 AI 赋能的沉浸式真实考场作答。支持严谨复刻历年真题结构或动态定制题量矩阵。
+        </p>
+</div>
+<!-- Quick Telemetry Chips -->
+<div class="flex items-center gap-space-md font-label-mono text-label-mono">
+<div class="px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface">
+<span class="material-symbols-outlined text-secondary text-[16px]">verified</span>
+<span>OCR 排版解析度 99.8%</span>
+</div>
+<div class="px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface">
+<span class="material-symbols-outlined text-primary text-[16px]">bolt</span>
+<span>生成引擎响应 < 1.2s</span>
+</div>
+</div>
+</section>
+<!-- Main Dual Entry Deck -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-space-xl items-stretch">
+<!-- Card 1: 1:1 True Exam PDF Clone -->
+<section class="relative group rounded-xl bg-surface-container-lowest shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between overflow-hidden p-space-xl cursor-pointer" id="card-clone">
+<div class="absolute top-0 left-0 right-0 h-1 bg-surface-container-highest group-[.active]:bg-primary transition-colors duration-200"></div>
+<div>
+<!-- Top Row Status -->
+<div class="flex items-center justify-between pb-space-md">
+<div class="inline-flex items-center gap-space-xs px-space-sm py-1 rounded bg-secondary/10 text-secondary font-label-mono text-label-mono font-medium">
+<span class="material-symbols-outlined text-[14px]">auto_fix_high</span>
+<span>100% 题型排版原貌保留</span>
+</div>
+<div class="w-6 h-6 rounded-full bg-surface-container flex items-center justify-center text-primary transition-transform group-hover:scale-110">
+<span class="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+</div>
+</div>
+<!-- Title Block -->
+<div class="space-y-space-xs">
+<h2 class="font-headline-lg text-headline-lg text-on-surface flex items-center gap-space-sm">
+<span>完整真题 PDF 1:1 原样精确克隆</span>
+</h2>
+<p class="font-body-md text-body-md text-on-surface-variant">
+              支持上传各学期标准真题试卷。自适应多模态视觉模型，原位提炼考卷标题、排版规范、分值规则与数学公式。
+            </p>
+</div>
+<!-- Drag & Drop Zone -->
+<div class="mt-space-lg rounded-xl bg-surface-container-low p-space-lg text-center flex flex-col items-center justify-center transition-colors hover:bg-surface-container group/drop">
+<div class="w-12 h-12 rounded-full bg-surface-container-lowest shadow-sm flex items-center justify-center text-primary group-hover/drop:scale-105 transition-transform">
+<span class="material-symbols-outlined text-[26px]">cloud_upload</span>
+</div>
+<p class="mt-space-sm font-headline-sm text-headline-sm text-on-surface font-semibold">拖拽试卷文件至此处，或 <span class="text-primary hover:underline cursor-pointer">浏览本地文件</span></p>
+<p class="font-label-sm text-label-sm text-on-surface-variant mt-1">支持格式：.pdf, .docx, .tex (最大 35MB)</p>
+</div>
+<!-- Parsed File Preview Panel -->
+<div class="mt-space-md rounded-lg bg-surface-container-low p-space-md flex flex-col gap-space-sm">
+<div class="flex items-start justify-between gap-space-sm">
+<div class="flex items-center gap-space-sm min-w-0">
+<div class="w-8 h-8 rounded bg-error-container text-on-error-container flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[18px]">description</span>
+</div>
+<div class="min-w-0">
+<p class="font-label-md text-label-md text-on-surface truncate font-semibold">2024届全国高等数学期末考试统考卷A.pdf</p>
+<p class="font-label-mono text-label-mono text-on-surface-variant">2.4MB • 已完成公式向量转录</p>
+</div>
+</div>
+<span class="inline-flex items-center px-space-xs py-0.5 rounded bg-surface-container text-primary font-label-mono text-code-sm">解析完毕</span>
+</div>
+<!-- Parsing Metrics & Meta Bar -->
+<div class="bg-surface-container-lowest rounded p-space-sm space-y-space-xs">
+<div class="flex justify-between font-label-mono text-code-sm">
+<span class="text-on-surface-variant">结构提取完成度</span>
+<span class="text-secondary font-semibold">100% (23 题完全对齐)</span>
+</div>
+<div class="w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
+<div class="w-full h-full bg-secondary transition-all duration-700"></div>
+</div>
+<div class="pt-1 grid grid-cols-3 gap-space-xs text-center font-label-mono text-label-mono text-on-surface">
+<div class="py-1 rounded bg-surface-container-low">选择题 <span class="font-semibold text-primary">8 题</span></div>
+<div class="py-1 rounded bg-surface-container-low">填空题 <span class="font-semibold text-primary">5 题</span></div>
+<div class="py-1 rounded bg-surface-container-low">解答题 <span class="font-semibold text-primary">4 题</span></div>
+</div>
+</div>
+<!-- Real Exam Attribute Preview -->
+<div class="p-space-sm rounded bg-surface-container-lowest flex items-center justify-between text-on-surface-variant font-label-sm text-label-sm">
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-primary">format_shapes</span>
+                双栏排版 + 答题卡规范
+              </span>
+<span class="flex items-center gap-1 font-label-mono">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">timer</span>
+                建议 120min
+              </span>
+<span class="flex items-center gap-1 font-label-mono font-semibold text-on-surface">
+                满分 100 分
+              </span>
+</div>
+</div>
+</div>
+<!-- Action CTA -->
+<div class="pt-space-xl mt-space-md">
+<button class="w-full h-11 px-space-lg rounded-lg bg-primary-container hover:bg-primary text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99]" type="button">
+<span class="material-symbols-outlined text-[20px]">play_circle</span>
+<span>确认此试卷并进入考场</span>
+</button>
+</div>
+</section>
+<!-- Card 2: Custom Parameterized Spec Engine -->
+<section class="relative group rounded-xl bg-surface-container-lowest shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between overflow-hidden p-space-xl cursor-pointer" id="card-custom">
+<div class="absolute top-0 left-0 right-0 h-1 bg-surface-container-highest group-[.active]:bg-primary transition-colors duration-200"></div>
+<div>
+<!-- Top Row Status -->
+<div class="flex items-center justify-between pb-space-md">
+<div class="inline-flex items-center gap-space-xs px-space-sm py-1 rounded bg-primary/10 text-primary font-label-mono text-label-mono font-medium">
+<span class="material-symbols-outlined text-[14px]">tune</span>
+<span>自定义分值与题型矩阵</span>
+</div>
+<div class="w-6 h-6 rounded-full bg-surface-container flex items-center justify-center text-primary transition-transform group-hover:scale-110">
+<span class="material-symbols-outlined text-[16px]">dashboard_customize</span>
+</div>
+</div>
+<!-- Title Block -->
+<div class="space-y-space-xs">
+<h2 class="font-headline-lg text-headline-lg text-on-surface flex items-center gap-space-sm">
+<span>自由规格智能生成</span>
+</h2>
+<p class="font-body-md text-body-md text-on-surface-variant">
+              无原题模板时，自主调控题量分布、分数权重与测试考纲。AI 将根据矩阵智能选拔符合要求的优质题目。
+            </p>
+</div>
+<!-- Exam Meta Config -->
+<div class="mt-space-lg space-y-space-sm">
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-1">测验标题命名</label>
+<div class="relative">
+<input class="w-full h-9 px-space-md bg-surface-container-low rounded font-body-md text-body-md text-on-surface focus:outline-none focus:bg-surface-container-lowest transition-colors" type="text" value="《概率论与数理统计阶段模拟测验》"/>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant absolute right-space-sm top-2.5">edit</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-space-md">
+<div class="bg-surface-container-low rounded p-space-sm flex items-center justify-between">
+<div>
+<span class="block font-label-sm text-label-sm text-on-surface-variant">试卷设定总分</span>
+<span class="font-label-mono text-headline-sm font-semibold text-on-surface">100 <span class="text-body-sm font-normal text-on-surface-variant">PTS</span></span>
+</div>
+<div class="flex gap-1">
+<button class="w-6 h-6 rounded bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container">-</button>
+<button class="w-6 h-6 rounded bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container">+</button>
+</div>
+</div>
+<div class="bg-surface-container-low rounded p-space-sm flex items-center justify-between">
+<div>
+<span class="block font-label-sm text-label-sm text-on-surface-variant">建议限时时长</span>
+<span class="font-label-mono text-headline-sm font-semibold text-on-surface">120 <span class="text-body-sm font-normal text-on-surface-variant">MIN</span></span>
+</div>
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant">hourglass_top</span>
+</div>
+</div>
+</div>
+<!-- Type & Scoring Matrix Breakdown -->
+<div class="mt-space-md bg-surface-container-low rounded-lg p-space-md space-y-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface font-semibold">题型分布与单题分值分配表</span>
+<span class="px-space-xs py-0.5 rounded bg-secondary/15 text-secondary font-label-mono text-label-mono flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                已分配 100/100 分 (平衡)
+              </span>
+</div>
+<div class="space-y-space-xs font-label-mono text-label-mono">
+<!-- Item 1 -->
+<div class="bg-surface-container-lowest rounded p-space-sm flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center text-[11px]">1</span>
+<span class="text-on-surface font-medium">单选题</span>
+</div>
+<div class="flex items-center gap-space-md text-on-surface-variant">
+<span>8 题 × 5 分</span>
+<span class="text-on-surface font-semibold">= 40 分</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-primary">40%</span>
+</div>
+</div>
+<!-- Item 2 -->
+<div class="bg-surface-container-lowest rounded p-space-sm flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center text-[11px]">2</span>
+<span class="text-on-surface font-medium">填空题</span>
+</div>
+<div class="flex items-center gap-space-md text-on-surface-variant">
+<span>5 题 × 4 分</span>
+<span class="text-on-surface font-semibold">= 20 分</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-primary">20%</span>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="bg-surface-container-lowest rounded p-space-sm flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center text-[11px]">3</span>
+<span class="text-on-surface font-medium">计算解答题</span>
+</div>
+<div class="flex items-center gap-space-md text-on-surface-variant">
+<span>4 题 × 10 分</span>
+<span class="text-on-surface font-semibold">= 40 分</span>
+<span class="px-1.5 py-0.5 rounded bg-surface-container text-primary">40%</span>
+</div>
+</div>
+</div>
+<!-- Difficulty Capsule Selector -->
+<div class="pt-1">
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-1.5">试题难度梯度倾向</label>
+<div class="grid grid-cols-3 gap-space-xs font-label-md text-label-md text-center">
+<button class="py-1.5 rounded bg-surface-container-lowest text-on-surface-variant hover:text-on-surface transition-colors" type="button">基础稳固</button>
+<button class="py-1.5 rounded bg-primary text-on-primary font-semibold shadow-sm" type="button">进阶拓展</button>
+<button class="py-1.5 rounded bg-surface-container-lowest text-on-surface-variant hover:text-on-surface transition-colors" type="button">考研冲刺</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Action CTA -->
+<div class="pt-space-xl mt-space-md">
+<button class="w-full h-11 px-space-lg rounded-lg bg-inverse-surface hover:bg-on-background text-inverse-on-surface font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99]" type="button">
+<span class="material-symbols-outlined text-[20px]">psychology</span>
+<span>智能生成新卷并进入考场</span>
+</button>
+</div>
+</section>
+</div>
+<!-- Recent Workspace Papers & Artifacts Row -->
+<section class="space-y-space-md pt-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary text-[20px]">history_edu</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">近期生成的试卷快速入口</h3>
+</div>
+<a class="font-label-md text-label-md text-primary hover:underline flex items-center gap-0.5" href="#">
+<span>查看试卷库全集 (48份)</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</a>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-space-md">
+<!-- Quick Card 1 -->
+<div class="rounded-xl bg-surface-container-lowest p-space-md shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group cursor-pointer">
+<div class="space-y-space-xs">
+<div class="flex items-center justify-between">
+<span class="px-space-xs py-0.5 rounded bg-surface-container text-on-primary-fixed-variant font-label-mono text-label-mono">1:1 真题复刻</span>
+<span class="font-label-mono text-label-mono text-on-surface-variant">2小时前</span>
+</div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface group-hover:text-primary transition-colors font-semibold truncate">
+              《线性代数期中摸底卷》
+            </h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant">全卷 21 题 • 满分 100 分 • 包含特征值专项</p>
+</div>
+<div class="mt-space-md pt-space-xs flex items-center justify-between font-label-mono text-label-mono text-on-surface-variant">
+<span class="text-secondary flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>已就绪</span>
+<span class="group-hover:translate-x-1 transition-transform text-primary font-semibold flex items-center">开考 →</span>
+</div>
+</div>
+<!-- Quick Card 2 -->
+<div class="rounded-xl bg-surface-container-lowest p-space-md shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group cursor-pointer">
+<div class="space-y-space-xs">
+<div class="flex items-center justify-between">
+<span class="px-space-xs py-0.5 rounded bg-surface-container-high text-primary font-label-mono text-label-mono">规格生成</span>
+<span class="font-label-mono text-label-mono text-on-surface-variant">昨天 19:42</span>
+</div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface group-hover:text-primary transition-colors font-semibold truncate">
+              《微积分核心考点特训》
+            </h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant">全卷 15 题 • 满分 100 分 • 侧重多元微分</p>
+</div>
+<div class="mt-space-md pt-space-xs flex items-center justify-between font-label-mono text-label-mono text-on-surface-variant">
+<span class="text-secondary flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>已就绪</span>
+<span class="group-hover:translate-x-1 transition-transform text-primary font-semibold flex items-center">开考 →</span>
+</div>
+</div>
+<!-- Quick Card 3 -->
+<div class="rounded-xl bg-surface-container-lowest p-space-md shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between group cursor-pointer">
+<div class="space-y-space-xs">
+<div class="flex items-center justify-between">
+<span class="px-space-xs py-0.5 rounded bg-surface-container-high text-primary font-label-mono text-label-mono">规格生成</span>
+<span class="font-label-mono text-label-mono text-on-surface-variant">3天前</span>
+</div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface group-hover:text-primary transition-colors font-semibold truncate">
+              《离散数学图论专项强训》
+            </h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant">全卷 18 题 • 满分 100 分 • 包含最短路证明</p>
+</div>
+<div class="mt-space-md pt-space-xs flex items-center justify-between font-label-mono text-label-mono text-on-surface-variant">
+<span class="text-secondary flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>已就绪</span>
+<span class="group-hover:translate-x-1 transition-transform text-primary font-semibold flex items-center">开考 →</span>
+</div>
+</div>
+<!-- Quick Card 4: Template Bank -->
+<div class="rounded-xl bg-surface-container-low p-space-md flex flex-col justify-between hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="space-y-space-xs">
+<div class="flex items-center justify-between">
+<span class="px-space-xs py-0.5 rounded bg-surface-container-lowest text-on-surface-variant font-label-mono text-label-mono">预设蓝图</span>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">bookmark</span>
+</div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface font-semibold truncate">
+              导入考研数学一真题标准模版
+            </h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant">内嵌教育部考试中心历年官方分值排版规范</p>
+</div>
+<div class="mt-space-md pt-space-xs flex items-center justify-between font-label-mono text-label-mono text-primary font-medium">
+<span>一键套用配比</span>
+<span class="material-symbols-outlined text-[18px]">add_circle</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Interactive State Logic -->
+<script>
+    (function() {
+      const cardClone = document.getElementById('card-clone');
+      const cardCustom = document.getElementById('card-custom');
+
+      function setActive(card) {
+        [cardClone, cardCustom].forEach(c => {
+          if (c) {
+            c.classList.remove('active', 'ring-2', 'ring-primary', 'bg-surface-container-lowest');
+            c.classList.add('bg-surface-container-lowest');
+          }
+        });
+        if (card) {
+          card.classList.add('active');
+        }
+      }
+
+      if (cardClone && cardCustom) {
+        cardClone.addEventListener('click', function(e) {
+          setActive(cardClone);
+        });
+        cardCustom.addEventListener('click', function(e) {
+          setActive(cardCustom);
+        });
+        // Default highlight clone card as active focus
+        setActive(cardClone);
+      }
+    })();
+  </script>
+</div></main><footer class="w-full bg-surface-container-lowest shadow-[0_-1px_6px_rgba(0,0,0,0.02)] py-space-lg"><div class="w-full px-margin-desktop flex flex-col sm:flex-row items-center justify-between gap-space-sm"><div class="flex items-center gap-space-md font-label-mono text-label-mono text-on-surface-variant"><span>© 2025 EXAMCRAFT AI ARCHITECTURE. ALL RIGHTS RESERVED.</span><span class="hidden md:inline">•</span><span class="hidden md:inline">PRECISION EVALUATION ENGINE</span></div><div class="flex items-center gap-space-xl font-label-sm text-label-sm text-on-surface-variant"><span class="flex items-center gap-space-xs"><span class="w-2 h-2 rounded-full bg-secondary"></span> 服务集群正常运行</span><span>延迟 14ms</span></div></div></footer></body></html>

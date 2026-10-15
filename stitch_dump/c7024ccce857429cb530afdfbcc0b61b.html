@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_blank" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@100..900&display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"primary-fixed-dim":"#c3c0ff","inverse-surface":"#283044","surface-container":"#eaedff","tertiary-fixed-dim":"#ffb3b6","secondary-container":"#82f5c1","outline":"#777587","surface-container-lowest":"#ffffff","on-tertiary-fixed":"#40000c","on-tertiary-fixed-variant":"#920028","on-primary-fixed-variant":"#3323cc","secondary-fixed":"#85f8c4","secondary":"#006c4a","surface-bright":"#faf8ff","on-background":"#131b2e","error":"#ba1a1a","on-error-container":"#93000a","surface-container-high":"#e2e7ff","tertiary-fixed":"#ffdada","surface-container-highest":"#dae2fd","primary":"#3525cd","surface-variant":"#dae2fd","secondary-fixed-dim":"#68dba9","surface-tint":"#4d44e3","on-surface-variant":"#464555","on-tertiary-container":"#ffd0d2","on-primary-fixed":"#0f0069","background":"#faf8ff","on-tertiary":"#ffffff","on-surface":"#131b2e","on-secondary-fixed":"#002114","tertiary-container":"#c20038","on-secondary":"#ffffff","on-error":"#ffffff","primary-fixed":"#e2dfff","outline-variant":"#c7c4d8","tertiary":"#950029","error-container":"#ffdad6","surface-container-low":"#f2f3ff","inverse-on-surface":"#eef0ff","primary-container":"#4f46e5","inverse-primary":"#c3c0ff","surface-dim":"#d2d9f4","on-secondary-fixed-variant":"#005137","on-primary-container":"#dad7ff","on-primary":"#ffffff","surface":"#faf8ff","on-secondary-container":"#00714e"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"margin-tablet":"1.5rem","space-xs":"0.25rem","space-xl":"1.5rem","space-md":"0.75rem","gutter-desktop":"1.5rem","space-lg":"1rem","margin-desktop":"2rem","gutter":"1rem","space-2xl":"2rem","space-sm":"0.5rem","margin":"1rem"},"fontFamily":{"headline-xl":["Geist"],"label-mono":["JetBrains Mono"],"label-md":["Geist"],"code-md":["JetBrains Mono"],"body-lg":["Geist"],"headline-xl-mobile":["Geist"],"body-sm":["Geist"],"code-sm":["JetBrains Mono"],"headline-md":["Geist"],"label-sm":["Geist"],"headline-lg":["Geist"],"headline-sm":["Geist"],"body-md":["Geist"]},"fontSize":{"headline-xl":["32px",{"lineHeight":"40px","letterSpacing":"-0.025em","fontWeight":"600"}],"label-mono":["11px",{"lineHeight":"14px","letterSpacing":"0.03em","fontWeight":"500"}],"label-md":["13px",{"lineHeight":"18px","letterSpacing":"0em","fontWeight":"500"}],"code-md":["13px",{"lineHeight":"20px","letterSpacing":"-0.01em","fontWeight":"400"}],"body-lg":["15px",{"lineHeight":"24px","letterSpacing":"-0.005em","fontWeight":"400"}],"headline-xl-mobile":["26px",{"lineHeight":"34px","letterSpacing":"-0.02em","fontWeight":"600"}],"body-sm":["12px",{"lineHeight":"18px","letterSpacing":"0em","fontWeight":"400"}],"code-sm":["11px",{"lineHeight":"16px","letterSpacing":"0.02em","fontWeight":"500"}],"headline-md":["20px",{"lineHeight":"28px","letterSpacing":"-0.015em","fontWeight":"600"}],"label-sm":["11px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"500"}],"headline-lg":["24px",{"lineHeight":"32px","letterSpacing":"-0.02em","fontWeight":"600"}],"headline-sm":["16px",{"lineHeight":"24px","letterSpacing":"-0.01em","fontWeight":"600"}],"body-md":["13px",{"lineHeight":"20px","letterSpacing":"0em","fontWeight":"400"}]}}}}</script></head><body class="bg-surface font-body-md text-body-md text-on-surface antialiased min-h-screen flex flex-col"><main class="w-full flex-1 flex flex-col"><div class="flex flex-col w-full">
+<!-- Top Floating Minimalist Exam Status Strip -->
+<header class="sticky top-0 z-40 w-full bg-surface-container-lowest/95 backdrop-blur-md border-b border-outline-variant/30 px-margin-desktop py-space-sm flex items-center justify-between shadow-sm">
+<!-- Left: Exam Title & Secure Integrity Status -->
+<div class="flex items-center space-x-space-md min-w-0">
+<div class="flex items-center space-x-space-xs text-primary font-headline-sm text-headline-sm">
+<span class="material-symbols-outlined text-primary text-[20px]" style="font-variation-settings: 'FILL' 1;">terminal</span>
+<span class="tracking-tight text-on-surface font-headline-sm truncate max-w-xs md:max-w-md">全国高等数学模拟冲刺卷 #04</span>
+</div>
+<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-secondary-container/30 text-secondary font-label-mono text-label-mono border border-secondary-container">
+<span class="inline-block w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"></span>
+<span>防作弊闭卷监考模式</span>
+</span>
+</div>
+<!-- Center: Global Progress Bar & Current Type -->
+<div class="hidden lg:flex flex-col items-center justify-center min-w-[260px]">
+<div class="flex items-center justify-between w-full mb-1">
+<span class="text-on-surface-variant font-label-mono text-label-mono">答题卡填涂: 7 / 16</span>
+<span class="px-1.5 py-0.2 bg-surface-container text-on-surface-variant font-label-mono text-label-mono rounded">综合解答题</span>
+</div>
+<div class="w-full bg-surface-container h-1.5 rounded-full overflow-hidden">
+<div class="bg-primary h-full rounded-full transition-all duration-300" style="width: 43.75%;"></div>
+</div>
+</div>
+<!-- Right: Telemetry & Actions -->
+<div class="flex items-center space-x-space-md">
+<!-- Countdown High-Fidelity Timer -->
+<div class="flex items-center space-x-1.5 px-space-md py-1 bg-surface-container-low rounded-lg border border-outline-variant/40">
+<span class="material-symbols-outlined text-tertiary text-[18px]">timer</span>
+<span class="font-code-md text-code-md font-semibold text-tertiary tracking-wider" id="exam-timer">01:28:45</span>
+</div>
+<!-- Quick Scratchpad Toggle -->
+<button class="hidden sm:inline-flex items-center space-x-1 px-space-md py-1 bg-surface text-on-surface-variant hover:text-on-surface font-label-md text-label-md rounded border border-outline-variant/50 hover:bg-surface-container transition" id="toggle-scratchpad-btn">
+<span class="material-symbols-outlined text-[17px]">draw</span>
+<span>便签草稿纸</span>
+</button>
+<!-- Focus Mode Pill -->
+<div class="hidden xl:flex items-center space-x-1 px-2 py-1 text-on-surface-variant font-label-mono text-label-mono">
+<span class="material-symbols-outlined text-[16px] text-primary">fullscreen</span>
+<span>全屏专注</span>
+</div>
+<!-- Submit Exam Button -->
+<button class="inline-flex items-center space-x-1 px-space-lg py-1.5 bg-primary hover:bg-primary-container text-on-primary font-label-md text-label-md rounded-lg shadow-sm transition active:scale-95">
+<span class="material-symbols-outlined text-[18px]">check_circle</span>
+<span>交卷并提交评测</span>
+</button>
+</div>
+</header>
+<!-- Main Pure-Focus Runner Layout -->
+<main class="w-full max-w-7xl mx-auto px-margin-tablet lg:px-margin-desktop py-space-xl flex flex-col space-y-space-xl">
+<!-- Question Header Card -->
+<div class="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 flex flex-col space-y-space-md">
+<div class="flex items-center justify-between pb-space-xs border-b border-surface-container">
+<div class="flex items-center space-x-space-md">
+<span class="px-2.5 py-1 bg-primary-fixed text-on-primary-fixed font-headline-sm text-headline-sm rounded">题号 16</span>
+<span class="text-on-surface-variant font-label-md text-label-md">综合计算与解答题 · 满分 10 分</span>
+</div>
+<div class="flex items-center space-x-2">
+<button class="inline-flex items-center space-x-1 px-2 py-1 text-on-surface-variant hover:text-primary text-label-sm font-label-sm rounded hover:bg-surface-container-low transition">
+<span class="material-symbols-outlined text-[16px]">bookmark_add</span>
+<span>添加笔记</span>
+</button>
+<span class="text-outline-variant">|</span>
+<span class="text-on-surface-variant font-label-mono text-label-mono">难度指数: ★★★★☆</span>
+</div>
+</div>
+<!-- Mathematical LaTeX Formulation & Prompt Description -->
+<div class="py-space-md">
+<h2 class="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm">
+          求下列不定积分的解析通解：
+        </h2>
+<div class="bg-surface-container-low px-space-xl py-space-lg rounded-lg border-l-4 border-primary flex items-center justify-between overflow-x-auto">
+<div class="flex items-center space-x-3 font-code-md text-headline-md text-primary">
+<span class="tracking-wide">∫ x² · ln(x + 1) dx</span>
+<span class="text-body-md text-on-surface-variant font-body-md ml-4">(定义域 x > -1)</span>
+</div>
+<span class="text-on-surface-variant font-label-mono text-label-mono uppercase tracking-widest hidden md:inline-block">CALCULUS II</span>
+</div>
+</div>
+</div>
+<!-- Dual Modality Input Switcher (Segmented Control) -->
+<div class="flex flex-col space-y-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center space-x-space-sm">
+<span class="text-on-surface font-headline-sm text-headline-sm">考生作答交付模式</span>
+<span class="text-on-surface-variant font-body-sm text-body-sm">(互斥二选一 · 系统即时转译)</span>
+</div>
+<div class="text-label-mono text-label-mono text-on-surface-variant">
+          当前已保存草稿: <span class="text-secondary font-semibold">14:02:19 自动暂存</span>
+</div>
+</div>
+<!-- Segmented Buttons -->
+<div class="grid grid-cols-2 p-1 bg-surface-container-high rounded-xl max-w-xl shadow-inner">
+<button class="flex items-center justify-center space-x-2 py-2 px-4 rounded-lg font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition" id="tab-ocr">
+<span class="material-symbols-outlined text-[19px]">photo_camera</span>
+<span>模式 A · 拍照扫码识图录入</span>
+</button>
+<button class="flex items-center justify-center space-x-2 py-2 px-4 rounded-lg font-label-md text-label-md bg-surface-container-lowest text-primary shadow-sm font-semibold transition" id="tab-ai-scribe">
+<span class="material-symbols-outlined text-[19px]">auto_fix_high</span>
+<span>模式 B · AI 规范代笔排版</span>
+</button>
+</div>
+<!-- Panel: Mode B (AI Scribe) ACTIVE -->
+<div class="flex flex-col space-y-space-md" id="panel-ai-scribe">
+<!-- Integrity Disclaimer Banner -->
+<div class="flex items-start space-x-space-md p-space-md bg-tertiary-fixed/30 border border-tertiary-fixed rounded-xl text-on-tertiary-fixed">
+<span class="material-symbols-outlined text-tertiary text-[20px] mt-0.5" style="font-variation-settings: 'FILL' 1;">gavel</span>
+<div class="flex-1 text-body-sm font-body-sm leading-relaxed">
+<span class="font-semibold text-tertiary">作答诚信与监考边界声明：</span>
+            本工作台开启的「AI 规范代笔」仅将考生的口述演录、凌乱草稿与简写符号转录为标准的 LaTeX 标准数学推导与分步排版。系统内嵌模型已被强制切断题目解答、逻辑修正与作弊引导能力，任何逻辑错误均会被原样忠实保留，确保考核客观性与独立性。
+          </div>
+</div>
+<!-- Split Input & Realtime Render Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-space-lg">
+<!-- Left: Candidate Scratchpad & Shorthand Raw Input -->
+<div class="flex flex-col bg-surface-container-lowest rounded-xl p-space-lg shadow-sm border border-outline-variant/40 space-y-space-sm">
+<div class="flex items-center justify-between pb-space-xs border-b border-surface-container">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-primary text-[18px]">edit_note</span>
+<span class="font-label-md text-label-md text-on-surface">考生自拟速记推导草稿 (支持手打与语音转文字)</span>
+</div>
+<span class="text-label-mono text-label-mono text-on-surface-variant font-code-sm">184 字符</span>
+</div>
+<textarea class="w-full h-80 p-space-md font-code-md text-code-md text-on-surface bg-surface-container-low rounded-lg border border-outline-variant/50 focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest transition resize-none leading-relaxed" placeholder="在此输入草稿推演，例如：
+原式采用分部积分法...
+设 u = ln(x+1), 则 du = 1/(x+1) dx
+设 dv = x^2 dx, 则 v = 1/3 * x^3 ...">原式采用分部积分法：
+设 u = ln(x + 1), 则 du = dx / (x + 1)
+设 dv = x^2 dx, 则选取 v = x^3 / 3
+
+根据分部积分公式 ∫ u dv = u v - ∫ v du：
+原式 = (x^3 / 3) * ln(x + 1) - (1/3) * ∫ (x^3 / (x + 1)) dx
+
+处理有理假分式：
+x^3 / (x + 1) = (x^3 + 1 - 1) / (x + 1)
+= (x^2 - x + 1) - 1 / (x + 1)
+
+逐项求积分：
+∫ (x^2 - x + 1 - 1/(x+1)) dx
+= x^3/3 - x^2/2 + x - ln(x+1)
+
+代回合并得到最终结果 (包含常数 C)。</textarea>
+<div class="flex items-center justify-between pt-2">
+<div class="flex items-center space-x-2 text-on-surface-variant font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-[16px] text-secondary">sync</span>
+<span>智能引擎自检排印中，实时对应分步赋分标签</span>
+</div>
+<button class="px-space-md py-1 bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md rounded border border-outline-variant/40 transition">
+                清空草稿
+              </button>
+</div>
+</div>
+<!-- Right: AI Standardized LaTeX Transcription Engine -->
+<div class="flex flex-col bg-surface-container-lowest rounded-xl p-space-lg shadow-sm border border-outline-variant/40 space-y-space-sm">
+<div class="flex items-center justify-between pb-space-xs border-b border-surface-container">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-secondary text-[18px]">verified</span>
+<span class="font-label-md text-label-md text-on-surface">标准答案卡转印排版预览 (LaTeX / Step-by-Step)</span>
+</div>
+<span class="px-2 py-0.5 bg-secondary-container/40 text-secondary font-label-mono text-label-mono rounded">排版合规 · 就绪</span>
+</div>
+<!-- Visual Step Flow Preview -->
+<div class="w-full h-80 overflow-y-auto pr-1 space-y-space-md">
+<!-- Step 1 -->
+<div class="p-space-md bg-surface-container-low rounded-lg border-l-2 border-secondary space-y-1">
+<div class="flex items-center justify-between">
+<span class="font-label-mono text-label-mono text-secondary font-semibold">【解题步骤一 · 分部积分变量替换】</span>
+<span class="text-on-surface-variant font-label-mono text-label-mono">预设给分点: 3 分</span>
+</div>
+<div class="font-code-md text-code-md text-on-surface">
+                  令 $u = \ln(x + 1)$，则 $\mathrm{d}u = \frac{1}{x + 1} \mathrm{d}x$；<br/>
+                  令 $\mathrm{d}v = x^2 \mathrm{d}x$，取 $v = \frac{1}{3} x^3$。
+                </div>
+</div>
+<!-- Step 2 -->
+<div class="p-space-md bg-surface-container-low rounded-lg border-l-2 border-secondary space-y-1">
+<div class="flex items-center justify-between">
+<span class="font-label-mono text-label-mono text-secondary font-semibold">【解题步骤二 · 代入公式与有理式拆分】</span>
+<span class="text-on-surface-variant font-label-mono text-label-mono">预设给分点: 4 分</span>
+</div>
+<div class="font-code-md text-code-md text-on-surface leading-relaxed">
+                  原式 $= \frac{1}{3} x^3 \ln(x + 1) - \frac{1}{3} \int \frac{x^3}{x + 1} \mathrm{d}x$<br/>
+                  其中被积项拆解：<br/>
+                  $\frac{x^3}{x + 1} = x^2 - x + 1 - \frac{1}{x + 1}$
+                </div>
+</div>
+<!-- Step 3 -->
+<div class="p-space-md bg-surface-container-low rounded-lg border-l-2 border-primary space-y-1">
+<div class="flex items-center justify-between">
+<span class="font-label-mono text-label-mono text-primary font-semibold">【解题步骤三 · 逐���求积与通解表达式】</span>
+<span class="text-on-surface-variant font-label-mono text-label-mono">预设给分点: 3 分</span>
+</div>
+<div class="font-code-md text-code-md text-on-surface bg-surface-container-lowest p-space-sm rounded border border-outline-variant/30 leading-loose">
+                  $\int \left( x^2 - x + 1 - \frac{1}{x+1} \right) \mathrm{d}x = \frac{1}{3}x^3 - \frac{1}{2}x^2 + x - \ln(x+1)$<br/>
+                  综上通解为：<br/>
+<strong>$\frac{1}{3}x^3 \ln(x + 1) - \frac{1}{9}x^3 + \frac{1}{6}x^2 - \frac{1}{3}x + \frac{1}{3}\ln(x + 1) + C$</strong>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between pt-2">
+<span class="text-on-surface-variant font-body-sm text-body-sm">阅卷系统将直接读取右侧格式化公式流</span>
+<button class="inline-flex items-center space-x-1 px-space-md py-1 bg-surface text-primary border border-primary-fixed-dim hover:bg-surface-container font-label-md text-label-md rounded transition">
+<span class="material-symbols-outlined text-[16px]">tune</span>
+<span>微调公式变量格式</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Panel: Mode A (OCR) INACTIVE STATE (Hidden by default or switchable) -->
+<div class="hidden flex-col space-y-space-md bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40" id="panel-ocr">
+<div class="flex items-center justify-between pb-space-md border-b border-surface-container">
+<div>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">拍照/扫描草稿纸作答交卷</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant">支持使用手持设备直接扫码拍照并极速回传同步，或本地上传清晰草稿图片。</p>
+</div>
+<span class="px-2 py-1 bg-surface-container text-on-surface-variant font-label-mono text-label-mono rounded">
+            支持 JPG, PNG, PDF (最大 20MB)
+          </span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-lg">
+<!-- QR Sync Box -->
+<div class="flex flex-col items-center justify-center p-space-xl bg-surface-container-low rounded-xl border border-dashed border-outline-variant text-center space-y-space-md">
+<div class="w-28 h-28 bg-surface-container-lowest p-2 rounded-lg border border-outline-variant flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-[72px] text-on-surface">qr_code_2</span>
+</div>
+<div class="space-y-1">
+<div class="font-label-md text-label-md text-on-surface font-semibold">微信/浏览器扫码拍照</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant">同步设备：已授权考生手机端</div>
+</div>
+</div>
+<!-- Drag & Upload Dropzone -->
+<div class="md:col-span-2 flex flex-col items-center justify-center p-space-xl bg-surface-container-low rounded-xl border-2 border-dashed border-primary-fixed-dim hover:border-primary transition cursor-pointer text-center space-y-space-sm group">
+<div class="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center text-primary group-hover:scale-110 transition">
+<span class="material-symbols-outlined text-[28px]">cloud_upload</span>
+</div>
+<div class="space-y-1">
+<div class="font-label-md text-label-md text-on-surface font-semibold">点击上传手写答题卷或将文件拖曳至此</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant">算法将实时矫正倾斜、滤除背景阴影并提取标准算式</div>
+</div>
+<button class="mt-2 px-space-lg py-1.5 bg-surface text-on-surface font-label-md text-label-md rounded border border-outline-variant shadow-sm hover:bg-surface-container transition">
+              选择本地图像
+            </button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Floating Exam Workbench Navigation Toolbar -->
+<footer class="sticky bottom-0 z-40 w-full bg-surface-container-lowest/95 backdrop-blur-md border-t border-outline-variant/30 px-margin-desktop py-space-sm shadow-lg">
+<div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-space-sm">
+<!-- Left: Navigation Previous / Flag / Next -->
+<div class="flex items-center space-x-space-sm">
+<button class="inline-flex items-center space-x-1 px-space-lg py-1.5 bg-surface hover:bg-surface-container text-on-surface font-label-md text-label-md rounded-lg border border-outline-variant/50 transition">
+<span class="material-symbols-outlined text-[18px]">arrow_back</span>
+<span>上一题</span>
+</button>
+<button class="inline-flex items-center space-x-1 px-space-md py-1.5 bg-tertiary-fixed/30 hover:bg-tertiary-fixed/60 text-tertiary font-label-md text-label-md rounded-lg border border-tertiary-fixed transition">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">flag</span>
+<span>疑难复查 (2)</span>
+</button>
+<button class="inline-flex items-center space-x-1 px-space-lg py-1.5 bg-primary hover:bg-primary-container text-on-primary font-label-md text-label-md rounded-lg transition shadow-sm">
+<span>下一题</span>
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+<!-- Center: 1~16 Question Matrix (Card Index) -->
+<div class="flex items-center space-x-1 overflow-x-auto py-1 px-2 bg-surface-container-low rounded-lg border border-outline-variant/30">
+<!-- 1 to 6 (Done) -->
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-secondary text-on-secondary flex items-center justify-center font-bold" title="第1题: 已作答">1</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-secondary text-on-secondary flex items-center justify-center font-bold" title="第2题: 已作答">2</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-secondary text-on-secondary flex items-center justify-center font-bold" title="第3题: 已作答">3</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-tertiary text-on-tertiary flex items-center justify-center font-bold ring-1 ring-tertiary" title="第4题: 标记复查">4</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-secondary text-on-secondary flex items-center justify-center font-bold" title="第5题: 已作答">5</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-secondary text-on-secondary flex items-center justify-center font-bold" title="第6题: 已作答">6</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-secondary text-on-secondary flex items-center justify-center font-bold" title="第7题: 已作答">7</button>
+<!-- 8 to 15 (Unanswered) -->
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center justify-center">8</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-tertiary text-on-tertiary flex items-center justify-center font-bold ring-1 ring-tertiary" title="第9题: 标记复查">9</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center justify-center">10</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center justify-center">11</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center justify-center">12</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center justify-center">13</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center justify-center">14</button>
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center justify-center">15</button>
+<!-- 16 (Current Active) -->
+<button class="w-6 h-6 rounded font-code-sm text-code-sm bg-primary text-on-primary ring-2 ring-primary-container ring-offset-1 flex items-center justify-center font-bold" title="当前题: 第16题">16</button>
+</div>
+<!-- Right: Stash & Save for Later -->
+<div class="flex items-center space-x-space-sm">
+<button class="inline-flex items-center space-x-1 px-space-md py-1.5 bg-surface text-on-surface-variant hover:text-on-surface font-label-md text-label-md rounded border border-outline-variant/40 hover:bg-surface-container transition">
+<span class="material-symbols-outlined text-[17px]">save</span>
+<span>暂存进度离开</span>
+</button>
+</div>
+</div>
+</footer>
+<!-- Inline Micro-interaction Script for Tab Switching & Simple Timer -->
+<script>
+    (function initExamRunner() {
+      const tabOcr = document.getElementById('tab-ocr');
+      const tabAiScribe = document.getElementById('tab-ai-scribe');
+      const panelOcr = document.getElementById('panel-ocr');
+      const panelAiScribe = document.getElementById('panel-ai-scribe');
+
+      if (tabOcr && tabAiScribe && panelOcr && panelAiScribe) {
+        tabOcr.addEventListener('click', () => {
+          tabOcr.classList.add('bg-surface-container-lowest', 'text-primary', 'shadow-sm', 'font-semibold');
+          tabOcr.classList.remove('text-on-surface-variant');
+          tabAiScribe.classList.remove('bg-surface-container-lowest', 'text-primary', 'shadow-sm', 'font-semibold');
+          tabAiScribe.classList.add('text-on-surface-variant');
+
+          panelOcr.classList.remove('hidden');
+          panelOcr.classList.add('flex');
+          panelAiScribe.classList.add('hidden');
+          panelAiScribe.classList.remove('flex');
+        });
+
+        tabAiScribe.addEventListener('click', () => {
+          tabAiScribe.classList.add('bg-surface-container-lowest', 'text-primary', 'shadow-sm', 'font-semibold');
+          tabAiScribe.classList.remove('text-on-surface-variant');
+          tabOcr.classList.remove('bg-surface-container-lowest', 'text-primary', 'shadow-sm', 'font-semibold');
+          tabOcr.classList.add('text-on-surface-variant');
+
+          panelAiScribe.classList.remove('hidden');
+          panelAiScribe.classList.add('flex');
+          panelOcr.classList.add('hidden');
+          panelOcr.classList.remove('flex');
+        });
+      }
+
+      // Live countdown simulation
+      let totalSeconds = 1 * 3600 + 28 * 60 + 45;
+      const timerElement = document.getElementById('exam-timer');
+      if (timerElement) {
+        setInterval(() => {
+          if (totalSeconds > 0) {
+            totalSeconds--;
+            const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+            const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+            const s = String(totalSeconds % 60).padStart(2, '0');
+            timerElement.textContent = `${h}:${m}:${s}`;
+          }
+        }, 1000);
+      }
+    })();
+  </script>
+</div></main></body></html>
