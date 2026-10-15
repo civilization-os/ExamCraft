@@ -103,46 +103,112 @@ export function sanitizeQuestion(q) {
   return q;
 }
 
-// Slice exam markdown into raw question text blocks
+// Universal Passage-Aware Exam Slicer
+// Supports Chinese exams (Math, Science, Politics) and English / Multilingual long-text papers with reading passages
 export function sliceMarkdownIntoQuestionBlocks(mdText) {
   const lines = mdText.split('\n');
   const blocks = [];
-  let headerLines = [];
-  let currentBlock = null;
+  let currentSection = '通用试题';
+  let currentPassageTitle = '';
+  let currentPassage = '';
+  let passageBuffer = [];
+  let isCollectingPassage = false;
+
+  const flushPassage = () => {
+    if (passageBuffer.length > 0) {
+      const candidate = passageBuffer.join('\n').trim();
+      if (candidate && !candidate.match(/^`?\d+~\d+`?\s*小题/) && !candidate.match(/^每(?:小)?题\s*\d+\s*分/)) {
+        currentPassage = candidate;
+      }
+      passageBuffer = [];
+    }
+  };
+
   const hasMarkdownQuestionHeaders = lines.some(l => l.trim().match(/^###\s*(?:题\s*)?\d+/));
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+
+    if (!line) {
+      if (isCollectingPassage && passageBuffer.length > 0) {
+        passageBuffer.push('');
+      }
+      continue;
+    }
+
+    // Section header (## ...)
+    if ((line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
+      flushPassage();
+      currentSection = line.replace(/^##\s+/, '').trim();
+      currentPassage = '';
+      currentPassageTitle = '';
+      isCollectingPassage = true;
+      continue;
+    }
+
+    // Passage header (#### Text 1, #### Passage A, #### 阅读篇章 A, etc.)
+    const passageMatch = line.match(/^#{3,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇)/i);
+    if (passageMatch) {
+      flushPassage();
+      currentPassageTitle = passageMatch[1].trim();
+      currentPassage = '';
+      isCollectingPassage = true;
+      passageBuffer.push(rawLine);
+      continue;
+    }
+
+    // Question start:
     let isQHeader = false;
+    let qNum = null;
+    let rest = '';
+
     if (hasMarkdownQuestionHeaders) {
-      isQHeader = !!line.match(/^###\s*(?:题\s*)?\d+/);
+      const m = line.match(/^###\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
+                line.match(/^##\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
+      if (m) {
+        isQHeader = true;
+        qNum = parseInt(m[1], 10);
+        rest = m[2];
+      }
     } else {
-      isQHeader = !!line.match(/^(?:###|##)\s*(?:题\s*)?\d+/) || !!line.match(/^\d+[\.、\s]\s*\S+/);
+      const m = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
+                line.match(/^(\d+)[\.、\s]\s*(.*)$/);
+      if (m) {
+        isQHeader = true;
+        qNum = parseInt(m[1], 10);
+        rest = m[2];
+      }
     }
 
     if (isQHeader) {
-      if (currentBlock) {
-        blocks.push(currentBlock.join('\n'));
-      }
-      currentBlock = [lines[i]];
-    } else if (currentBlock) {
-      if (line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/)) {
-        blocks.push(currentBlock.join('\n'));
-        currentBlock = null;
-        headerLines.push(lines[i]);
-      } else {
-        currentBlock.push(lines[i]);
-      }
+      flushPassage();
+      isCollectingPassage = false;
+      blocks.push({
+        qNum,
+        section: currentSection,
+        passageTitle: currentPassageTitle,
+        passage: currentPassage,
+        lines: [rawLine]
+      });
+      continue;
+    }
+
+    if (blocks.length > 0 && !isCollectingPassage) {
+      blocks[blocks.length - 1].lines.push(rawLine);
     } else {
-      headerLines.push(lines[i]);
+      passageBuffer.push(rawLine);
     }
   }
 
-  if (currentBlock) {
-    blocks.push(currentBlock.join('\n'));
-  }
+  flushPassage();
 
-  return { headerText: headerLines.join('\n'), blocks };
+  return {
+    blocks: blocks.map(b => ({
+      ...b,
+      text: b.lines.join('\n')
+    }))
+  };
 }
 
 // Advanced robust parser for Chinese national exams & course markdown papers
@@ -154,8 +220,22 @@ export function parseExamMarkdown(mdText) {
   const questions = [];
 
   let currentSection = '通用试题';
+  let currentPassage = '';
+  let currentPassageTitle = '';
+  let passageBuffer = [];
+  let isCollectingPassage = false;
   let currentQ = null;
   let state = 'prompt'; // 'prompt' | 'options' | 'analysis'
+
+  const flushPassage = () => {
+    if (passageBuffer.length > 0) {
+      const candidate = passageBuffer.join('\n').trim();
+      if (candidate && !candidate.match(/^`?\d+~\d+`?\s*小题/) && !candidate.match(/^每(?:小)?题\s*\d+\s*分/)) {
+        currentPassage = candidate;
+      }
+      passageBuffer = [];
+    }
+  };
 
   const finishCurrentQ = () => {
     if (!currentQ) return;
@@ -186,6 +266,8 @@ export function parseExamMarkdown(mdText) {
         currentQ.analysis += '\n\n';
       } else if (currentQ && state === 'prompt' && currentQ.prompt) {
         currentQ.prompt += '\n\n';
+      } else if (isCollectingPassage && passageBuffer.length > 0) {
+        passageBuffer.push('');
       }
       continue;
     }
@@ -206,19 +288,35 @@ export function parseExamMarkdown(mdText) {
       continue;
     }
 
-    // 3. Section header (## 一、选择题 ...)
-    if (line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || (line.startsWith('## ') && !line.match(/^##\s*\d+$/))) {
+    // 3. Section header (## 一、选择题 ... or ## Section I ...)
+    if ((line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
       finishCurrentQ();
+      flushPassage();
       currentSection = line.replace(/^##\s+/, '').trim();
+      currentPassage = '';
+      currentPassageTitle = '';
+      isCollectingPassage = true;
       continue;
     }
 
-    // 4. Section description (e.g. `1~10` 小题，每小题 `5` 分，共 `50` 分...)
+    // 4. Passage header (#### Text 1, #### Passage A, etc.)
+    const passageMatch = line.match(/^#{3,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇)/i);
+    if (passageMatch) {
+      finishCurrentQ();
+      flushPassage();
+      currentPassageTitle = passageMatch[1].trim();
+      currentPassage = '';
+      isCollectingPassage = true;
+      passageBuffer.push(rawLine);
+      continue;
+    }
+
+    // 5. Section description (e.g. `1~10` 小题，每小题 `5` 分，共 `50` 分...)
     if (line.match(/^`?\d+~\d+`?\s*小题/) || line.match(/小题.*每小题.*分/)) {
       continue;
     }
 
-    // 5. Question start:
+    // 6. Question start:
     let qHeaderMatch = null;
     if (hasMarkdownQuestionHeaders) {
       qHeaderMatch = line.match(/^###\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/) ||
@@ -230,13 +328,15 @@ export function parseExamMarkdown(mdText) {
 
     if (qHeaderMatch) {
       finishCurrentQ();
+      flushPassage();
+      isCollectingPassage = false;
       const numInt = parseInt(qHeaderMatch[1], 10);
       const numStr = String(numInt).padStart(2, '0');
       const rest = qHeaderMatch[2] ? qHeaderMatch[2].trim() : '';
 
-      const isChoice = currentSection.includes('选择') || rest.includes('选项') || (numInt >= 1 && numInt <= 10 && currentSection.includes('选择'));
+      const isChoice = currentSection.includes('选择') || currentSection.includes('Use of English') || currentSection.includes('Reading') || rest.includes('选项') || (numInt >= 1 && numInt <= 10 && currentSection.includes('选择'));
       const isBlank = currentSection.includes('填空') || (numInt >= 11 && numInt <= 16 && currentSection.includes('填空'));
-      const isSolution = currentSection.includes('解答') || currentSection.includes('证明') || currentSection.includes('计算') || numInt >= 17;
+      const isSolution = currentSection.includes('解答') || currentSection.includes('证明') || currentSection.includes('计算') || currentSection.includes('Writing') || currentSection.includes('Translation') || numInt >= 17;
 
       let score = 5;
       if (isBlank) score = 5;
@@ -252,6 +352,8 @@ export function parseExamMarkdown(mdText) {
         type: isChoice ? '单项选择题' : isBlank ? '填空题' : '综合计算与解答题',
         score: score,
         section: currentSection,
+        passage: currentPassage || undefined,
+        passageTitle: currentPassageTitle || undefined,
         prompt: rest,
         options: isChoice ? [] : undefined,
         userAnswer: '',
@@ -263,9 +365,14 @@ export function parseExamMarkdown(mdText) {
       continue;
     }
 
-    if (!currentQ) continue;
+    if (!currentQ) {
+      if (isCollectingPassage) {
+        passageBuffer.push(rawLine);
+      }
+      continue;
+    }
 
-    // 6. Score declaration inside question body: （本题满分 10 分）
+    // 7. Score declaration inside question body: （本题满分 10 分）
     const scoreMatch = line.match(/^[（\(]本题满分\s*`?(\d+)`?\s*分[）\)]/) ||
                        line.match(/^[（\(](\d+)\s*分[）\)]/);
     if (scoreMatch && state === 'prompt') {
@@ -273,7 +380,7 @@ export function parseExamMarkdown(mdText) {
       continue;
     }
 
-    // 7. Analysis & Solution identifier
+    // 8. Analysis & Solution identifier
     const isAnalysisTag = line.match(/^(?:\*\*解析[:：\s]*\*\*|【解析】|解析[:：]|\*\*证明[:：\s]*\*\*|【证明】|证明[:：]|\*\*解[:：\s]*\*\*|【解】|解[:：]|\*\*[（\(]\d+[）\)](?:证明|解)[:：\s]*\*\*)/);
     if (isAnalysisTag) {
       state = 'analysis';
@@ -281,14 +388,14 @@ export function parseExamMarkdown(mdText) {
       continue;
     }
 
-    // 8. Answer identifier
+    // 9. Answer identifier
     const ansMatch = line.match(/^(?:\*\*答案[:：\s]*\*\*|答案[:：]|【答案】)\s*(.+?)(?:\*\*|$)/i);
     if (ansMatch) {
       currentQ.standardAnswer = ansMatch[1].trim().replace(/\*/g, '');
       continue;
     }
 
-    // 9. Options
+    // 10. Options
     if (currentQ.options && state === 'prompt') {
       const optMatch = line.match(/^[-*]?\s*(?:\(?([A-D])\)[\.、:：\s]?|([A-D])[\.、:：\s])\s*(.*)$/i);
       if (optMatch) {
@@ -301,7 +408,7 @@ export function parseExamMarkdown(mdText) {
       }
     }
 
-    // 10. Accumulate content based on current state
+    // 11. Accumulate content based on current state
     if (state === 'analysis') {
       currentQ.analysis = (currentQ.analysis ? currentQ.analysis + '\n' : '') + rawLine;
     } else {
@@ -349,7 +456,7 @@ function extractJsonArray(text) {
   return null;
 }
 
-// Parallel chunked AI parser for full exams
+// Parallel chunked AI parser for full exams (Multilingual & Long-text passage-aware)
 export async function parseExamWithAiBatches(mdText, config) {
   const baseline = parseExamMarkdown(mdText);
   if (!config.apiKey || !config.apiKey.trim()) {
@@ -363,28 +470,57 @@ export async function parseExamWithAiBatches(mdText, config) {
     return baseline;
   }
 
-  // Create batches of 3-5 blocks each
-  const batchSize = 4;
+  // Group blocks into passage-aware batches:
+  // Questions that share the same passage (e.g. English Text 1, Cloze) are kept together (max 5 questions per batch)
   const batches = [];
-  for (let i = 0; i < blocks.length; i += batchSize) {
+  let currentBatch = [];
+  let currentBatchPassage = null;
+
+  for (const block of blocks) {
+    const isSamePassage = block.passage === currentBatchPassage;
+    const isBatchFull = currentBatch.length >= (block.passage ? 5 : 4);
+
+    if (currentBatch.length > 0 && (!isSamePassage || isBatchFull)) {
+      batches.push({
+        passage: currentBatchPassage,
+        passageTitle: currentBatch[0].passageTitle,
+        blocks: currentBatch
+      });
+      currentBatch = [];
+    }
+
+    currentBatch.push(block);
+    currentBatchPassage = block.passage;
+  }
+
+  if (currentBatch.length > 0) {
     batches.push({
-      index: Math.floor(i / batchSize) + 1,
-      startIndex: i,
-      text: blocks.slice(i, i + batchSize).join('\n\n')
+      passage: currentBatchPassage,
+      passageTitle: currentBatch[0].passageTitle,
+      blocks: currentBatch
     });
   }
 
-  const batchPromises = batches.map(async (b) => {
-    const prompt = `你是一位精通中国考研数学命题规范的高校专家。请将以下试题切片内容解析为结构化 JSON 数组。
-【极其严格的排版与格式纪律】：
+  const batchPromises = batches.map(async (b, batchIdx) => {
+    const passageSnippet = b.passage
+      ? `【关联阅读篇章 / 材料】：\n${b.passageTitle ? '### ' + b.passageTitle + '\n' : ''}${b.passage}\n\n`
+      : '';
+    const questionsSnippet = b.blocks.map(blk => blk.text).join('\n\n');
+
+    const prompt = `你是一位精通中国考研统考、高校期末考试与国家外语/数学测试命题规范的高校专家。
+请将以下试题切片内容解析为结构化 JSON 数组。
+
+【排版与格式纪律】：
 1. prompt 字段必须且只能包含纯题目描述（含公式 LaTeX），严禁将“解：”、“证明：”或任何换元、计算步骤放入 prompt 中！
 2. 若大题内部有小问（如 1. 证明... 2. 求矩阵...），这些属于题干要求，必须保留在 prompt 中，绝对不能拆分成独立的考题！
-3. 每道题的分值（如“（本题满分 10 分）”）提取为数值存入 score 字段，并从 prompt 中彻底清除该说明。
-4. standardAnswer 存放标准答案或精简结果；选择题为字母，填空题为结果，解答题为最终化简结果（若为长证明可填“详见证明与分步解答”）。
-5. analysis 字段必须完整包含所有证明步骤、微分方程求解、极坐标积分等详细推导，保持 LaTeX 格式。
+3. 若存在关联阅读篇章/材料，请在各题目中保留或提取 passage 字段。
+4. 每道题的分值（如“（本题满分 10 分）”或“每小题2分”）提取为数值存入 score 字段，并从 prompt 中彻底清除该说明。
+5. standardAnswer 存放标准答案或精简结果；选择题为选项字母（如 A），填空题为结果，解答题为最终化简结果（若为长证明或写作可填“详见证明与分步解答/参考范文”）。
+6. analysis 字段必须完整包含所有证明步骤、推导或答案解析（数学保持 LaTeX 格式）。
 
-待解析题目内容：
-${b.text}
+待解析内容：
+${passageSnippet}【试题部分】：
+${questionsSnippet}
 
 直接输出合法 JSON 数组，格式样例：
 [
@@ -394,6 +530,7 @@ ${b.text}
     "type": "单项选择题",
     "score": 5,
     "section": "一、选择题",
+    "passage": "关联阅读材料文本（若有）",
     "prompt": "题目描述",
     "options": [
       { "key": "A", "text": "选项A" },
@@ -406,19 +543,24 @@ ${b.text}
 
     try {
       const res = await model.invoke([
-        { role: 'system', content: '你是一位精通微积分与高等数学试卷排版的大模型专家，直接返回合法 JSON 数组，严禁在 prompt 中泄露解答。' },
+        { role: 'system', content: '你是一位精通考试命题与排版的大模型专家，直接返回合法 JSON 数组，严禁在 prompt 中泄露解答。' },
         { role: 'user', content: prompt }
       ]);
       const parsed = extractJsonArray(res.content);
       if (parsed && Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map(sanitizeQuestion);
+        return parsed.map(q => {
+          if (!q.passage && b.passage) q.passage = b.passage;
+          if (!q.passageTitle && b.passageTitle) q.passageTitle = b.passageTitle;
+          return sanitizeQuestion(q);
+        });
       }
     } catch (err) {
-      console.warn(`[AI Batch ${b.index} Error]:`, err.message);
+      console.warn(`[AI Batch ${batchIdx + 1} Error]:`, err.message);
     }
 
     // Fallback for this batch to baseline questions
-    const fallbackSlice = baseline.questions.slice(b.startIndex, b.startIndex + batchSize);
+    const qNums = b.blocks.map(blk => blk.qNum);
+    const fallbackSlice = baseline.questions.filter(q => qNums.includes(q.id));
     return fallbackSlice.map(sanitizeQuestion);
   });
 
@@ -967,4 +1109,98 @@ ${text}
     });
   }
 });
+
+// POST /api/model/question-edit-assist
+// 单题交互微调与变式重构助手
+apiRouter.post('/model/question-edit-assist', async (req, res) => {
+  const { question, instructionType, customPrompt } = req.body;
+
+  if (!question) {
+    return res.status(400).json({ success: false, error: '试题数据不能为空' });
+  }
+
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: '请先在系统设置中配置有效的 API Key'
+    });
+  }
+
+  let directive = '';
+  switch (instructionType) {
+    case 'format':
+      directive = '全面规范优化题干与解析的文字表述，纠正语病与粗糙标点，将所有数学公式与符号转换为最标准工整的 LaTeX（行内 $...$，大公式或矩阵 $$...$$），保持原题考查逻辑与答案完全不变。';
+      break;
+    case 'variant':
+      directive = '保持当前题目的考察知识点、题型与考查深度不变，但改变其中的数值、函数形式、积分区域、矩阵数字或应用背景，生成一道高质量同构同考点的“举一反三”变式题，并重新推导标准答案与详细分步解析。';
+      break;
+    case 'expand_analysis':
+      directive = '对当前题目的解析进行极度详尽的扩写，增加解题思路点拨、前置核心考纲定理回顾、分步推导演算细节与考场踩分点预估（如“【踩分点 1】+3分”），便于考生自学与彻底弄懂。';
+      break;
+    case 'adjust_difficulty':
+      directive = `调整题目考查难度与深度：${customPrompt || '适当提升综合考查深度与运算技巧，增加设问思维量'}。并同步更新标答与解析。`;
+      break;
+    default:
+      directive = `根据用户的定制化要求修改本题：${customPrompt || '微调优化题目表述与排版'}。`;
+      break;
+  }
+
+  const prompt = `你是一位精通中国国家考研与高校期末命题规范的名师专家。用户希望对以下一道试题进行定向智能微调重构。
+
+【原题详情】：
+${JSON.stringify(question, null, 2)}
+
+【微调指令要求】：
+${directive}
+
+【核心格式规范】：
+1. prompt 字段必须且仅包含题目描述，严禁将“解：”、“证明：”或任何答案推导过程混入 prompt！
+2. options 字段：如果是单选/多选题，必须保持 [{ "key": "A", "text": "..." }, ...] 的格式。
+3. standardAnswer 必须是标准最终简明答案（选择题填字母，解答题填最终精炼结果）。
+4. analysis 必须包含完整详细的推导演算过程与 LaTeX 格式。
+5. score 保留或按要求更新分值数值。
+
+请直接返回合法 JSON 对象，格式如下：
+{
+  "id": ${question.id || 1},
+  "num": "${question.num || '01'}",
+  "type": "${question.type || '综合计算与解答题'}",
+  "score": ${question.score || 10},
+  "section": "${question.section || '试题'}",
+  "passage": ${question.passage ? JSON.stringify(question.passage) : 'undefined'},
+  "passageTitle": ${question.passageTitle ? JSON.stringify(question.passageTitle) : 'undefined'},
+  "prompt": "优化或重构后的题干",
+  "options": ${question.options ? JSON.stringify(question.options) : 'undefined'},
+  "standardAnswer": "最终标准答案",
+  "analysis": "完整分步推导解析"
+}`;
+
+  try {
+    const model = createChatModel(currentConfig);
+    const response = await model.invoke([
+      { role: 'system', content: '你是一位精通试卷命题规范的专家，必须返回纯合法 JSON 对象。' },
+      { role: 'user', content: prompt }
+    ]);
+
+    let parsed = extractJsonFromAiResponse(response.content);
+    if (!parsed) {
+      throw new Error('AI 未能返回合法的试题 JSON');
+    }
+
+    parsed = sanitizeQuestion(parsed);
+
+    res.json({
+      success: true,
+      updatedQuestion: parsed,
+      provider: currentConfig.category || 'ai',
+      modelName: currentConfig.modelName
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: `单题 AI 辅助修改失败: ${err.message}`
+    });
+  }
+});
+
 

@@ -333,6 +333,22 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
             </div>
           </div>
 
+          {/* Passage / Reading Comprehension Material */}
+          {currentQ.passage && (
+            <div className="mb-space-md p-space-md bg-surface-container-low rounded-xl border border-secondary/30 space-y-2">
+              <div className="flex items-center justify-between text-secondary font-semibold font-label-md">
+                <span className="flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[18px]">menu_book</span>
+                  <span>{currentQ.passageTitle || '【阅读理解 / 篇章背景材料】'}</span>
+                </span>
+                <span className="text-[12px] font-label-mono text-on-surface-variant">请结合本篇材料回答下述问题</span>
+              </div>
+              <div className="max-h-80 overflow-y-auto p-space-sm bg-surface-container-lowest rounded-lg text-body-md leading-relaxed text-on-surface border border-outline-variant/20 whitespace-pre-line font-sans">
+                <MathMarkdown content={currentQ.passage} />
+              </div>
+            </div>
+          )}
+
           {/* Mathematical Prompt Description */}
           <div className="py-space-md">
             <MathMarkdown
