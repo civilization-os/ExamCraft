@@ -458,3 +458,96 @@ export const MISTAKE_ITEMS = [
     aiInsight: "公式记忆失误：P(x) = -2/x，故 -∫P(x)dx = 2 ln x，积分因子应为 x² 而非 1/x²。推荐通过齐次方程常数变易法现场反推，降低纯公式记忆偏差风险。"
   }
 ];
+
+export const INITIAL_SUBMISSIONS = [
+  {
+    id: "sub-2024a-v2",
+    paperId: "paper-math-2024a",
+    paperTitle: "《2024届全国高等数学期末统考试卷A》",
+    source: "1:1 真题复刻 (PDF导入)",
+    submitTime: "2025-02-28 16:45",
+    durationSpent: 5240,
+    score: 86,
+    totalScore: 100,
+    accuracy: 87,
+    questions: MOCK_EXAM_QUESTIONS.map((q, idx) => {
+      // simulate Q02 mistake and Q16 partial deduction
+      if (idx === 1) {
+        return {
+          ...q,
+          isCorrect: false,
+          scoreObtained: 0,
+          userAnswer: "D",
+          aiInsight: "误用等价无穷小导致 0/0 逻辑谬误。应使用麦克劳林展开 sin x = x - x³/6 + o(x³)，答案为 A (-1/6)。"
+        };
+      }
+      if (idx === 8) {
+        return {
+          ...q,
+          isCorrect: false,
+          scoreObtained: 0,
+          userAnswer: "y(x) = x⁵/3",
+          aiInsight: "通解公式积分因子负号漏乘，标准答案为 y(x) = (1/2)x⁴ + (3/2)x²。"
+        };
+      }
+      if (idx === 15) {
+        return {
+          ...q,
+          isCorrect: true,
+          scoreObtained: 8,
+          aiInsight: "分部积分思路清晰严密，步骤分拿到 8/10 分，长除法常数项微瑕已自核。"
+        };
+      }
+      return {
+        ...q,
+        isCorrect: true,
+        scoreObtained: q.score || 5,
+        aiInsight: "推导严谨，得分点完全达成。"
+      };
+    }),
+    aiOverallReview: {
+      summary: "考生在《2024届高数期末试卷A》二刷冲刺中表现出色，总分由一刷的 68 分显著提升至 86 分！基础选择题与常规微分方程求解熟练度明显改善，但在微积分综合解答题细节变形及等价无穷小展开阶数仍有提分空间。",
+      strengths: ["定积分换元计算准确无误", "线性代数矩阵运算速度快", "大题分步书写格式规范严谨"],
+      weaknesses: ["差式极限中随意套用等价无穷小", "一阶微分方程通解公式符号易混淆", "有理假分式长除法符号分配漏乘"],
+      actionPlan: [
+        "针对第 2 题与第 9 题进行同构变式练习，巩固泰勒展开与常数变易法",
+        "将失分题目一键沉淀至《高等数学期末易错集》"
+      ],
+      radarAnalysis: {
+        conceptMastery: 88,
+        calculationAccuracy: 84,
+        logicalRigorousness: 86,
+        speedAndStrategy: 90,
+        difficultProblemAttack: 80
+      }
+    }
+  },
+  {
+    id: "sub-2024a-v1",
+    paperId: "paper-math-2024a",
+    paperTitle: "《2024届全国高等数学期末统考试卷A》",
+    source: "1:1 真题复刻 (PDF导入)",
+    submitTime: "2025-02-27 10:15",
+    durationSpent: 6600,
+    score: 68,
+    totalScore: 100,
+    accuracy: 65,
+    questions: MOCK_EXAM_QUESTIONS.map((q, idx) => {
+      const isWrong = idx === 1 || idx === 3 || idx === 8 || idx === 11 || idx === 14;
+      return {
+        ...q,
+        isCorrect: !isWrong,
+        scoreObtained: isWrong ? 0 : (q.score || 5),
+        userAnswer: isWrong ? "C" : q.standardAnswer,
+        aiInsight: isWrong ? "基础概念理解不透彻，已自动记录错因。" : "作答正确。"
+      };
+    }),
+    aiOverallReview: {
+      summary: "一刷首测由于临场时间分配较紧张，后半段解答题未及充分演算。客观题中存在 3 处典型易错点，建议回归教材基础定义，完成错题归集后进行二刷。",
+      strengths: ["常规导数求值准确", "作答态度端正完整"],
+      weaknesses: ["做题节奏稍显滞后", "综合题步骤踩分点不明确", "易出现计算粗心"],
+      actionPlan: ["重点复习微积分有理化拆项", "控制单道选择题用时在 2 分钟以内"]
+    }
+  }
+];
+

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { INITIAL_SUBMISSIONS } from '../data/mockData';
 
 export default function PaperLibraryView({ papers, onStartExam, onNavigate, onViewSubmission }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -7,24 +8,27 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [paperList, setPaperList] = useState(papers);
 
-  // Submissions history state from localStorage
+  // Submissions history state from localStorage with fallback to INITIAL_SUBMISSIONS
   const [submissions, setSubmissions] = useState(() => {
     try {
       const raw = localStorage.getItem('examcraft_submissions');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      localStorage.setItem('examcraft_submissions', JSON.stringify(INITIAL_SUBMISSIONS));
+    } catch {}
+    return INITIAL_SUBMISSIONS;
   });
   const [selectedHistoryPaper, setSelectedHistoryPaper] = useState(null);
+  const [activeMenuPaperId, setActiveMenuPaperId] = useState(null);
+  const [toastMessage, setToastMessage] = useState('');
 
-  // Refresh submissions when component mounts or updates
-  const refreshSubmissions = () => {
-    try {
-      const raw = localStorage.getItem('examcraft_submissions');
-      if (raw) setSubmissions(JSON.parse(raw));
-    } catch {}
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3000);
   };
+
 
   // Modals
   const [selectedPreviewPaper, setSelectedPreviewPaper] = useState(null);
@@ -467,20 +471,90 @@ A. 1  B. 3  C. 0  D. 不存在
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSelectedReportPaper(paper)}
+                          onClick={() => {
+                            if (latestSub && onViewSubmission) {
+                              onViewSubmission(latestSub);
+                            } else {
+                              setSelectedReportPaper(paper);
+                            }
+                          }}
                           className="inline-flex items-center gap-1 px-2.5 h-7.5 rounded bg-surface-container-lowest hover:bg-surface text-on-surface font-label-sm text-label-sm transition-colors shadow-xs border border-outline-variant/30 cursor-pointer"
                         >
                           诊断报告
                         </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => alert(`试卷「${paper.title}」已加入快速导出清单。`)}
-                        className="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container transition-colors cursor-pointer"
-                        title="更多操作"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">more_horiz</span>
-                      </button>
+
+                      {/* Modern Dropdown Popover Action instead of alert */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuPaperId(activeMenuPaperId === paper.id ? null : paper.id);
+                          }}
+                          className="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container transition-colors cursor-pointer"
+                          title="更多操作"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">more_horiz</span>
+                        </button>
+
+                        {activeMenuPaperId === paper.id && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute right-0 bottom-full mb-1 w-48 bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/40 p-1.5 z-30 animate-in fade-in zoom-in-95 duration-150 text-body-sm text-on-surface"
+                          >
+                            {paperSubs.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveMenuPaperId(null);
+                                  setSelectedHistoryPaper({ paper, submissions: paperSubs });
+                                }}
+                                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-container transition-colors text-left cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-[16px] text-primary">history</span>
+                                <span>历次作答记录 ({paperSubs.length})</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuPaperId(null);
+                                showToast(`已将《${paper.title}》加入快速导出任务列表`);
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-container transition-colors text-left cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[16px] text-secondary">file_download</span>
+                              <span>导出本卷 PDF</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuPaperId(null);
+                                handleToggleStar(paper.id);
+                                showToast(paper.starred ? `已取消星标《${paper.title}》` : `已星标收藏《${paper.title}》`);
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-container transition-colors text-left cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[16px] text-tertiary">
+                                {paper.starred ? 'star_half' : 'star'}
+                              </span>
+                              <span>{paper.starred ? '取消星标' : '设为重点星标'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuPaperId(null);
+                                setSelectedPreviewPaper(paper);
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-container transition-colors text-left cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[16px] text-outline">visibility</span>
+                              <span>大试卷排版总览</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })()}
@@ -883,7 +957,16 @@ A. 1  B. 3  C. 0  D. 不存在
           </div>
         </div>
       )}
+
+      {/* Global Toast Floating Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-on-surface text-surface px-4 py-2 rounded-full shadow-2xl font-label-md flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <span className="material-symbols-outlined text-[18px] text-secondary">check_circle</span>
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }
+
 
