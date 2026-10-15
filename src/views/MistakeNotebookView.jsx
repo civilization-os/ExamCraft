@@ -3,20 +3,60 @@ import MathMarkdown from '../components/MathMarkdown';
 import { MISTAKE_COLLECTIONS, MISTAKE_ITEMS } from '../data/mockData';
 
 export default function MistakeNotebookView({ onStartExamWithMistakes }) {
-  const [collections, setCollections] = useState(MISTAKE_COLLECTIONS);
-  const [activeColId, setActiveColId] = useState('col-2');
-  const [activeCategory, setActiveCategory] = useState('mistakes');
-  const [mistakes, setMistakes] = useState(MISTAKE_ITEMS);
-  const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
+  const [collections, setCollections] = useState(() => {
+    try {
+      const raw = localStorage.getItem('examcraft_notebook_data');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.collections && parsed.collections.length > 0) {
+          const existingIds = new Set(parsed.collections.map((c) => c.id));
+          return [...parsed.collections, ...MISTAKE_COLLECTIONS.filter((c) => !existingIds.has(c.id))];
+        }
+      }
+    } catch {}
+    return MISTAKE_COLLECTIONS;
+  });
 
-  // AI Mistake Import State
-  const [isImportMistakeModalOpen, setIsImportMistakeModalOpen] = useState(false);
-  const [mistakeRawText, setMistakeRawText] = useState('');
-  const [isAiParsingMistake, setIsAiParsingMistake] = useState(false);
+  const [activeColId, setActiveColId] = useState(() => {
+    try {
+      const raw = localStorage.getItem('examcraft_notebook_data');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.collections && parsed.collections.length > 0) {
+          return parsed.collections[0].id;
+        }
+      }
+    } catch {}
+    return 'col-2';
+  });
 
-  // AI Variant Generation State
-  const [variantModal, setVariantModal] = useState(null); // { item, loading, data, error }
+  const [activeCategory, setActiveCategory] = useState('all');
+
+  const [mistakes, setMistakes] = useState(() => {
+    try {
+      const raw = localStorage.getItem('examcraft_notebook_data');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.items && parsed.items.length > 0) {
+          const existingIds = new Set(parsed.items.map((i) => i.id));
+          return [...parsed.items, ...MISTAKE_ITEMS.filter((i) => !existingIds.has(i.id))];
+        }
+      }
+    } catch {}
+    return MISTAKE_ITEMS;
+  });
+
+  // Keep localStorage synced when collections or mistakes change
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('examcraft_notebook_data', JSON.stringify({
+        collections,
+        items: mistakes
+      }));
+    } catch (e) {
+      console.warn('Notebook sync error:', e);
+    }
+  }, [collections, mistakes]);
 
   const activeCol = collections.find((c) => c.id === activeColId) || collections[1];
 
@@ -364,44 +404,69 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
 
           {/* Mistake Questions Stream */}
           <div className="flex flex-col gap-space-md">
-            {mistakes.map((item) => (
-              <article
-                key={item.id}
-                className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/30 flex flex-col gap-space-md hover:shadow-md transition-all"
-              >
-                {/* Header Row */}
-                <div className="flex items-center justify-between pb-2 border-b border-surface-container">
-                  <div className="flex items-center gap-space-sm">
-                    <span className="px-2 py-0.5 rounded bg-error-container text-on-error-container font-label-mono text-label-mono font-semibold">
-                      {item.num}
-                    </span>
-                    <span className="text-on-surface-variant font-label-md text-label-md">
-                      {item.type} · 满分 {item.score} 分
-                    </span>
-                    <span className="text-outline-variant">/</span>
-                    <span className="font-label-mono text-tertiary font-bold text-label-md">
-                      失分: {item.myDeduction}
+            {(() => {
+              const displayItems = mistakes.filter((m) => {
+                if (m.collectionId) return m.collectionId === activeColId;
+                return activeColId === 'col-2' || activeCategory === 'all';
+              });
+
+              if (displayItems.length === 0) {
+                return (
+                  <div className="bg-surface-container-lowest rounded-xl p-12 text-center text-on-surface-variant border border-outline-variant/30">
+                    <span className="material-symbols-outlined text-[40px] text-outline mb-2">folder_open</span>
+                    <p className="text-body-md font-medium">当前题集暂无试题收录。</p>
+                    <p className="text-body-sm text-outline mt-1">您可以在交卷复盘报告页点击「📥 结果转题集」，勾选对题或错题一键沉淀至本集。</p>
+                  </div>
+                );
+              }
+
+              return displayItems.map((item) => (
+                <article
+                  key={item.id}
+                  className={`bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border transition-all flex flex-col gap-space-md hover:shadow-md ${
+                    item.isCorrect ? 'border-secondary/40' : 'border-outline-variant/30'
+                  }`}
+                >
+                  {/* Header Row */}
+                  <div className="flex items-center justify-between pb-2 border-b border-surface-container">
+                    <div className="flex items-center gap-space-sm flex-wrap">
+                      <span className={`px-2 py-0.5 rounded font-label-mono text-label-mono font-semibold ${
+                        item.isCorrect
+                          ? 'bg-secondary-container text-secondary'
+                          : 'bg-error-container text-on-error-container'
+                      }`}>
+                        {item.num}
+                      </span>
+                      <span className="text-on-surface-variant font-label-md text-label-md">
+                        {item.type} · 满分 {item.score} 分
+                      </span>
+                      <span className="text-outline-variant">/</span>
+                      <span className={`font-label-mono font-bold text-label-md ${
+                        item.isCorrect ? 'text-secondary' : 'text-tertiary'
+                      }`}>
+                        {item.isCorrect ? '状态: ✅ 做对保留' : `失分: ${item.myDeduction}`}
+                      </span>
+                    </div>
+                    <span className="font-label-mono text-code-sm text-on-surface-variant">
+                      来源：{item.source}
                     </span>
                   </div>
-                  <span className="font-label-mono text-code-sm text-on-surface-variant">
-                    来源：{item.source}
-                  </span>
-                </div>
 
-                {/* Prompt & Formula */}
-                <div className="space-y-1.5">
-                  <MathMarkdown
-                    content={item.title}
-                    className="font-headline-sm text-headline-sm text-on-surface font-semibold"
-                  />
-                  {item.formula && (
-                    <div className="p-space-md bg-surface-container-low rounded-lg text-primary overflow-x-auto border border-outline-variant/20">
-                      <MathMarkdown
-                        content={item.formula.startsWith('$') ? item.formula : `$$${item.formula}$$`}
-                      />
-                    </div>
-                  )}
-                </div>
+                  {/* Prompt & Formula */}
+                  <div className="space-y-1.5">
+                    <MathMarkdown
+                      content={item.fullPrompt || item.title}
+                      className="font-headline-sm text-headline-sm text-on-surface font-semibold"
+                    />
+                    {item.formula && (
+                      <div className="p-space-md bg-surface-container-low rounded-lg text-primary overflow-x-auto border border-outline-variant/20">
+                        <MathMarkdown
+                          content={item.formula.startsWith('$') ? item.formula : `$$${item.formula}$$`}
+                        />
+                      </div>
+                    )}
+                  </div>
+
 
                 {/* Weak Point & Error Reason */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-space-sm">
@@ -425,10 +490,14 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 {/* Answer Comparison */}
                 <div className="p-space-md bg-surface-container-low rounded-xl space-y-space-xs text-code-sm border border-outline-variant/30">
                   <div className="flex items-start gap-2">
-                    <span className="px-1.5 py-0.5 rounded bg-error-container text-on-error-container font-sans text-label-sm font-bold shrink-0">
-                      考生错解
+                    <span className={`px-1.5 py-0.5 rounded font-sans text-label-sm font-bold shrink-0 ${
+                      item.isCorrect
+                        ? 'bg-secondary-container/60 text-secondary'
+                        : 'bg-error-container text-on-error-container'
+                    }`}>
+                      {item.isCorrect ? '考生作答 (达成)' : '考生错解'}
                     </span>
-                    <MathMarkdown content={item.userWrongAnswer} className="text-on-surface-variant font-mono text-code-sm" />
+                    <MathMarkdown content={item.userWrongAnswer} className="text-on-surface font-mono text-code-sm" />
                   </div>
                   <div className="flex items-start gap-2 pt-1 border-t border-surface-container">
                     <span className="px-1.5 py-0.5 rounded bg-secondary-container text-on-secondary-container font-sans text-label-sm font-bold shrink-0">
@@ -467,7 +536,8 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   </button>
                 </div>
               </article>
-            ))}
+            ));
+          })()}
           </div>
         </section>
       </div>

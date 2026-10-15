@@ -4,6 +4,7 @@ import DashboardView from './views/DashboardView';
 import ExamGeneratorView from './views/ExamGeneratorView';
 import PaperLibraryView from './views/PaperLibraryView';
 import ExamRoomView from './views/ExamRoomView';
+import ExamResultReportView from './views/ExamResultReportView';
 import MistakeNotebookView from './views/MistakeNotebookView';
 import SettingsView from './views/SettingsView';
 import { INITIAL_PAPERS, MOCK_EXAM_QUESTIONS } from './data/mockData';
@@ -13,6 +14,7 @@ export default function App() {
   const [papers, setPapers] = useState(INITIAL_PAPERS);
   const [activePaper, setActivePaper] = useState(INITIAL_PAPERS[0]);
   const [questions, setQuestions] = useState(MOCK_EXAM_QUESTIONS);
+  const [activeSubmission, setActiveSubmission] = useState(null);
 
   const handleStartExam = (paper) => {
     setActivePaper(paper);
@@ -22,6 +24,19 @@ export default function App() {
       setQuestions(MOCK_EXAM_QUESTIONS);
     }
     setCurrentPath('exam-room');
+  };
+
+  const handleSubmitExam = (submission) => {
+    setActiveSubmission(submission);
+    setCurrentPath('exam-result');
+  };
+
+  const handleViewSubmission = (submission) => {
+    setActiveSubmission(submission);
+    // Also sync activePaper if found
+    const matchPaper = papers.find(p => p.id === submission.paperId || p.title === submission.paperTitle);
+    if (matchPaper) setActivePaper(matchPaper);
+    setCurrentPath('exam-result');
   };
 
   const handleStartExamWithMistakes = (collectionTitle) => {
@@ -43,12 +58,12 @@ export default function App() {
     setCurrentPath('exam-room');
   };
 
-  const isExamRoom = currentPath === 'exam-room';
+  const isFullScreenMode = currentPath === 'exam-room' || currentPath === 'exam-result';
 
   return (
     <div className="min-h-screen bg-background text-on-surface flex flex-col font-sans selection:bg-primary-fixed selection:text-primary">
-      {/* Top Header - hidden during full focus exam room mode */}
-      {!isExamRoom && (
+      {/* Top Header - hidden during full focus exam room or result review mode */}
+      {!isFullScreenMode && (
         <Header
           currentPath={currentPath}
           setCurrentPath={setCurrentPath}
@@ -57,7 +72,7 @@ export default function App() {
       )}
 
       {/* Main Container */}
-      <main className={`flex-1 flex flex-col ${!isExamRoom ? 'pt-14' : ''}`}>
+      <main className={`flex-1 flex flex-col ${!isFullScreenMode ? 'pt-14' : ''}`}>
         {currentPath === 'dashboard' && (
           <DashboardView
             papers={papers}
@@ -79,6 +94,7 @@ export default function App() {
             papers={papers}
             onStartExam={handleStartExam}
             onNavigate={setCurrentPath}
+            onViewSubmission={handleViewSubmission}
           />
         )}
 
@@ -98,9 +114,23 @@ export default function App() {
             questions={questions}
             onExit={() => setCurrentPath('exam-generator')}
             onOpenMistakes={() => setCurrentPath('question-bank')}
+            onSubmitExam={handleSubmitExam}
+          />
+        )}
+
+        {currentPath === 'exam-result' && (
+          <ExamResultReportView
+            submission={activeSubmission}
+            onBackToLibrary={() => setCurrentPath('paper-library')}
+            onRetakeExam={() => {
+              if (activePaper) handleStartExam(activePaper);
+              else setCurrentPath('paper-library');
+            }}
+            onOpenNotebook={() => setCurrentPath('question-bank')}
           />
         )}
       </main>
     </div>
   );
 }
+

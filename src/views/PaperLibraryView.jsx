@@ -1,11 +1,30 @@
 import React, { useState } from 'react';
 
-export default function PaperLibraryView({ papers, onStartExam, onNavigate }) {
+export default function PaperLibraryView({ papers, onStartExam, onNavigate, onViewSubmission }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('全部');
   const [sortBy, setSortBy] = useState('date-desc');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [paperList, setPaperList] = useState(papers);
+
+  // Submissions history state from localStorage
+  const [submissions, setSubmissions] = useState(() => {
+    try {
+      const raw = localStorage.getItem('examcraft_submissions');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedHistoryPaper, setSelectedHistoryPaper] = useState(null);
+
+  // Refresh submissions when component mounts or updates
+  const refreshSubmissions = () => {
+    try {
+      const raw = localStorage.getItem('examcraft_submissions');
+      if (raw) setSubmissions(JSON.parse(raw));
+    } catch {}
+  };
 
   // Modals
   const [selectedPreviewPaper, setSelectedPreviewPaper] = useState(null);
@@ -341,70 +360,130 @@ A. 1  B. 3  C. 0  D. 不存在
                   </div>
 
                   {/* Answer Telemetry Metric Strip */}
-                  {paper.highestScore !== null ? (
-                    <div className="grid grid-cols-3 gap-space-xs bg-surface-container-lowest p-2 rounded-lg shadow-xs border border-outline-variant/20">
-                      <div className="flex flex-col">
-                        <span className="font-label-mono text-[10px] text-on-surface-variant uppercase">Highest Score</span>
-                        <span className="font-label-mono text-label-md text-secondary font-semibold">
-                          {paper.highestScore} <span className="text-[11px] font-normal text-on-surface-variant">/ {paper.totalScore}</span>
-                        </span>
+                  {(() => {
+                    const paperSubs = submissions.filter(
+                      (s) => s.paperId === paper.id || s.paperTitle === paper.title
+                    );
+                    const hasAttempts = paperSubs.length > 0;
+                    const realHighest = hasAttempts ? Math.max(...paperSubs.map((s) => s.score)) : paper.highestScore;
+                    const realAttempts = hasAttempts ? paperSubs.length : (paper.attempts || 0);
+
+                    if (realAttempts > 0) {
+                      return (
+                        <div className="grid grid-cols-3 gap-space-xs bg-surface-container-lowest p-2 rounded-lg shadow-xs border border-outline-variant/20">
+                          <div className="flex flex-col">
+                            <span className="font-label-mono text-[10px] text-on-surface-variant uppercase">Highest Score</span>
+                            <span className="font-label-mono text-label-md text-secondary font-semibold">
+                              {realHighest} <span className="text-[11px] font-normal text-on-surface-variant">/ {paper.totalScore}</span>
+                            </span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="font-label-mono text-[10px] text-on-surface-variant uppercase">Attempts</span>
+                            <span className="font-label-mono text-label-md text-on-surface font-semibold">{realAttempts} 次作答</span>
+                            {hasAttempts && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedHistoryPaper({ paper, submissions: paperSubs })}
+                                className="text-primary hover:underline text-[10px] font-label-mono text-left cursor-pointer font-medium mt-0.5"
+                              >
+                                回看历次记录 &gt;
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="font-label-mono text-[10px] text-on-surface-variant uppercase">Identified Flaws</span>
+                            <span className="font-label-mono text-label-md text-tertiary font-semibold">{paper.flaws || 0} 处典型错因</span>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="flex items-center justify-between bg-surface-container-lowest p-2 rounded-lg shadow-xs border border-outline-variant/20">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+                          <span className="font-label-mono text-label-sm text-on-surface-variant">STATUS:</span>
+                          <span className="font-label-mono text-label-sm text-secondary font-semibold">{paper.status}</span>
+                        </div>
+                        <span className="font-label-mono text-[11px] text-outline">预计平均完成用时 ~{Math.round(paper.duration * 0.75)}m</span>
                       </div>
-                      <div className="flex flex-col">
-                        <span className="font-label-mono text-[10px] text-on-surface-variant uppercase">Attempts</span>
-                        <span className="font-label-mono text-label-md text-on-surface font-semibold">{paper.attempts} 次作答</span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="font-label-mono text-[10px] text-on-surface-variant uppercase">Identified Flaws</span>
-                        <span className="font-label-mono text-label-md text-tertiary font-semibold">{paper.flaws} 处典型错因</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between bg-surface-container-lowest p-2 rounded-lg shadow-xs border border-outline-variant/20">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-                        <span className="font-label-mono text-label-sm text-on-surface-variant">STATUS:</span>
-                        <span className="font-label-mono text-label-sm text-secondary font-semibold">{paper.status}</span>
-                      </div>
-                      <span className="font-label-mono text-[11px] text-outline">预计平均完成用时 ~{Math.round(paper.duration * 0.75)}m</span>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
 
                 {/* Footer Action Strip */}
-                <div className="bg-surface-container-low px-space-lg py-2.5 flex items-center justify-between gap-space-sm border-t border-outline-variant/20">
-                  <div className="flex items-center gap-space-xs flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => onStartExam(paper)}
-                      className="inline-flex items-center gap-1 px-3 h-7.5 rounded bg-primary-container hover:bg-primary text-on-primary font-label-sm text-label-sm transition-all shadow-xs cursor-pointer active:scale-95"
-                    >
-                      <span className="material-symbols-outlined text-[15px]">fullscreen</span>
-                      进入考场 (专注模式)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPreviewPaper(paper)}
-                      className="inline-flex items-center gap-1 px-2.5 h-7.5 rounded bg-surface-container-lowest hover:bg-surface text-on-surface font-label-sm text-label-sm transition-colors shadow-xs border border-outline-variant/30 cursor-pointer"
-                    >
-                      大试卷总览
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedReportPaper(paper)}
-                      className="inline-flex items-center gap-1 px-2.5 h-7.5 rounded bg-surface-container-lowest hover:bg-surface text-on-surface font-label-sm text-label-sm transition-colors shadow-xs border border-outline-variant/30 cursor-pointer"
-                    >
-                      诊断报告
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => alert(`试卷「${paper.title}」已加入快速导出清单。`)}
-                    className="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container transition-colors cursor-pointer"
-                    title="更多操作"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">more_horiz</span>
-                  </button>
-                </div>
+                {(() => {
+                  const paperSubs = submissions.filter(
+                    (s) => s.paperId === paper.id || s.paperTitle === paper.title
+                  );
+                  const latestSub = paperSubs[0] || null;
+
+                  return (
+                    <div className="bg-surface-container-low px-space-lg py-2.5 flex items-center justify-between gap-space-sm border-t border-outline-variant/20 flex-wrap">
+                      <div className="flex items-center gap-space-xs flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => onStartExam(paper)}
+                          className="inline-flex items-center gap-1 px-3 h-7.5 rounded bg-primary-container hover:bg-primary text-on-primary font-label-sm text-label-sm transition-all shadow-xs cursor-pointer active:scale-95 font-medium"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">fullscreen</span>
+                          进入考场 (专注模式)
+                        </button>
+
+                        {/* Direct Jump to Latest Submission Review */}
+                        {latestSub && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (onViewSubmission) onViewSubmission(latestSub);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 h-7.5 rounded bg-secondary-container/40 hover:bg-secondary-container text-secondary font-label-sm text-label-sm transition-colors shadow-xs border border-secondary/30 cursor-pointer font-semibold"
+                            title={`查看最新一次交卷复盘报告 (${latestSub.score}分)`}
+                          >
+                            <span className="material-symbols-outlined text-[15px]">analytics</span>
+                            <span>AI 判卷复盘 ({latestSub.score}分)</span>
+                          </button>
+                        )}
+
+                        {/* History Records Button if multiple attempts */}
+                        {paperSubs.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedHistoryPaper({ paper, submissions: paperSubs })}
+                            className="inline-flex items-center gap-1 px-2.5 h-7.5 rounded bg-surface-container-lowest hover:bg-surface text-on-surface font-label-sm text-label-sm transition-colors shadow-xs border border-outline-variant/30 cursor-pointer"
+                            title={`回看此卷全部 ${paperSubs.length} 次作答提交报告`}
+                          >
+                            <span className="material-symbols-outlined text-[15px]">history</span>
+                            <span>作答记录 ({paperSubs.length})</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPreviewPaper(paper)}
+                          className="inline-flex items-center gap-1 px-2.5 h-7.5 rounded bg-surface-container-lowest hover:bg-surface text-on-surface font-label-sm text-label-sm transition-colors shadow-xs border border-outline-variant/30 cursor-pointer"
+                        >
+                          大试卷总览
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedReportPaper(paper)}
+                          className="inline-flex items-center gap-1 px-2.5 h-7.5 rounded bg-surface-container-lowest hover:bg-surface text-on-surface font-label-sm text-label-sm transition-colors shadow-xs border border-outline-variant/30 cursor-pointer"
+                        >
+                          诊断报告
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => alert(`试卷「${paper.title}」已加入快速导出清单。`)}
+                        className="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container transition-colors cursor-pointer"
+                        title="更多操作"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">more_horiz</span>
+                      </button>
+                    </div>
+                  );
+                })()}
               </article>
             );
           })}
@@ -691,6 +770,120 @@ A. 1  B. 3  C. 0  D. 不存在
           </div>
         </div>
       )}
+
+      {/* Modal: 历史作答提交记录回溯抽屉/弹窗 */}
+      {selectedHistoryPaper && (
+        <div className="fixed inset-0 z-50 bg-on-background/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-3xl w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
+            {/* Header */}
+            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container shrink-0">
+              <div>
+                <span className="px-2 py-0.5 rounded bg-primary-fixed text-primary font-label-mono text-label-mono font-semibold">
+                  作答历史回溯中心
+                </span>
+                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface mt-1">
+                  《{selectedHistoryPaper.paper.title}》· 提交记录 ({selectedHistoryPaper.submissions.length} 次作答)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedHistoryPaper(null)}
+                className="text-outline hover:text-on-surface p-1 rounded-full hover:bg-surface-container cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Submissions List */}
+            <div className="flex-1 overflow-y-auto space-y-space-sm pr-1">
+              {selectedHistoryPaper.submissions.length === 0 ? (
+                <div className="p-8 text-center text-on-surface-variant">暂无真实作答记录。</div>
+              ) : (
+                selectedHistoryPaper.submissions.map((sub, idx) => {
+                  const correctCount = sub.questions?.filter((q) => q.isCorrect).length || 0;
+                  const wrongCount = sub.questions?.filter((q) => !q.isCorrect && q.userAnswer?.trim()).length || 0;
+
+                  return (
+                    <div
+                      key={sub.id || idx}
+                      className="p-space-md rounded-xl bg-surface-container-low border border-outline-variant/30 flex flex-col sm:flex-row sm:items-center justify-between gap-space-md hover:bg-surface-container transition-colors"
+                    >
+                      <div className="flex flex-col space-y-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="px-2 py-0.5 rounded bg-primary-container text-on-primary font-label-mono text-[11px] font-bold">
+                            第 {selectedHistoryPaper.submissions.length - idx} 次提交
+                          </span>
+                          <span className="text-[12px] font-label-mono text-on-surface-variant">
+                            提交时间: {sub.submitTime}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline space-x-2">
+                          <span className="text-[30px] font-mono font-bold text-secondary">
+                            {sub.score}
+                          </span>
+                          <span className="text-body-sm font-mono text-on-surface-variant">
+                            / {sub.totalScore || 100} 分
+                          </span>
+                          <span className="text-[12px] font-label-mono text-primary font-semibold pl-2">
+                            正确率: {sub.accuracy}%
+                          </span>
+                          <span className="text-[11px] font-label-mono text-outline">
+                            (做对 {correctCount} 题 · 答错 {wrongCount} 题)
+                          </span>
+                        </div>
+                        {sub.aiOverallReview?.summary && (
+                          <p className="text-body-sm text-on-surface-variant line-clamp-2 italic max-w-xl">
+                            “{sub.aiOverallReview.summary}”
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedHistoryPaper(null);
+                            if (onViewSubmission) onViewSubmission(sub);
+                          }}
+                          className="px-3.5 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-sm text-label-sm font-semibold shadow-xs transition-all active:scale-95 cursor-pointer flex items-center space-x-1"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">visibility</span>
+                          <span>查看该次 AI 判卷复盘</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between pt-2 border-t border-surface-container shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const p = selectedHistoryPaper.paper;
+                  setSelectedHistoryPaper(null);
+                  onStartExam(p);
+                }}
+                className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer flex items-center space-x-1"
+              >
+                <span className="material-symbols-outlined text-[18px]">restart_alt</span>
+                <span>再刷一次本卷</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedHistoryPaper(null)}
+                className="px-4 py-2 rounded-lg bg-surface-container-low text-on-surface font-label-md cursor-pointer"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

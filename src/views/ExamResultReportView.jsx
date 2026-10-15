@@ -1,0 +1,918 @@
+import React, { useState } from 'react';
+import MathMarkdown from '../components/MathMarkdown';
+
+export default function ExamResultReportView({
+  submission,
+  onBackToLibrary,
+  onRetakeExam,
+  onOpenNotebook
+}) {
+  if (!submission) {
+    return (
+      <div className="w-full flex-1 flex flex-col items-center justify-center p-12 text-center">
+        <span className="material-symbols-outlined text-[48px] text-outline mb-2">assignment_late</span>
+        <h2 className="text-headline-sm font-semibold text-on-surface">未检测到作答提交记录</h2>
+        <p className="text-body-md text-on-surface-variant mt-1 mb-6">请从试卷库中选择一份已完成的试卷或重新进入考场完成考试。</p>
+        <button
+          type="button"
+          onClick={onBackToLibrary}
+          className="px-4 py-2 bg-primary text-on-primary rounded-lg font-label-md cursor-pointer"
+        >
+          返回试卷库
+        </button>
+      </div>
+    );
+  }
+
+  const {
+    id,
+    paperId,
+    paperTitle = '模拟冲刺卷',
+    submitTime = '刚刚',
+    durationSpent = 0,
+    score = 0,
+    totalScore = 100,
+    accuracy = 0,
+    questions = [],
+    aiOverallReview = null
+  } = submission;
+
+  // Question filter: 'all' | 'wrong' | 'correct' | 'unanswered'
+  const [filterMode, setFilterMode] = useState('all');
+
+  // Modal for exporting to notebook / question bank
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [selectedQIds, setSelectedQIds] = useState(() => {
+    // Default: pre-select all wrong questions
+    return questions.filter(q => !q.isCorrect).map(q => q.id);
+  });
+  const [targetCollectionMode, setTargetCollectionMode] = useState('new'); // 'new' | 'existing'
+  const [existingColId, setExistingColId] = useState('col-2');
+  const [newCollectionName, setNewCollectionName] = useState(`${paperTitle} · 错题与精选集`);
+  const [exportSuccessMessage, setExportSuccessMessage] = useState('');
+
+  // Expand / collapse all analyses toggle
+  const [expandedAll, setExpandedAll] = useState(false);
+  const [expandedMap, setExpandedMap] = useState({});
+
+  const toggleExpand = (qId) => {
+    setExpandedMap(prev => ({ ...prev, [qId]: !prev[qId] }));
+  };
+
+  const formatDuration = (totalSec) => {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    if (mins >= 60) {
+      const hrs = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      return `${hrs}小时${remMins}分${secs}秒`;
+    }
+    return `${mins}分${secs}秒`;
+  };
+
+  // Stats calculation
+  const totalCount = questions.length;
+  const correctCount = questions.filter(q => q.isCorrect).length;
+  const wrongCount = questions.filter(q => !q.isCorrect && q.userAnswer && q.userAnswer.trim().length > 0).length;
+  const unansweredCount = questions.filter(q => !q.userAnswer || q.userAnswer.trim().length === 0).length;
+
+  // Filter questions
+  const filteredQuestions = questions.filter(q => {
+    if (filterMode === 'wrong') return !q.isCorrect && q.userAnswer && q.userAnswer.trim().length > 0;
+    if (filterMode === 'correct') return q.isCorrect;
+    if (filterMode === 'unanswered') return !q.userAnswer || q.userAnswer.trim().length === 0;
+    return true;
+  });
+
+  // Calculate percentile
+  const beatPercentile = Math.min(99.2, Math.max(12.5, Math.round((accuracy * 0.95 + 10) * 10) / 10));
+
+  // Selection handlers for Export Modal
+  const handleSelectAllWrong = () => {
+    const wrongIds = questions.filter(q => !q.isCorrect).map(q => q.id);
+    setSelectedQIds(wrongIds);
+  };
+
+  const handleSelectAllCorrect = () => {
+    const correctIds = questions.filter(q => q.isCorrect).map(q => q.id);
+    setSelectedQIds(correctIds);
+  };
+
+  const handleSelectAll = () => {
+    setSelectedQIds(questions.map(q => q.id));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedQIds([]);
+  };
+
+  const toggleSelectQuestion = (qId) => {
+    setSelectedQIds(prev =>
+      prev.includes(qId) ? prev.filter(id => id !== qId) : [...prev, qId]
+    );
+  };
+
+  // Perform export to localStorage notebook
+  const handleConfirmExportToNotebook = () => {
+    if (selectedQIds.length === 0) {
+      alert('请至少勾选一道题目以沉淀至题集。');
+      return;
+    }
+
+    const selectedQuestions = questions.filter(q => selectedQIds.includes(q.id));
+    const finalFolderName = targetCollectionMode === 'new'
+      ? (newCollectionName.trim() || `${paperTitle} · 精选题集`)
+      : '归档题集';
+
+    try {
+      // 1. Read existing notebook storage or create initial
+      const storedNotebookRaw = localStorage.getItem('examcraft_notebook_data');
+      let notebookData = null;
+      if (storedNotebookRaw) {
+        try {
+          notebookData = JSON.parse(storedNotebookRaw);
+        } catch {}
+      }
+
+      const colId = targetCollectionMode === 'new' ? `col-${Date.now()}` : existingColId;
+      
+      const newCollection = {
+        id: colId,
+        title: finalFolderName,
+        count: selectedQuestions.length,
+        active: true,
+        updated: '刚刚',
+        desc: `收录自试卷《${paperTitle}》的 ${selectedQuestions.length} 道专项精选题（含 ${selectedQuestions.filter(q=>!q.isCorrect).length} 道错题，${selectedQuestions.filter(q=>q.isCorrect).length} 道典题）。`,
+        icon: 'folder_special'
+      };
+
+      // Convert questions to mistake items
+      const newItems = selectedQuestions.map(q => ({
+        id: `item-${q.id}-${Date.now()}`,
+        collectionId: colId,
+        num: `题号 ${q.num}`,
+        type: q.type || '试题',
+        score: q.score || 5,
+        title: q.prompt ? (q.prompt.length > 80 ? q.prompt.slice(0, 80) + '...' : q.prompt) : '题目详情',
+        formula: q.mathExpression || '',
+        fullPrompt: q.prompt,
+        options: q.options,
+        source: paperTitle,
+        isCorrect: q.isCorrect,
+        myDeduction: q.isCorrect ? '+0分 (已做对)' : `-${q.score || 5}分`,
+        errorReason: q.isCorrect
+          ? '考生作答完全正确，收录为经典同构保留题'
+          : (q.aiInsight || '步骤演算或概念理解出现偏差'),
+        weakPoint: q.weakPoint || `${q.type} / 综合考点`,
+        userWrongAnswer: q.userAnswer || '未填写',
+        standardAnswer: q.standardAnswer || '详见官方解析',
+        aiInsight: q.aiInsight || q.analysis || '建议结合考纲定理重新手推演算，规避粗心失分。',
+        analysis: q.analysis || ''
+      }));
+
+      let collectionsList = notebookData?.collections || [];
+      let itemsList = notebookData?.items || [];
+
+      if (targetCollectionMode === 'new') {
+        collectionsList = [newCollection, ...collectionsList];
+      } else {
+        collectionsList = collectionsList.map(c =>
+          c.id === existingColId ? { ...c, count: (c.count || 0) + newItems.length } : c
+        );
+      }
+      itemsList = [...newItems, ...itemsList];
+
+      localStorage.setItem('examcraft_notebook_data', JSON.stringify({
+        collections: collectionsList,
+        items: itemsList
+      }));
+
+      const correctSelected = selectedQuestions.filter(q => q.isCorrect).length;
+      const wrongSelected = selectedQuestions.filter(q => !q.isCorrect).length;
+
+      setExportSuccessMessage(`🎉 成功收录 ${selectedQuestions.length} 道试题（含 ${wrongSelected} 道错题 + ${correctSelected} 道做对经典题）至题集《${finalFolderName}》！`);
+      setTimeout(() => {
+        setIsExportModalOpen(false);
+        setExportSuccessMessage('');
+      }, 2500);
+    } catch (e) {
+      alert(`保存题集失败: ${e.message}`);
+    }
+  };
+
+  const scrollToQuestion = (qId) => {
+    const el = document.getElementById(`q-card-${qId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-primary');
+      setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-primary');
+      }, 1500);
+    }
+  };
+
+  return (
+    <div className="w-full flex-1 flex flex-col bg-background min-h-screen pb-24">
+      {/* 1. Top Minimalist Telemetry & Action Navigation */}
+      <header className="sticky top-0 z-40 w-full bg-surface-container-lowest/95 backdrop-blur-md border-b border-outline-variant/30 px-4 sm:px-margin-desktop py-space-sm flex items-center justify-between shadow-xs">
+        <div className="flex items-center space-x-space-md min-w-0">
+          <button
+            type="button"
+            onClick={onBackToLibrary}
+            className="flex items-center text-outline hover:text-on-surface p-1 rounded-lg hover:bg-surface-container transition-colors cursor-pointer mr-1"
+            title="返回试卷库"
+          >
+            <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+          </button>
+          <div className="flex items-center space-x-1.5 min-w-0">
+            <span className="material-symbols-outlined text-secondary text-[22px] material-symbols-fill">
+              verified
+            </span>
+            <div className="flex flex-col">
+              <span className="font-headline-sm text-headline-sm font-semibold text-on-surface truncate max-w-xs md:max-w-md">
+                {paperTitle} · AI 评测复盘报告
+              </span>
+              <span className="text-[11px] font-label-mono text-on-surface-variant">
+                提交时间: {submitTime} · 答题用时: {formatDuration(durationSpent)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-space-sm sm:space-x-space-md">
+          <button
+            type="button"
+            onClick={() => setIsExportModalOpen(true)}
+            className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 bg-primary hover:bg-primary-container text-on-primary font-label-md text-label-md rounded-lg shadow-sm transition-all active:scale-95 cursor-pointer font-medium"
+          >
+            <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
+            <span>📥 结果转题集 (自由组合)</span>
+          </button>
+          <button
+            type="button"
+            onClick={onRetakeExam}
+            className="hidden sm:inline-flex items-center space-x-1 px-3 py-1.5 bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md rounded-lg border border-outline-variant/40 transition-colors cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[17px]">restart_alt</span>
+            <span>再做一次本卷</span>
+          </button>
+          <button
+            type="button"
+            onClick={onBackToLibrary}
+            className="inline-flex items-center space-x-1 px-3 py-1.5 bg-surface-container-low hover:bg-surface-container text-on-surface-variant font-label-md text-label-md rounded-lg border border-outline-variant/30 transition-colors cursor-pointer"
+          >
+            <span>返回试卷库</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="w-full max-w-7xl mx-auto px-4 sm:px-margin-tablet lg:px-margin-desktop py-space-xl flex flex-col space-y-space-xl">
+        
+        {/* 2. Score & AI Master Review Dashboard */}
+        <section className="bg-surface-container-lowest rounded-2xl p-space-xl shadow-sm border border-outline-variant/30 flex flex-col lg:flex-row gap-space-xl items-stretch">
+          {/* Left: Score & Key KPI Cards */}
+          <div className="lg:w-80 shrink-0 flex flex-col justify-between p-space-lg bg-surface-container-low rounded-xl border border-outline-variant/30 space-y-space-md">
+            <div>
+              <div className="flex items-center justify-between text-on-surface-variant font-label-mono text-label-mono mb-1">
+                <span>FINAL ASSESSMENT SCORE</span>
+                <span className="px-2 py-0.5 rounded-full bg-secondary-container/40 text-secondary font-semibold text-[11px]">
+                  全真模拟评测
+                </span>
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-[52px] leading-tight font-extrabold font-mono text-secondary">
+                  {score}
+                </span>
+                <span className="text-body-md font-mono text-on-surface-variant">
+                  / {totalScore} 分
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-space-sm pt-2 border-t border-outline-variant/20">
+              <div className="p-2 rounded bg-surface-container-lowest/80 border border-outline-variant/20">
+                <span className="text-[11px] font-label-mono text-on-surface-variant block">全卷正确率</span>
+                <span className="text-headline-sm font-bold font-mono text-primary">{accuracy}%</span>
+              </div>
+              <div className="p-2 rounded bg-surface-container-lowest/80 border border-outline-variant/20">
+                <span className="text-[11px] font-label-mono text-on-surface-variant block">预计击败同考</span>
+                <span className="text-headline-sm font-bold font-mono text-tertiary">{beatPercentile}%</span>
+              </div>
+              <div className="p-2 rounded bg-surface-container-lowest/80 border border-outline-variant/20">
+                <span className="text-[11px] font-label-mono text-on-surface-variant block">答对题目</span>
+                <span className="text-headline-sm font-bold font-mono text-secondary">{correctCount} <span className="text-[11px] font-normal text-on-surface-variant">题</span></span>
+              </div>
+              <div className="p-2 rounded bg-surface-container-lowest/80 border border-outline-variant/20">
+                <span className="text-[11px] font-label-mono text-on-surface-variant block">错题待攻坚</span>
+                <span className="text-headline-sm font-bold font-mono text-error">{wrongCount} <span className="text-[11px] font-normal text-on-surface-variant">题</span></span>
+              </div>
+            </div>
+
+            <div className="text-[11px] font-label-mono text-on-surface-variant flex items-center justify-between pt-1">
+              <span>试卷总题数: {totalCount} 题</span>
+              <span>未作答: {unansweredCount} 题</span>
+            </div>
+          </div>
+
+          {/* Right: AI Master Diagnostic Review */}
+          <div className="flex-1 flex flex-col justify-between space-y-space-md">
+            <div>
+              <div className="flex items-center space-x-2 text-primary mb-2">
+                <span className="material-symbols-outlined text-[22px] material-symbols-fill">psychology</span>
+                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
+                  AI 命题组名师·全卷考情深度诊断
+                </h3>
+              </div>
+              <p className="text-body-md text-on-surface-variant leading-relaxed bg-surface-container-low/50 p-space-md rounded-xl border border-outline-variant/20">
+                {aiOverallReview?.summary ||
+                  `考生在本次《${paperTitle}》中表现扎实，基础客观题发挥稳定。失分多集中在推导细节与概念辨析临界点。建议重点关注本次判卷识别的典型错题，通过举一反三变式训练完成知识点闭环巩固。`}
+              </p>
+            </div>
+
+            {/* Strengths & Weaknesses Tags */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+              <div className="p-space-sm rounded-xl bg-secondary-container/20 border border-secondary-container/40">
+                <span className="text-label-sm font-semibold text-secondary flex items-center gap-1 mb-1.5">
+                  <span className="material-symbols-outlined text-[16px]">thumb_up</span>
+                  优势考点与解题长板
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(aiOverallReview?.strengths || ['常规题型作答规范', '时间节奏把控合理', '基础概念辨析清晰']).map((st, i) => (
+                    <span key={i} className="px-2 py-0.5 rounded bg-surface-container-lowest text-[11px] font-label-mono text-secondary border border-secondary/20">
+                      ✓ {st}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-space-sm rounded-xl bg-error-container/20 border border-error-container/40">
+                <span className="text-label-sm font-semibold text-error flex items-center gap-1 mb-1.5">
+                  <span className="material-symbols-outlined text-[16px]">warning</span>
+                  典型失分点与薄弱环节
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(aiOverallReview?.weaknesses || ['复杂式子变形符号处理易出现笔误', '临界条件展开阶数需巩固', '综合应用题给分点自核需加强']).map((wt, i) => (
+                    <span key={i} className="px-2 py-0.5 rounded bg-surface-container-lowest text-[11px] font-label-mono text-error border border-error/20">
+                      ⚠ {wt}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Plan */}
+            <div className="flex items-center justify-between text-body-sm text-on-surface-variant bg-surface-container-low px-space-md py-2 rounded-lg">
+              <span className="font-semibold text-on-surface flex items-center gap-1">
+                <span className="material-symbols-outlined text-[16px] text-primary">lightbulb</span>
+                提分突破口：
+              </span>
+              <span className="truncate max-w-xl text-[13px]">
+                {aiOverallReview?.actionPlan?.[0] || '建议一键将本次错题与经典题收录至题集，针对失分题型进行举一反三重练。'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsExportModalOpen(true)}
+                className="text-primary hover:underline font-label-sm font-semibold shrink-0 cursor-pointer ml-2"
+              >
+                立即转题集 &gt;
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* 3. Filter Pill Bar & Question Mini-Map Matrix */}
+        <section className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+          {/* Left: Filter Pills */}
+          <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto pb-1 md:pb-0">
+            <button
+              type="button"
+              onClick={() => setFilterMode('all')}
+              className={`px-3 py-1 rounded-full font-label-mono text-label-mono transition-all flex items-center gap-1 cursor-pointer ${
+                filterMode === 'all'
+                  ? 'bg-primary text-on-primary font-medium shadow-xs'
+                  : 'bg-surface-container-low text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
+              }`}
+            >
+              <span>全部试题</span>
+              <span className="opacity-80">({totalCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterMode('wrong')}
+              className={`px-3 py-1 rounded-full font-label-mono text-label-mono transition-all flex items-center gap-1 cursor-pointer ${
+                filterMode === 'wrong'
+                  ? 'bg-error text-on-error font-medium shadow-xs'
+                  : 'bg-surface-container-low text-error hover:bg-surface-container'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[14px]">cancel</span>
+              <span>仅看错题</span>
+              <span className="opacity-80">({wrongCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterMode('correct')}
+              className={`px-3 py-1 rounded-full font-label-mono text-label-mono transition-all flex items-center gap-1 cursor-pointer ${
+                filterMode === 'correct'
+                  ? 'bg-secondary text-on-secondary font-medium shadow-xs'
+                  : 'bg-surface-container-low text-secondary hover:bg-surface-container'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[14px]">check_circle</span>
+              <span>仅看对题</span>
+              <span className="opacity-80">({correctCount})</span>
+            </button>
+            {unansweredCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilterMode('unanswered')}
+                className={`px-3 py-1 rounded-full font-label-mono text-label-mono transition-all flex items-center gap-1 cursor-pointer ${
+                  filterMode === 'unanswered'
+                    ? 'bg-outline text-on-primary font-medium shadow-xs'
+                    : 'bg-surface-container-low text-outline hover:bg-surface-container'
+                }`}
+              >
+                <span>未作答</span>
+                <span className="opacity-80">({unansweredCount})</span>
+              </button>
+            )}
+          </div>
+
+          {/* Right: Quick actions */}
+          <div className="flex items-center gap-space-sm shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const nextState = !expandedAll;
+                setExpandedAll(nextState);
+                const newMap = {};
+                questions.forEach(q => { newMap[q.id] = nextState; });
+                setExpandedMap(newMap);
+              }}
+              className="px-2.5 py-1 rounded bg-surface-container hover:bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm transition-colors cursor-pointer flex items-center gap-1"
+            >
+              <span className="material-symbols-outlined text-[16px]">
+                {expandedAll ? 'unfold_less' : 'unfold_more'}
+              </span>
+              <span>{expandedAll ? '全部收起解析' : '全部展开解析'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsExportModalOpen(true)}
+              className="px-3 py-1 rounded bg-primary-container hover:bg-primary text-on-primary font-label-sm text-label-sm transition-colors cursor-pointer flex items-center gap-1 font-medium"
+            >
+              <span className="material-symbols-outlined text-[16px]">playlist_add_check</span>
+              <span>勾选题目转题集</span>
+            </button>
+          </div>
+        </section>
+
+        {/* 4. Question Navigation Mini-Map Matrix (Quick Jump) */}
+        <div className="bg-surface-container-lowest rounded-xl p-space-md shadow-xs border border-outline-variant/30 flex items-center gap-space-sm overflow-x-auto">
+          <span className="text-[11px] font-label-mono text-on-surface-variant font-semibold shrink-0">
+            答题卡快览:
+          </span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {questions.map((q) => {
+              const isAns = q.userAnswer && q.userAnswer.trim().length > 0;
+              let bgClass = 'bg-surface-container text-on-surface-variant';
+              if (q.isCorrect) {
+                bgClass = 'bg-secondary text-on-secondary font-bold';
+              } else if (isAns) {
+                bgClass = 'bg-error text-on-error font-bold';
+              } else {
+                bgClass = 'bg-surface-container-high text-outline';
+              }
+
+              return (
+                <button
+                  key={q.id}
+                  type="button"
+                  onClick={() => scrollToQuestion(q.id)}
+                  title={`第 ${q.num} 题 (${q.type}) - ${q.isCorrect ? '正确' : (isAns ? '错误' : '未作答')}`}
+                  className={`w-7 h-7 rounded text-[11px] font-mono transition-transform hover:scale-110 active:scale-95 cursor-pointer flex items-center justify-center shadow-2xs ${bgClass}`}
+                >
+                  {q.num}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 5. Question Detailed Review Cards */}
+        <section className="space-y-space-lg">
+          {filteredQuestions.length === 0 ? (
+            <div className="bg-surface-container-lowest rounded-xl p-12 text-center text-on-surface-variant border border-outline-variant/30">
+              <span className="material-symbols-outlined text-[40px] text-outline mb-2">check_circle_outline</span>
+              <p className="text-body-md font-medium">当前筛选条件下暂无试题。</p>
+            </div>
+          ) : (
+            filteredQuestions.map((q) => {
+              const isExpanded = expandedMap[q.id] ?? false;
+              const isAnswered = q.userAnswer && q.userAnswer.trim().length > 0;
+
+              return (
+                <article
+                  key={q.id}
+                  id={`q-card-${q.id}`}
+                  className={`bg-surface-container-lowest rounded-2xl shadow-sm border transition-all p-space-lg sm:p-space-xl flex flex-col space-y-space-md ${
+                    q.isCorrect
+                      ? 'border-secondary/30 hover:border-secondary'
+                      : (isAnswered ? 'border-error/30 hover:border-error' : 'border-outline-variant/40')
+                  }`}
+                >
+                  {/* Top Bar: Question Specs, Status Badge, and Single-Question Action */}
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-space-xs border-b border-outline-variant/20">
+                    <div className="flex items-center space-x-2">
+                      <span className="px-2 py-0.5 rounded font-label-mono text-label-mono font-bold bg-surface-container text-on-surface">
+                        第 {q.num} 题
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-surface-container-low font-label-mono text-[11px] text-on-surface-variant">
+                        {q.type} · 满分 {q.score} 分
+                      </span>
+                      {q.section && (
+                        <span className="text-[11px] font-label-mono text-outline hidden sm:inline">
+                          [{q.section}]
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      {/* Correct / Wrong Pill */}
+                      {q.isCorrect ? (
+                        <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-secondary-container/40 text-secondary font-label-mono text-[12px] font-semibold border border-secondary/30">
+                          <span className="material-symbols-outlined text-[15px]">check_circle</span>
+                          <span>回答正确 (+{q.score}分)</span>
+                        </span>
+                      ) : isAnswered ? (
+                        <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-error-container/40 text-error font-label-mono text-[12px] font-semibold border border-error/30">
+                          <span className="material-symbols-outlined text-[15px]">cancel</span>
+                          <span>回答错误 (得分 0/{q.score}分)</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-surface-container text-outline font-label-mono text-[12px]">
+                          <span className="material-symbols-outlined text-[15px]">help</span>
+                          <span>未作答 (0/{q.score}分)</span>
+                        </span>
+                      )}
+
+                      {/* Add to Notebook Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedQIds([q.id]);
+                          setIsExportModalOpen(true);
+                        }}
+                        className="p-1 rounded text-outline hover:text-primary hover:bg-surface-container transition-colors cursor-pointer"
+                        title="收录此题到题集"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Passage context if English Reading / Comprehension */}
+                  {q.passage && (
+                    <div className="bg-surface-container-low/40 rounded-xl p-space-md border border-outline-variant/30 text-body-sm leading-relaxed text-on-surface-variant max-h-56 overflow-y-auto font-serif">
+                      <div className="flex items-center space-x-1 text-primary font-semibold text-[12px] mb-1 font-sans">
+                        <span className="material-symbols-outlined text-[16px]">menu_book</span>
+                        <span>{q.passageTitle || '篇章阅读参考材料'}</span>
+                      </div>
+                      <MathMarkdown content={q.passage} />
+                    </div>
+                  )}
+
+                  {/* Question Prompt */}
+                  <div className="text-on-surface font-body-lg text-body-lg leading-relaxed">
+                    <MathMarkdown content={q.prompt || ''} />
+                    {q.mathExpression && (
+                      <div className="my-2 p-2 bg-surface-container-low rounded-lg text-center font-mono">
+                        <MathMarkdown content={`$$${q.mathExpression}$$`} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Multiple Choice Options with In-Place Comparison */}
+                  {q.options && q.options.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 my-2">
+                      {q.options.map((opt) => {
+                        const isUserChoice = (q.userAnswer || '').trim().toUpperCase() === opt.key.toUpperCase();
+                        const isStandardChoice = (q.standardAnswer || '').trim().toUpperCase() === opt.key.toUpperCase();
+
+                        let optCardStyle = 'bg-surface-container-low border-outline-variant/20 text-on-surface';
+                        if (isStandardChoice) {
+                          optCardStyle = 'bg-secondary-container/20 border-secondary text-secondary font-medium ring-1 ring-secondary/30';
+                        } else if (isUserChoice && !q.isCorrect) {
+                          optCardStyle = 'bg-error-container/20 border-error text-error ring-1 ring-error/30';
+                        }
+
+                        return (
+                          <div
+                            key={opt.key}
+                            className={`flex items-start space-x-2.5 p-2.5 rounded-xl border text-body-md transition-all ${optCardStyle}`}
+                          >
+                            <span className="w-6 h-6 rounded-md bg-surface-container flex items-center justify-center font-bold text-[12px] shrink-0 font-mono">
+                              {opt.key}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <MathMarkdown content={opt.text} />
+                            </div>
+                            {isStandardChoice && (
+                              <span className="text-[11px] font-label-mono text-secondary px-1.5 py-0.5 rounded bg-secondary-container/40 shrink-0 font-semibold">
+                                标准答案
+                              </span>
+                            )}
+                            {isUserChoice && !isStandardChoice && (
+                              <span className="text-[11px] font-label-mono text-error px-1.5 py-0.5 rounded bg-error-container/40 shrink-0 font-semibold">
+                                考生错选
+                              </span>
+                            )}
+                            {isUserChoice && isStandardChoice && (
+                              <span className="text-[11px] font-label-mono text-secondary px-1.5 py-0.5 rounded bg-secondary-container/40 shrink-0 font-semibold">
+                                考生作答 (正确)
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* In-Place Candidate Answer vs Standard Answer Comparison */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md p-space-md rounded-xl bg-surface-container-low/70 border border-outline-variant/30">
+                    {/* Candidate Answer */}
+                    <div className="flex flex-col space-y-1">
+                      <span className="font-label-mono text-[11px] text-on-surface-variant flex items-center gap-1 font-semibold">
+                        <span className="material-symbols-outlined text-[15px] text-outline">history_edu</span>
+                        考生本次作答:
+                      </span>
+                      <div className={`p-2.5 rounded-lg border font-mono text-body-sm min-h-[48px] flex items-center ${
+                        q.isCorrect
+                          ? 'bg-secondary-container/15 border-secondary/30 text-secondary font-semibold'
+                          : (isAnswered ? 'bg-error-container/15 border-error/30 text-error' : 'bg-surface-container text-outline italic')
+                      }`}>
+                        {isAnswered ? (
+                          <MathMarkdown content={q.userAnswer} />
+                        ) : (
+                          '（本题未作答填涂）'
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Standard Answer */}
+                    <div className="flex flex-col space-y-1">
+                      <span className="font-label-mono text-[11px] text-secondary flex items-center gap-1 font-semibold">
+                        <span className="material-symbols-outlined text-[15px]">verified</span>
+                        官方标准答案:
+                      </span>
+                      <div className="p-2.5 rounded-lg bg-surface-container-lowest border border-secondary/30 text-secondary font-mono font-semibold text-body-sm min-h-[48px] flex items-center">
+                        <MathMarkdown content={q.standardAnswer || '详见分步解析'} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expandable Official Analysis & AI Insight */}
+                  <div className="pt-space-xs">
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand(q.id)}
+                      className="inline-flex items-center space-x-1 text-primary hover:text-primary-container font-label-sm text-label-sm font-semibold transition-colors cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {isExpanded ? 'keyboard_arrow_up' : 'keyboard_arrow_down'}
+                      </span>
+                      <span>{isExpanded ? '收起官方解析与 AI 错因归因' : '查看完整分步解析与考点精讲'}</span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="mt-space-sm p-space-md rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-space-md animate-in fade-in duration-200">
+                        {/* Official Analysis */}
+                        <div className="space-y-1">
+                          <span className="font-label-mono text-[11px] text-primary font-semibold flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[15px]">lightbulb</span>
+                            官方分步推导解析:
+                          </span>
+                          <div className="text-body-md text-on-surface leading-relaxed pl-2 border-l-2 border-primary/40">
+                            <MathMarkdown content={q.analysis || '暂无官方详细解析'} />
+                          </div>
+                        </div>
+
+                        {/* AI Scribe / Master Insight */}
+                        {q.aiInsight && (
+                          <div className="p-space-sm rounded-lg bg-surface-container-lowest border border-outline-variant/20 space-y-1">
+                            <span className="font-label-mono text-[11px] text-tertiary font-semibold flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[15px]">psychology</span>
+                              AI 名师扣分归因与考点突破点拨:
+                            </span>
+                            <p className="text-body-sm text-on-surface-variant pl-2">
+                              {q.aiInsight}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })
+          )}
+        </section>
+      </main>
+
+      {/* 6. Modal: Export Questions to Notebook / Question Bank */}
+      {isExportModalOpen && (
+        <div className="fixed inset-0 z-50 bg-on-background/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container shrink-0">
+              <div className="flex items-center space-x-2">
+                <span className="material-symbols-outlined text-[24px] text-primary">bookmark_add</span>
+                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
+                  结果转题集 (自由组合对题+错题)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExportModalOpen(false)}
+                className="text-outline hover:text-on-surface p-1 rounded hover:bg-surface-container cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Quick Filter Pill Buttons */}
+            <div className="flex items-center justify-between flex-wrap gap-2 shrink-0 py-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleSelectAllWrong}
+                  className="px-2.5 py-1 rounded bg-error-container/30 text-error hover:bg-error-container/50 font-label-mono text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  一键勾选所有错题 ({questions.filter(q => !q.isCorrect).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSelectAllCorrect}
+                  className="px-2.5 py-1 rounded bg-secondary-container/30 text-secondary hover:bg-secondary-container/50 font-label-mono text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  一键勾选所有做对题 ({questions.filter(q => q.isCorrect).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSelectAll}
+                  className="px-2.5 py-1 rounded bg-surface-container hover:bg-surface-container-high text-on-surface font-label-mono text-[11px] transition-colors cursor-pointer"
+                >
+                  全卷全选 ({questions.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="px-2.5 py-1 rounded text-outline hover:text-on-surface font-label-mono text-[11px] cursor-pointer"
+                >
+                  清空
+                </button>
+              </div>
+
+              <span className="font-label-mono text-label-mono text-primary font-bold">
+                已选中 {selectedQIds.length} 题
+              </span>
+            </div>
+
+            {/* Scrollable Questions Checkbox List */}
+            <div className="flex-1 overflow-y-auto min-h-[220px] max-h-[300px] border border-outline-variant/30 rounded-xl p-space-sm space-y-1.5 bg-surface-container-low/30">
+              {questions.map((q) => {
+                const isSelected = selectedQIds.includes(q.id);
+                return (
+                  <div
+                    key={q.id}
+                    onClick={() => toggleSelectQuestion(q.id)}
+                    className={`flex items-center space-x-3 p-2 rounded-lg transition-colors cursor-pointer border ${
+                      isSelected
+                        ? 'bg-primary-fixed/20 border-primary text-on-surface'
+                        : 'bg-surface-container-lowest border-outline-variant/20 hover:bg-surface-container text-on-surface-variant'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {}} // handled by parent onClick
+                      className="w-4 h-4 text-primary rounded border-outline-variant cursor-pointer"
+                    />
+                    <span className="font-mono font-bold text-[12px] w-12 shrink-0">
+                      第 {q.num} 题
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-label-mono bg-surface-container shrink-0">
+                      {q.type}
+                    </span>
+                    {q.isCorrect ? (
+                      <span className="text-secondary font-mono text-[11px] font-semibold shrink-0">
+                        ✅ 做对
+                      </span>
+                    ) : (
+                      <span className="text-error font-mono text-[11px] font-semibold shrink-0">
+                        ❌ 做错
+                      </span>
+                    )}
+                    <span className="text-body-sm truncate flex-1 font-sans">
+                      {q.prompt || '题目详情'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Target Collection Setting */}
+            <div className="space-y-space-sm pt-space-xs border-t border-surface-container shrink-0">
+              <span className="text-label-sm font-semibold text-on-surface block">
+                归档目标题集 / 错题本文件夹:
+              </span>
+              
+              <div className="flex items-center space-x-4">
+                <label className="flex items-center space-x-1.5 text-body-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="targetCol"
+                    checked={targetCollectionMode === 'new'}
+                    onChange={() => setTargetCollectionMode('new')}
+                    className="text-primary"
+                  />
+                  <span>新建专项题集</span>
+                </label>
+                <label className="flex items-center space-x-1.5 text-body-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="targetCol"
+                    checked={targetCollectionMode === 'existing'}
+                    onChange={() => setTargetCollectionMode('existing')}
+                    className="text-primary"
+                  />
+                  <span>存入已有题集</span>
+                </label>
+              </div>
+
+              {targetCollectionMode === 'new' ? (
+                <input
+                  type="text"
+                  value={newCollectionName}
+                  onChange={(e) => setNewCollectionName(e.target.value)}
+                  placeholder="输入题集名称，例如：2026考研英语二 · 典题与错题精选"
+                  className="w-full px-3 py-2 bg-surface-container-low rounded-lg text-body-md border border-outline-variant/40 focus:outline-none focus:border-primary"
+                />
+              ) : (
+                <select
+                  value={existingColId}
+                  onChange={(e) => setExistingColId(e.target.value)}
+                  className="w-full px-3 py-2 bg-surface-container-low rounded-lg text-body-md border border-outline-variant/40 focus:outline-none focus:border-primary"
+                >
+                  <option value="col-2">高等数学期末易错集 (35 题)</option>
+                  <option value="col-1">考研数学核心压轴 (28 题)</option>
+                  <option value="col-3">线性代数特征值与矩阵 (19 题)</option>
+                  <option value="col-4">概率论大数定律与极限 (12 题)</option>
+                </select>
+              )}
+            </div>
+
+            {/* Success message banner if any */}
+            {exportSuccessMessage && (
+              <div className="p-3 bg-secondary-container/30 border border-secondary text-secondary rounded-xl text-body-sm font-medium animate-in fade-in">
+                {exportSuccessMessage}
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-2 border-t border-surface-container shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsExportModalOpen(false);
+                  onOpenNotebook();
+                }}
+                className="text-label-sm text-primary hover:underline font-semibold cursor-pointer"
+              >
+                前往我的错题本/题集中心 &gt;
+              </button>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsExportModalOpen(false)}
+                  className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmExportToNotebook}
+                  className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md font-semibold shadow-sm cursor-pointer"
+                >
+                  确认归档收录 ({selectedQIds.length} 题)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
