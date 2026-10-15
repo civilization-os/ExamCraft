@@ -197,5 +197,122 @@ $$
 
 ---
 
+## 🐳 Docker 容器化与生产环境部署指导
+
+ExamCraft 提供了多阶段极致轻量的标准 Docker 容器化镜像，打包了前端 Vite 生产构建资源与 Node.js Express 后端服务，并且自包含 `@civilization/model-core` 模型调度引擎，支持零外部依赖、开箱即用。
+
+### 1. Docker Compose 一键启动（推荐）
+
+项目根目录已预置 `docker-compose.yml` 编排文件，支持一键拉起与持久化挂载配置。
+
+在 Windows PowerShell 或终端中执行：
+
+```powershell
+# 1. 一键构建并后台启动容器
+docker compose up -d --build
+
+# 2. 查看容器运行状态与健康检查
+docker compose ps
+
+# 3. 实时跟踪查看容器日志
+docker compose logs -f
+
+# 4. 停止并释放容器
+docker compose down
+```
+
+启动完成后，打开浏览器访问 **`http://localhost:3000`** 即可立即使用。
+
+> [!TIP]
+> **配置持久化与热更新**：
+> `docker-compose.yml` 默认将 `./examcraft-config.json` 挂载至容器内部 `/app/examcraft-config.json`。在网页界面的「系统设置」中修改任何 API Key 或模型参数，均会直接持久化写入宿主机文件，重启容器配置不丢失！
+
+---
+
+### 2. Docker 命令行独立构建与运行
+
+如果您不使用 Compose，可以直接通过原生 Docker 命令进行镜像构建与启动。
+
+#### 步骤一：构建 Docker 镜像
+```powershell
+docker build -t examcraft:latest .
+```
+
+#### 步骤二：启动容器
+
+**方式 A：通过环境变量直接注入模型 API Key**
+```powershell
+docker run -d \
+  -p 3000:3000 \
+  --name examcraft-workbench \
+  --restart unless-stopped \
+  -e MODEL_API_KEY="sk-your-deepseek-api-key" \
+  -e MODEL_NAME="deepseek-chat" \
+  -e MODEL_BASE_URL="https://api.deepseek.com/v1" \
+  examcraft:latest
+```
+
+**方式 B：通过宿主机配置文件挂载运行**
+```powershell
+# 在 Windows PowerShell 中：
+docker run -d `
+  -p 3000:3000 `
+  --name examcraft-workbench `
+  --restart unless-stopped `
+  -v ${PWD}/examcraft-config.json:/app/examcraft-config.json `
+  examcraft:latest
+```
+
+---
+
+### 3. Node.js 原生生产部署（支持 PM2 进程守护）
+
+如需直接在 Windows / Linux 服务器上裸机部署：
+
+```powershell
+# 1. 确保已安装项目生产依赖
+pnpm install
+
+# 2. 编译打包前端 Vite 静态产物到 dist 目录
+pnpm run build
+
+# 3. 方式一：直接以生产模式启动 Express 服务
+pnpm run start
+# 或直接执行：node server.js
+```
+
+#### 使用 PM2 进行生产级后台保活与常驻：
+```powershell
+# 全局安装 PM2
+npm install -g pm2
+
+# 启动并命名应用
+pm2 start server.js --name "examcraft-workbench"
+
+# 设置开机自启并保存状态
+pm2 save
+```
+
+---
+
+### 4. 环境变量与模型接入参数全览表
+
+容器与 Node.js 生产环境均全面支持通过环境变量灵活覆盖系统设置，便于云原生与 CI/CD 自动化集成：
+
+| 环境变量名 | 说明 | 示例 / 默认值 |
+| :--- | :--- | :--- |
+| `PORT` | Web 服务与 API 监听端口 | `3000` |
+| `NODE_ENV` | 运行环境模式 | `production` |
+| `MODEL_API_KEY` | 大模型 API 密钥（通用） | `sk-xxxxxx` |
+| `OPENAI_API_KEY` | OpenAI 密钥（若未提供通用 Key 则自动 Fallback） | `sk-xxxxxx` |
+| `DEEPSEEK_API_KEY`| DeepSeek 专用密钥 | `sk-xxxxxx` |
+| `GEMINI_API_KEY` | Google Gemini 官方 API Key | `AIzaSyxxxxxx` |
+| `MODEL_NAME` | 默认调用的模型代号 | `deepseek-chat` / `gemini-2.5-flash` / `gpt-4o` |
+| `MODEL_BASE_URL` | 模型接口基地址（适用 OpenAI 兼容网关） | `https://api.deepseek.com/v1` |
+| `MODEL_CATEGORY` | 模型类别（官方直连 / 兼容协议） | `protocol` 或 `official` |
+| `MODEL_PROTOCOL` | 协议类型 | `openai-compatible` |
+
+---
+
 ## 📄 开源许可
 MIT License.

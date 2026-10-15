@@ -46,6 +46,11 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
     return MISTAKE_ITEMS;
   });
 
+  // Dynamically count mistakes per collection
+  const getCollectionCount = (colId) => {
+    return mistakes.filter((m) => m.collectionId === colId || (!m.collectionId && colId === 'col-2')).length;
+  };
+
   // Keep localStorage synced when collections or mistakes change
   React.useEffect(() => {
     try {
@@ -337,7 +342,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                         isActive ? 'px-1.5 py-0.5 rounded bg-primary text-on-primary font-bold' : 'text-on-surface-variant'
                       }`}
                     >
-                      {col.count}
+                      {getCollectionCount(col.id)}
                     </span>
                   </div>
                 );

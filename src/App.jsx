@@ -11,13 +11,34 @@ import { INITIAL_PAPERS, MOCK_EXAM_QUESTIONS } from './data/mockData';
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState('exam-generator');
-  const [papers, setPapers] = useState(INITIAL_PAPERS);
-  const [activePaper, setActivePaper] = useState(INITIAL_PAPERS[0]);
+  const [papers, setPapers] = useState(() => {
+    try {
+      const raw = localStorage.getItem('examcraft_papers');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_PAPERS;
+  });
+  const [activePaper, setActivePaper] = useState(() => papers[0] || INITIAL_PAPERS[0]);
   const [questions, setQuestions] = useState(MOCK_EXAM_QUESTIONS);
   const [activeSubmission, setActiveSubmission] = useState(null);
 
   const handleStartExam = (paper) => {
     setActivePaper(paper);
+    if (paper) {
+      setPapers((prev) => {
+        if (!prev.some((p) => p.id === paper.id)) {
+          const next = [paper, ...prev];
+          try {
+            localStorage.setItem('examcraft_papers', JSON.stringify(next));
+          } catch {}
+          return next;
+        }
+        return prev;
+      });
+    }
     if (paper.questions && paper.questions.length > 0) {
       setQuestions(paper.questions);
     } else {

@@ -369,8 +369,12 @@ A. 1  B. 3  C. 0  D. 不存在
                       (s) => s.paperId === paper.id || s.paperTitle === paper.title
                     );
                     const hasAttempts = paperSubs.length > 0;
-                    const realHighest = hasAttempts ? Math.max(...paperSubs.map((s) => s.score)) : paper.highestScore;
-                    const realAttempts = hasAttempts ? paperSubs.length : (paper.attempts || 0);
+                    const realHighest = hasAttempts ? Math.max(...paperSubs.map((s) => s.score)) : null;
+                    const realAttempts = hasAttempts ? paperSubs.length : 0;
+                    const latestSub = hasAttempts ? paperSubs[0] : null;
+                    const identifiedFlaws = hasAttempts
+                      ? (latestSub?.questions?.filter(q => !q.isCorrect).length || 0)
+                      : 0;
 
                     if (realAttempts > 0) {
                       return (
@@ -396,7 +400,7 @@ A. 1  B. 3  C. 0  D. 不存在
                           </div>
                           <div className="flex flex-col">
                             <span className="font-label-mono text-[10px] text-on-surface-variant uppercase">Identified Flaws</span>
-                            <span className="font-label-mono text-label-md text-tertiary font-semibold">{paper.flaws || 0} 处典型错因</span>
+                            <span className="font-label-mono text-label-md text-tertiary font-semibold">{identifiedFlaws} 处典型错因</span>
                           </div>
                         </div>
                       );

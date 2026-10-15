@@ -11,22 +11,33 @@ const CONFIG_FILE = path.join(__dirname, 'examcraft-config.json');
 export const apiRouter = express.Router();
 
 function loadSavedConfig() {
+  let fileCfg = {};
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
-      return JSON.parse(raw);
+      fileCfg = JSON.parse(raw) || {};
     }
   } catch (e) {
     console.error('Failed to read config file:', e.message);
   }
+
+  // Environment variables fallback for Docker / Container / Production deployments
+  const envApiKey = process.env.MODEL_API_KEY || process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.GEMINI_API_KEY || '';
+  const envModelName = process.env.MODEL_NAME || '';
+  const envBaseURL = process.env.MODEL_BASE_URL || process.env.OPENAI_BASE_URL || '';
+  const envCategory = process.env.MODEL_CATEGORY || '';
+  const envProtocol = process.env.MODEL_PROTOCOL || '';
+
   return {
-    category: 'official',
-    vendor: 'gemini',
-    modelName: 'gemini-2.5-flash',
-    apiKey: '',
-    temperature: 0.7,
-    timeoutMs: 30000,
-    maxRetries: 2
+    category: fileCfg.category || envCategory || (envBaseURL ? 'protocol' : 'official'),
+    vendor: fileCfg.vendor || 'gemini',
+    protocol: fileCfg.protocol || envProtocol || 'openai-compatible',
+    modelName: fileCfg.modelName || envModelName || 'deepseek-chat',
+    baseURL: fileCfg.baseURL || envBaseURL || 'https://api.deepseek.com/v1',
+    apiKey: fileCfg.apiKey || envApiKey || '',
+    temperature: typeof fileCfg.temperature === 'number' ? fileCfg.temperature : 0.7,
+    timeoutMs: typeof fileCfg.timeoutMs === 'number' ? fileCfg.timeoutMs : 30000,
+    maxRetries: typeof fileCfg.maxRetries === 'number' ? fileCfg.maxRetries : 2
   };
 }
 
