@@ -1307,6 +1307,178 @@ ${text}
   }
 });
 
+// 确定性考题数学公式与高频展开式提取启发式引擎（0ms 即时响应，无网络依赖）
+export function extractDeterministicChips(text = '') {
+  if (!text) return [];
+  const chips = [];
+  const seen = new Set();
+
+  const addChip = (raw, category = 'core', customLabel = null) => {
+    if (!raw) return;
+    let clean = String(raw).trim();
+    clean = clean.replace(/^\$+|\$+$/g, '').trim();
+    if (!clean || clean.length < 2) return;
+    if (/^[0-9\.\,\;\:\?\!]+$/.test(clean)) return;
+
+    const normKey = clean.replace(/\s+/g, '');
+    if (seen.has(normKey)) return;
+    seen.add(normKey);
+
+    chips.push({
+      id: `chip_det_${chips.length}_${Date.now()}`,
+      label: customLabel || clean,
+      latex: `$${clean}$`,
+      category,
+      actionPrompt: `帮我写下公式：$${clean}$`
+    });
+  };
+
+  // 1. 提取 $...$ 和 $$...$$
+  const dollarRegex = /\$\$([\s\S]+?)\$\$|\$([^\$]+?)\$/g;
+  let match;
+  while ((match = dollarRegex.exec(text)) !== null) {
+    const expr = match[1] || match[2];
+    if (expr) addChip(expr, 'core');
+  }
+
+  // 2. 提取 \( ... \) 和 \[ ... \]
+  const slashRegex = /\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g;
+  while ((match = slashRegex.exec(text)) !== null) {
+    const expr = match[1] || match[2];
+    if (expr) addChip(expr, 'core');
+  }
+
+  // 3. 高等数学/微积分典型展开与等价代换智能联想
+  if (text.includes('arcsin') || text.includes('\\arcsin')) {
+    addChip('\\arcsin x = x + \\frac{1}{6}x^3 + o(x^3)', 'expansion', 'arcsin 展开: x + ⅙x³');
+  }
+  if (text.includes('sqrt[3]') || text.includes('\\sqrt[3]') || text.includes('1+x^2')) {
+    addChip('\\sqrt[3]{1+x^2} - 1 \\sim \\frac{1}{3}x^2', 'expansion', '立方根等价: ⅓x²');
+  }
+  if (text.includes('sin') || text.includes('\\sin')) {
+    addChip('\\sin x = x - \\frac{1}{6}x^3 + o(x^3)', 'expansion', 'sin 展开: x - ⅙x³');
+  }
+  if (text.includes('cos') || text.includes('\\cos')) {
+    addChip('1 - \\cos x \\sim \\frac{1}{2}x^2', 'expansion', '1 - cos x 等价: ½x²');
+  }
+  if (text.includes('tan') || text.includes('\\tan')) {
+    addChip('\\tan x \\sim x', 'expansion', 'tan x 等价: x');
+  }
+  if (text.includes('ln') || text.includes('\\ln')) {
+    addChip('\\ln(1+x) \\sim x', 'expansion', 'ln(1+x) 等价: x');
+  }
+  if (text.includes('e^') || text.includes('e^{')) {
+    addChip('e^x - 1 \\sim x', 'expansion', 'eˣ - 1 等价: x');
+  }
+  if (text.includes('等价无穷小') || text.includes('\\to 0') || text.includes('->0')) {
+    addChip('x \\to 0', 'core', '极限趋向 x → 0');
+    addChip('\\lim_{x \\to 0} \\frac{f(x)}{g(x)} = 1', 'setup', '等价无穷小定义式');
+  }
+
+  return chips;
+}
+
+// POST /api/model/extract-math-chips
+// 考场草稿纸专属：从当前试题深度提取核心公式、已知条件式、展开通式与换元设项
+apiRouter.post('/model/extract-math-chips', async (req, res) => {
+  const { prompt: questionPrompt, mathExpression, options, num } = req.body;
+  const fullText = [
+    questionPrompt || '',
+    mathExpression || '',
+    ...(Array.isArray(options) ? options.map(o => (o && o.text ? o.text : '')) : [])
+  ].join('\n');
+
+  if (!fullText.trim()) {
+    return res.status(400).json({ success: false, error: '试题内容为空' });
+  }
+
+  // 若未配置 API Key 或处于离线状态，立即返回高质量确定性启发式提取结果
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    const fallbackChips = extractDeterministicChips(fullText);
+    return res.json({
+      success: true,
+      chips: fallbackChips,
+      source: 'heuristic',
+      provider: 'local-rules'
+    });
+  }
+
+  try {
+    const model = createChatModel(currentConfig);
+    const systemPrompt = `你是一位精通微积分、线性代数与高等数学命题规律的【考场草稿演算快捷输入提取专家】。
+考生正在草稿纸上演算本题，需要将题目中的关键数学式快速输入或抄录到画板上。
+
+【绝对铁律与学术诚信红线】：
+1. 严禁代算代答！严禁在返回结果中给出本题的最终答案（如 a=1/6, b=-1 等结论）！
+2. 只能提取题目中已有的已知式、设项、展开通式或等价代换定义式，以便考生随手选用作为板书草稿！
+
+【提取类别规范】：
+1. core: 题干核心已知式与子式（如 $ax^2 + bx + \\arcsin x$, $\\sqrt[3]{1+x^2}-1$, $x \\to 0$）
+2. expansion: 常用的泰勒展开通式、麦克劳林级数、等价无穷小代换公式（如 $\\arcsin x = x + \\frac{1}{6}x^3 + o(x^3)$, $(1+u)^\\alpha - 1 \\sim \\alpha u$）
+3. setup: 常规设项与等价关系式（如 $\\lim_{x \\to 0} \\frac{ax^2 + bx + \\arcsin x}{\\sqrt[3]{1+x^2}-1} = 1$, 设 $u = x^2$）
+
+直接返回纯合法 JSON 对象，格式如下：
+{
+  "chips": [
+    {
+      "label": "简明公式标识（例如：ax² + bx + arcsin x）",
+      "latex": "$完整标准LaTeX$",
+      "category": "core",
+      "actionPrompt": "帮我写下公式：$完整标准LaTeX$"
+    }
+  ]
+}
+只输出合法 JSON，不要包含任何 markdown 代码块标识。`;
+
+    const userPrompt = `当前考题信息（第 ${num || '当前'} 题）：
+${fullText}
+
+请为考生的草稿纸快速提取 4 ~ 8 个最核心、最实用的快捷输入公式胶囊：`;
+
+    const response = await model.invoke([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ]);
+
+    let parsed = extractJsonFromAiResponse(response.content);
+
+    if (parsed && Array.isArray(parsed.chips) && parsed.chips.length > 0) {
+      const formattedChips = parsed.chips.map((chip, idx) => ({
+        id: `chip_ai_${idx}_${Date.now()}`,
+        label: chip.label || chip.latex,
+        latex: chip.latex?.startsWith('$') ? chip.latex : `$${chip.latex}$`,
+        category: chip.category || 'core',
+        actionPrompt: chip.actionPrompt || `帮我写下：${chip.latex}`
+      }));
+
+      return res.json({
+        success: true,
+        chips: formattedChips,
+        source: 'ai',
+        provider: currentConfig.category || 'ai',
+        modelName: currentConfig.modelName
+      });
+    }
+
+    const fallbackChips = extractDeterministicChips(fullText);
+    return res.json({
+      success: true,
+      chips: fallbackChips,
+      source: 'heuristic_fallback',
+      provider: 'local-rules'
+    });
+  } catch (err) {
+    console.warn('extract-math-chips AI fallback:', err.message);
+    const fallbackChips = extractDeterministicChips(fullText);
+    return res.json({
+      success: true,
+      chips: fallbackChips,
+      source: 'heuristic_fallback',
+      provider: 'local-rules'
+    });
+  }
+});
+
 // POST /api/model/scratchpad-agent-loop
 // 考场草稿纸专属 Agent Loop：辅助考生帮写草稿与规范板书
 // 绝对铁律：只能局限于考生能说出来的他才能写，严禁任何代算与多推导一步！

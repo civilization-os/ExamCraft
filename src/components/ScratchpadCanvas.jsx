@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import MathMarkdown from './MathMarkdown';
 
 /**
@@ -207,6 +207,92 @@ const parseMixedTextSegments = (rawLine) => {
 };
 
 /**
+ * 试题专属核心公式与推演子式高灵敏度提取引擎 (0ms 本地瞬时提取，无网络依赖)
+ */
+export const extractFormulasFromProblem = (questionData, contextProblem = '') => {
+  const chips = [];
+  const seenLatex = new Set();
+
+  const addChip = (rawLatex, category = 'core', customLabel = null) => {
+    if (!rawLatex) return;
+    let clean = String(rawLatex).trim();
+    clean = clean.replace(/^\$+|\$+$/g, '').trim();
+    if (!clean || clean.length < 2) return;
+    if (/^[0-9\.\,\;\:\?\!]+$/.test(clean)) return;
+
+    const normKey = clean.replace(/\s+/g, '');
+    if (seenLatex.has(normKey)) return;
+    seenLatex.add(normKey);
+
+    const formatted = customLabel || formatMathExpression(clean);
+    chips.push({
+      id: `chip_local_${chips.length}_${Date.now()}`,
+      label: formatted || clean,
+      latex: `$${clean}$`,
+      category,
+      actionPrompt: `帮我写下公式：$${clean}$`
+    });
+  };
+
+  // 1. 汇集文本池（题干、公式、选项）
+  const textPool = [];
+  if (contextProblem) textPool.push(contextProblem);
+  if (questionData?.prompt) textPool.push(questionData.prompt);
+  if (questionData?.mathExpression) textPool.push(questionData.mathExpression);
+  if (Array.isArray(questionData?.options)) {
+    questionData.options.forEach((opt) => {
+      if (opt && opt.text) textPool.push(opt.text);
+    });
+  }
+
+  const combinedText = textPool.join('\n');
+
+  // 2. 提取 $...$ 与 $$...$$
+  const dollarRegex = /\$\$([\s\S]+?)\$\$|\$([^\$]+?)\$/g;
+  let match;
+  while ((match = dollarRegex.exec(combinedText)) !== null) {
+    const raw = match[1] || match[2];
+    if (raw) addChip(raw, 'core');
+  }
+
+  // 3. 提取 \( ... \) 与 \[ ... \]
+  const slashRegex = /\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g;
+  while ((match = slashRegex.exec(combinedText)) !== null) {
+    const raw = match[1] || match[2];
+    if (raw) addChip(raw, 'core');
+  }
+
+  // 4. 针对典型高等数学/微积分考点的展开通式与等价无穷小自动联想
+  if (combinedText.includes('arcsin') || combinedText.includes('\\arcsin')) {
+    addChip('\\arcsin x = x + \\frac{1}{6}x^3 + o(x^3)', 'expansion', 'arcsin 展开: x + ⅙x³');
+  }
+  if (combinedText.includes('sqrt[3]') || combinedText.includes('\\sqrt[3]') || combinedText.includes('1+x^2')) {
+    addChip('\\sqrt[3]{1+x^2} - 1 \\sim \\frac{1}{3}x^2', 'expansion', '立方根等价: ⅓x²');
+  }
+  if (combinedText.includes('sin') || combinedText.includes('\\sin')) {
+    addChip('\\sin x = x - \\frac{1}{6}x^3 + o(x^3)', 'expansion', 'sin 展开: x - ⅙x³');
+  }
+  if (combinedText.includes('cos') || combinedText.includes('\\cos')) {
+    addChip('1 - \\cos x \\sim \\frac{1}{2}x^2', 'expansion', '1 - cos x 等价: ½x²');
+  }
+  if (combinedText.includes('tan') || combinedText.includes('\\tan')) {
+    addChip('\\tan x \\sim x', 'expansion', 'tan x 等价: x');
+  }
+  if (combinedText.includes('ln') || combinedText.includes('\\ln')) {
+    addChip('\\ln(1+x) \\sim x', 'expansion', 'ln(1+x) 等价: x');
+  }
+  if (combinedText.includes('e^') || combinedText.includes('e^{')) {
+    addChip('e^x - 1 \\sim x', 'expansion', 'eˣ - 1 等价: x');
+  }
+  if (combinedText.includes('等价无穷小') || combinedText.includes('\\to 0') || combinedText.includes('->0')) {
+    addChip('x \\to 0', 'core', '极限趋向 x → 0');
+    addChip('\\lim_{x \\to 0} \\frac{f(x)}{g(x)} = 1', 'setup', '等价无穷小定义式');
+  }
+
+  return chips;
+};
+
+/**
  * 纯净纸质图元（无生硬外框与白底，墨水直接落在稿纸上，支持整体拖拽与橡皮擦除）
  */
 function DraggableCanvasElement({
@@ -342,6 +428,7 @@ export default function ScratchpadCanvas({
   textStorageKey = 'examcraft_scratchpad_text',
   contextProblem = '',
   questionNum = null,
+  questionData = null,
   isMaximized = false,
   onToggleMaximize = null,
   onClose = null
@@ -349,6 +436,24 @@ export default function ScratchpadCanvas({
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const prevStorageKeyRef = useRef(storageKey);
+
+  // ==================== 快捷公式胶囊 (本题专属提取 + AI 智能提取) ====================
+  const [mathChips, setMathChips] = useState(() => {
+    return extractFormulasFromProblem(questionData, contextProblem);
+  });
+  const [isExtractingChips, setIsExtractingChips] = useState(false);
+  const [chipFilter, setChipFilter] = useState('all'); // 'all' | 'core' | 'expansion' | 'setup'
+
+  // 当切换题目或上下文变更时，实时重新本地提取本题的公式胶囊
+  useEffect(() => {
+    const extracted = extractFormulasFromProblem(questionData, contextProblem);
+    setMathChips(extracted);
+  }, [storageKey, questionData, contextProblem]);
+
+  const filteredChips = useMemo(() => {
+    if (chipFilter === 'all') return mathChips;
+    return mathChips.filter((c) => c.category === chipFilter);
+  }, [mathChips, chipFilter]);
 
   // ==================== 画板手绘状态 ====================
   const [tool, setTool] = useState('brush'); // 'brush' | 'eraser' | 'select'
@@ -1118,7 +1223,79 @@ export default function ScratchpadCanvas({
   const handleDeleteElement = useCallback((id) => {
     setElements((prev) => prev.filter((el) => el.id !== id));
     showToast('已移除该草稿图元', 'info');
-  }, []);
+  }, [showToast]);
+
+  // AI 智能提取当前试题核心公式与展开通式
+  const handleAiExtractChips = async () => {
+    setIsExtractingChips(true);
+    showToast('AI 正在深度解析本题题干与数学结构...', 'info');
+    try {
+      const res = await fetch('/api/model/extract-math-chips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: questionData?.prompt || contextProblem,
+          mathExpression: questionData?.mathExpression || '',
+          options: questionData?.options || [],
+          num: questionNum
+        })
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.chips) && data.chips.length > 0) {
+        setMathChips((prev) => {
+          const existingKeys = new Set(prev.map((c) => c.latex.replace(/[\$\s]/g, '')));
+          const newAiChips = data.chips.filter((c) => !existingKeys.has(c.latex.replace(/[\$\s]/g, '')));
+          return [...prev, ...newAiChips];
+        });
+        showToast(`✨ AI 成功提取 ${data.chips.length} 个关键推演式！`, 'success');
+      } else {
+        showToast('已提取出当前题目的全部关键公式', 'info');
+      }
+    } catch (err) {
+      showToast(`AI 提取失败: ${err.message}`, 'warn');
+    } finally {
+      setIsExtractingChips(false);
+    }
+  };
+
+  // 一键快捷抄入草稿纸（无需输入，直接落墨为画板图元与板书）
+  const handleQuickWriteToBoard = useCallback((latexContent, labelText) => {
+    const cleanText = latexContent.startsWith('$') ? latexContent : `$${latexContent}$`;
+    const acts = [{ type: 'write', content: cleanText, color: brushColor || '#0f172a' }];
+    const elemWidth = Math.min(340, Math.max(260, (containerRef.current?.clientWidth || 700) - 40));
+    const lines = cleanText.split('\n');
+    const elemHeight = Math.max(90, Math.min(260, lines.length * 32 + 55));
+    const pos = findNextAvailablePosition(elemWidth, elemHeight);
+
+    const newElem = {
+      id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      title: labelText ? `📝 公式: ${labelText}` : '📝 本题公式抄录',
+      x: pos.x,
+      y: pos.y,
+      width: elemWidth,
+      height: elemHeight,
+      actions: acts,
+      createdAt: Date.now()
+    };
+
+    setElements((prev) => [...prev, newElem]);
+
+    // 同步追加到右侧板书笔记
+    setBoardText((prev) => (prev ? `${prev}\n\n${cleanText}` : cleanText));
+    showToast(`已将「${labelText || cleanText}」一键抄入草稿纸！`, 'success');
+  }, [brushColor, findNextAvailablePosition, showToast]);
+
+  // 点击胶囊快速追加到口述指令框
+  const handleAppendSpokenPrompt = (chip) => {
+    setSpokenInput((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) {
+        return `帮我写下公式：${chip.latex}`;
+      }
+      return `${trimmed} ${chip.latex}`;
+    });
+    showToast(`已填入指令：「${chip.label}」`, 'info');
+  };
 
   // ==================== 核心 Agent Loop 执行逻辑 ====================
   const handleTriggerAgentLoop = async (customPrompt = '') => {
@@ -1600,14 +1777,131 @@ export default function ScratchpadCanvas({
                 </span>
               </div>
 
-              {/* 快捷画图 & 常用板书指令胶囊 */}
+              {/* 模块 1.1：本题专属公式快捷提取与快捷胶囊栏 */}
+              <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-surface-container-lowest/80 border border-outline-variant/30">
+                <div className="flex items-center justify-between gap-1 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-on-surface">
+                    <span className="material-symbols-outlined text-[15px] text-primary">functions</span>
+                    <span>第 {questionNum || '当前'} 题公式快捷输入</span>
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-primary/10 text-primary font-bold">
+                      {mathChips.length}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    {/* 分类筛选 (若项目较多时展示) */}
+                    {mathChips.length > 3 && (
+                      <div className="hidden sm:flex items-center gap-0.5 text-[10px] bg-surface-container p-0.5 rounded-md">
+                        {[
+                          { id: 'all', label: '全部' },
+                          { id: 'core', label: '核心式' },
+                          { id: 'expansion', label: '展开' }
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setChipFilter(tab.id)}
+                            className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
+                              chipFilter === tab.id
+                                ? 'bg-surface-container-lowest text-primary font-bold shadow-2xs'
+                                : 'text-on-surface-variant hover:text-on-surface'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* AI 智能提取核心式按钮 */}
+                    <button
+                      type="button"
+                      onClick={handleAiExtractChips}
+                      disabled={isExtractingChips || isAgentRunning}
+                      className="px-2 py-0.5 rounded-md bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-medium border border-primary/20 transition flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                      title="由 AI 深度解析本题题干，智能提取核心子式、展开通式与中间设项"
+                    >
+                      <span className={`material-symbols-outlined text-[13px] ${isExtractingChips ? 'animate-spin' : ''}`}>
+                        {isExtractingChips ? 'sync' : 'auto_awesome'}
+                      </span>
+                      <span>{isExtractingChips ? 'AI 提取中...' : '✨ AI 提取核心式'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 公式快捷胶囊列表 */}
+                <div className="flex items-center gap-1.5 flex-wrap max-h-[105px] overflow-y-auto pr-0.5 select-none">
+                  {filteredChips.length === 0 ? (
+                    <div className="text-[11px] text-outline py-1 px-1 flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[13px]">info</span>
+                      <span>题干未检测到公式，可点击右上角「✨ AI 提取核心式」</span>
+                    </div>
+                  ) : (
+                    filteredChips.map((chip) => {
+                      const isAi = chip.id?.startsWith('chip_ai');
+                      const isExpansion = chip.category === 'expansion';
+                      return (
+                        <div
+                          key={chip.id}
+                          className={`group/chip inline-flex items-center rounded-md border text-[11px] transition shadow-2xs ${
+                            isAi
+                              ? 'border-purple-300 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20'
+                              : isExpansion
+                              ? 'border-amber-300/60 dark:border-amber-800/60 bg-amber-50/40 dark:bg-amber-950/20'
+                              : 'border-outline-variant/40 bg-surface-container-lowest hover:border-primary/50'
+                          }`}
+                        >
+                          {/* 胶囊主干：点击填入口述输入框 */}
+                          <button
+                            type="button"
+                            onClick={() => handleAppendSpokenPrompt(chip)}
+                            disabled={isAgentRunning}
+                            className="px-2 py-0.5 flex items-center gap-1 font-mono text-[11px] text-on-surface hover:text-primary transition cursor-pointer truncate max-w-[210px]"
+                            title={`左键填入指令框：${chip.latex}`}
+                          >
+                            {isAi && (
+                              <span className="text-[9px] px-1 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 font-sans font-bold">
+                                AI
+                              </span>
+                            )}
+                            {isExpansion && !isAi && (
+                              <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 font-sans font-bold">
+                                展开
+                              </span>
+                            )}
+                            <span className="truncate">{formatMathExpression(chip.label || chip.latex)}</span>
+                          </button>
+
+                          {/* 右侧快捷微操作：一键直接抄入画板 */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQuickWriteToBoard(chip.latex, chip.label);
+                            }}
+                            disabled={isAgentRunning}
+                            className="px-1.5 py-0.5 bg-surface-container/60 hover:bg-primary hover:text-white text-on-surface-variant transition border-l border-outline-variant/30 cursor-pointer flex items-center gap-0.5 text-[10px]"
+                            title={`一键将「${chip.label || chip.latex}」抄入草稿画板与板书`}
+                          >
+                            <span className="material-symbols-outlined text-[12px]">edit_note</span>
+                            <span className="text-[9px] hidden sm:inline">抄入</span>
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* 常用几何画图快捷指令胶囊 */}
               <div className="flex items-center gap-1 flex-wrap">
+                <span className="text-[10px] text-outline font-medium">常用图形:</span>
                 {[
-                  { label: '📈 直角坐标系', prompt: '帮我画一个标准的直角坐标系' },
+                  { label: '📈 坐标系', prompt: '帮我画一个标准的直角坐标系' },
                   { label: '抛物线 y=x²', prompt: '画一个直角坐标系并绘制二次函数 y=x^2 抛物线' },
                   { label: '正弦 y=sin(x)', prompt: '画一个直角坐标系并绘制正弦波 y=sin(x)' },
                   { label: '📐 直角三角形', prompt: '画一个直角三角形 ABC，角 C 为直角' },
-                  { label: '⭕ 画圆与半径', prompt: '画一个圆并标出圆心 O 和半径 r' }
+                  { label: '⭕ 圆与半径', prompt: '画一个圆并标出圆心 O 和半径 r' }
                 ].map((item) => (
                   <button
                     key={item.label}
@@ -1630,14 +1924,21 @@ export default function ScratchpadCanvas({
                 <textarea
                   value={spokenInput}
                   onChange={(e) => setSpokenInput(e.target.value)}
-                  placeholder="说出或输入您要画的图或写的字，例如：
-“画一个坐标系并在上面画 y = x^2”
-“帮我把设项：设 u = ln(x+1) 写入画板”
-（AI 将严格按您所说在画板上作画/写字，绝不替您算答案）"
+                  placeholder="说出或点击上方题目公式（例如：“帮我把公式 $ax^2 + bx + \arcsin x$ 写入画板” 或 “画函数图像 y=x^2”）... AI 将严格按您所说作画写字，严禁替算答案"
                   disabled={isAgentRunning}
                   rows={2}
-                  className="w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/40 text-[12px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary resize-none leading-relaxed"
+                  className="w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/40 text-[12px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary resize-none leading-relaxed pr-6"
                 />
+                {spokenInput && (
+                  <button
+                    type="button"
+                    onClick={() => setSpokenInput('')}
+                    className="absolute top-2 right-2 p-0.5 rounded-full hover:bg-surface-container text-outline hover:text-on-surface transition cursor-pointer"
+                    title="清空当前输入框"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">close</span>
+                  </button>
+                )}
               </div>
 
               {/* Agent 触发按钮与状态 */}

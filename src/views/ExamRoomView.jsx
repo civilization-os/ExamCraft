@@ -1085,6 +1085,7 @@ export default function ExamRoomView({
             <ScratchpadCanvas
               key={`${activePaper?.id || 'paper'}_${currentQKey}`}
               questionNum={currentQ?.num}
+              questionData={currentQ}
               storageKey={scratchpadCanvasStorageKey}
               textStorageKey={scratchpadStorageKey}
               contextProblem={currentQ ? `${currentQ.prompt} ${currentQ.mathExpression || ''}` : ''}
