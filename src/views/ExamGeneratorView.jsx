@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import { extractExamMeta, sliceMarkdownIntoChunks } from '../utils/examChunker';
+import { calculatePaperMetrics } from '../utils/paperMetrics';
 
 export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, onNavigate }) {
   const [activeMode, setActiveMode] = useState('markdown'); // Default to markdown
@@ -329,7 +330,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
         questionCount: allQuestions.length,
         totalScore: meta.totalScore || 100,
         duration: meta.duration || 120,
-        difficulty: 4,
+        difficulty: calculatePaperMetrics({ title: meta.title, questions: allQuestions, duration: meta.duration }).difficulty,
         tags: ['#AI克隆', '#篇章切片', '#KaTeX高保真'],
         status: '未作答 (全新排版完毕)',
         typeBreakdown: {
@@ -515,7 +516,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
       questionCount: parsedExam.questions.length,
       totalScore: parsedExam.totalScore || 100,
       duration: parsedExam.duration || 120,
-      difficulty: 4,
+      difficulty: calculatePaperMetrics(parsedExam).difficulty,
       tags: ['#Markdown录入', '#KaTeX公式渲染', '#已存试卷库'],
       status: '未作答 (已保存)',
       questions: parsedExam.questions

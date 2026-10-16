@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
+import { getQuestionDifficulty } from '../utils/paperMetrics';
 
 export default function ExamRoomView({ activePaper, questions, onExit, onOpenMistakes, onSubmitExam }) {
   const [currentQIndex, setCurrentQIndex] = useState(0);
@@ -518,8 +519,11 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                 <span>添加笔记</span>
               </button>
               <span className="text-outline-variant">|</span>
-              <span className="text-on-surface-variant font-label-mono text-label-mono">
-                难度: {currentQ.difficultyStr || '★★★★☆'}
+              <span className="text-on-surface-variant font-label-mono text-label-mono flex items-center gap-1">
+                难度: <span className="text-tertiary tracking-wider">{getQuestionDifficulty(currentQ).stars}</span>
+                <span className="text-[10px] px-1 py-0.2 rounded bg-surface-container text-outline">
+                  {getQuestionDifficulty(currentQ).label}
+                </span>
               </span>
             </div>
           </div>

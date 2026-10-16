@@ -909,7 +909,15 @@ apiRouter.post('/model/ai-import-paper', async (req, res) => {
       questionCount: parsed.questions.length,
       totalScore: parsed.totalScore || 100,
       duration: parsed.duration || 120,
-      difficulty: 4,
+      difficulty: (() => {
+        const titleLower = (parsed.title || fileName || '').toLowerCase();
+        const solCount = parsed.questions.filter(q => q.type.includes('解答') || q.type.includes('证明') || q.type.includes('计算')).length;
+        if ((titleLower.includes('数学') || titleLower.includes('高数')) && (titleLower.includes('考研') || solCount >= 4)) return 5;
+        if (titleLower.includes('英语') && titleLower.includes('英语一')) return 5;
+        if (titleLower.includes('英语') && titleLower.includes('英语二')) return 4;
+        if (titleLower.includes('期末') || titleLower.includes('单元')) return 3;
+        return solCount >= 3 ? 4 : 3;
+      })(),
       tags: ['#AI导入', '#model_core', '#全真规整'],
       status: '未作答 (AI解析完毕)',
       typeBreakdown: {

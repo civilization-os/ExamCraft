@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { INITIAL_SUBMISSIONS } from '../data/mockData';
+import { calculatePaperMetrics } from '../utils/paperMetrics';
 
 // Dynamically compute real question and section breakdown from paper
 function getPaperStructure(paper) {
@@ -195,7 +196,11 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
     return matchesSearch && p.category === activeCategory;
   }).sort((a, b) => {
     if (sortBy === 'score-desc') return b.totalScore - a.totalScore;
-    if (sortBy === 'diff-desc') return b.difficulty - a.difficulty;
+    if (sortBy === 'diff-desc') {
+      const diffB = calculatePaperMetrics(b).difficulty;
+      const diffA = calculatePaperMetrics(a).difficulty;
+      return diffB - diffA;
+    }
     return 0; // default date order
   });
 
@@ -375,6 +380,7 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
           ) : (
             filteredPapers.map((paper) => {
               const isEditingNote = editingNoteId === paper.id;
+              const paperMetrics = calculatePaperMetrics(paper);
               return (
                 <article
                   key={paper.id}
@@ -424,8 +430,12 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                         建议 {paper.duration} 分钟
                       </span>
                       <span>·</span>
-                      <span className="flex items-center gap-1 font-label-sm text-label-sm text-tertiary">
-                        难度: <span className="tracking-widest">{'★'.repeat(paper.difficulty)}{'☆'.repeat(5 - paper.difficulty)}</span>
+                      <span className="flex items-center gap-1.5 font-label-sm text-label-sm text-tertiary">
+                        <span>难度:</span>
+                        <span className="tracking-widest font-mono font-medium">{paperMetrics.stars}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-tertiary-fixed/30 text-tertiary font-label-mono font-medium">
+                          {paperMetrics.difficultyLabel}
+                        </span>
                       </span>
                     </div>
                   </div>
@@ -540,7 +550,7 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                           <span className="font-label-mono text-label-sm text-on-surface-variant">STATUS:</span>
                           <span className="font-label-mono text-label-sm text-secondary font-semibold">{paper.status}</span>
                         </div>
-                        <span className="font-label-mono text-[11px] text-outline">预计平均完成用时 ~{Math.round(paper.duration * 0.75)}m</span>
+                        <span className="font-label-mono text-[11px] text-outline">预计平均完成用时 ~{paperMetrics.estimatedMinutes}m</span>
                       </div>
                     );
                   })()}
