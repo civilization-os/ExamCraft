@@ -684,7 +684,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                 }`}
               >
                 <span className="material-symbols-outlined text-[19px]">auto_fix_high</span>
-                <span>模式 B · AI 规范代笔排版</span>
+                <span>模式 B · AI 规范代笔 (帮写不帮算)</span>
               </button>
             </div>
 
@@ -694,11 +694,11 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                 {/* Integrity Disclaimer Banner */}
                 <div className="flex items-start space-x-space-md p-space-md bg-tertiary-fixed/30 border border-tertiary-fixed rounded-xl text-on-tertiary-fixed">
                   <span className="material-symbols-outlined text-tertiary text-[20px] mt-0.5 material-symbols-fill">
-                    gavel
+                    shield
                   </span>
                   <div className="flex-1 text-body-sm font-body-sm leading-relaxed">
-                    <span className="font-semibold text-tertiary">作答诚信与监考边界声明：</span>
-                    本工作台开启的「AI 规范代笔」由底层 <code>model_core</code> 调度。仅将考生的口述演录、凌乱草稿与简写符号转录为标准的 LaTeX 数学推导与分步排版。系统内嵌模型已被强制切断题目解答、逻辑修正与作弊引导能力，任何逻辑错误均会被原样忠实保留。
+                    <span className="font-bold text-tertiary">考场学术诚信防线（可以让 AI 帮写，但绝对不能帮算）：</span>
+                    本工作台的 AI 规范代笔仅辅助将考生本人的口述速记与手拟草稿誊录为标准 LaTeX 卷面。<strong>AI 严禁代做任何下一步推导、严禁计算最终数值或求解结果</strong>。任何考生原稿中的推导失误均会原样忠实保留，守护全真考场实战纪律。
                   </div>
                 </div>
 
@@ -724,7 +724,8 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                       placeholder="在此输入草稿推演，例如：
 原式采用分部积分法...
 设 u = ln(x+1), 则 du = 1/(x+1) dx
-设 dv = x^2 dx, 则 v = 1/3 * x^3 ..."
+设 dv = x^2 dx, 则 v = 1/3 * x^3 ...
+（AI 将辅助把您的手稿整理为规范 LaTeX 格式，绝不替您算答案）"
                       className="w-full h-80 p-space-md font-mono text-code-md text-on-surface bg-surface-container-low rounded-lg border border-outline-variant/50 focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest transition resize-none leading-relaxed"
                     />
 
@@ -738,7 +739,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                         <span className={`material-symbols-outlined text-[16px] ${isScribing ? 'animate-spin' : ''}`}>
                           {isScribing ? 'progress_activity' : 'auto_fix_high'}
                         </span>
-                        <span>{isScribing ? 'AI 转录排版中...' : '⚡ 调用 model_core 规范转录'}</span>
+                        <span>{isScribing ? 'AI 规范排版转录中...' : '⚡ AI 规范转录 (帮写不帮算 · 严禁代解)'}</span>
                       </button>
 
                       <button
@@ -973,7 +974,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
             <div className="px-2.5 py-1 rounded-lg bg-surface-container-low border border-outline-variant/25 text-[11px] text-on-surface-variant flex items-center justify-between shrink-0">
               <div className="flex items-center gap-1.5 text-secondary font-medium">
                 <span className="material-symbols-outlined text-[14px]">shield</span>
-                <span>考场防作弊生效：AI 仅辅助排版与 LaTeX，严禁计算代答</span>
+                <span>考场纪律原则：可以让 AI 帮写（规范排版与 LaTeX），但绝不能帮算（严禁代解与计算代答）</span>
               </div>
               {scratchpadNote && (
                 <span className="font-mono text-[10px] text-outline">
@@ -1078,12 +1079,12 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                   onClick={() => handleScratchpadAssist('format')}
                   disabled={isScratchpadAiLoading}
                   className="px-2.5 py-1 rounded-lg bg-primary-fixed hover:bg-primary-fixed-dim text-on-primary-fixed text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                  title="将草稿整理为规范的 Markdown 与 LaTeX 公式，不改变原式与计算"
+                  title="将草稿整理为规范的 Markdown 与 LaTeX 公式，严格保持原式与逻辑，绝对不代算"
                 >
                   <span className={`material-symbols-outlined text-[13px] ${isScratchpadAiLoading ? 'animate-spin' : ''}`}>
                     {isScratchpadAiLoading ? 'progress_activity' : 'auto_fix_high'}
                   </span>
-                  <span>AI 排版规整</span>
+                  <span>AI 帮写排版 (严禁代算)</span>
                 </button>
 
                 <button
