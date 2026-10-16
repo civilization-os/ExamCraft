@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
+import ScratchpadCanvas from '../components/ScratchpadCanvas';
 import { getQuestionDifficulty } from '../utils/paperMetrics';
 
 export default function ExamRoomView({ activePaper, questions, onExit, onOpenMistakes, onSubmitExam }) {
@@ -42,7 +43,9 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
 
   // Scratchpad toggle & persistent local storage
   const scratchpadStorageKey = activePaper?.id ? `examcraft_scratchpad_${activePaper.id}` : 'examcraft_scratchpad_default';
+  const scratchpadCanvasStorageKey = activePaper?.id ? `examcraft_scratchpad_canvas_${activePaper.id}` : 'examcraft_scratchpad_canvas_default';
   const [showScratchpad, setShowScratchpad] = useState(false);
+  const [scratchpadTab, setScratchpadTab] = useState('canvas'); // 'canvas' (手写涂鸦板) | 'text' (文本公式笔记)
   const [scratchpadNote, setScratchpadNote] = useState(() => {
     try {
       const key = activePaper?.id ? `examcraft_scratchpad_${activePaper.id}` : 'examcraft_scratchpad_default';
@@ -894,54 +897,87 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
           <div
             className={`bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant/40 p-space-md z-50 flex flex-col gap-2.5 transition-all duration-200 ${
               isScratchpadMaximized
-                ? 'fixed inset-3 sm:inset-6 lg:inset-10 animate-in zoom-in-95'
-                : 'fixed bottom-6 right-6 w-[420px] sm:w-[520px] h-[520px] max-w-[94vw] max-h-[85vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
+                ? 'fixed inset-2 sm:inset-4 lg:inset-8 animate-in zoom-in-95'
+                : 'fixed bottom-5 right-5 w-[460px] sm:w-[580px] h-[560px] max-w-[96vw] max-h-[88vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
             }`}
           >
-            {/* Header */}
+            {/* Header: Dual Mode Switcher & Window Controls */}
             <div className="flex items-center justify-between pb-2 border-b border-surface-container shrink-0">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[20px] text-primary">draw</span>
-                <span className="font-semibold text-on-surface text-label-md">
-                  {isScratchpadMaximized ? '全屏草稿演算大工作台' : '便签草稿纸'}
-                </span>
-                {lastSavedTime && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-secondary-container/30 text-secondary text-[11px] font-mono font-medium">
+                {/* Mode Selector Tabs: Canvas vs Text */}
+                <div className="flex items-center bg-surface-container-low p-0.5 rounded-lg border border-outline-variant/30">
+                  <button
+                    type="button"
+                    onClick={() => setScratchpadTab('canvas')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] font-semibold transition cursor-pointer ${
+                      scratchpadTab === 'canvas'
+                        ? 'bg-primary text-on-primary shadow-xs'
+                        : 'text-on-surface-variant hover:text-on-surface'
+                    }`}
+                    title="自由手写涂鸦板（支持鼠标/触笔手绘、橡皮擦、坐标方格纸）"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">draw</span>
+                    <span>手绘涂鸦板</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScratchpadTab('text')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] font-semibold transition cursor-pointer ${
+                      scratchpadTab === 'text'
+                        ? 'bg-primary text-on-primary shadow-xs'
+                        : 'text-on-surface-variant hover:text-on-surface'
+                    }`}
+                    title="文本公式笔记（支持 Markdown / LaTeX 实时渲染与 AI 帮写排版）"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">edit_note</span>
+                    <span>文本公式笔记</span>
+                  </button>
+                </div>
+
+                {scratchpadTab === 'text' && lastSavedTime && (
+                  <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-secondary-container/30 text-secondary text-[11px] font-mono font-medium">
                     <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"></span>
                     <span>{lastSavedTime} 已暂存</span>
                   </span>
                 )}
                 {!isScratchpadMaximized && (
-                  <span className="text-[10px] text-outline hidden sm:inline font-label-mono">
+                  <span className="text-[10px] text-outline hidden md:inline font-label-mono">
                     (支持右下角拉伸放大)
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1.5">
-                {/* Font Size Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setScratchpadFontSize((f) => (f === 'sm' ? 'md' : f === 'md' ? 'lg' : 'sm'))}
-                  className="px-2 py-0.5 rounded text-[11px] font-medium bg-surface-container hover:bg-surface-container-high text-on-surface transition cursor-pointer flex items-center gap-1"
-                  title={`当前字号: ${scratchpadFontSize === 'lg' ? '大字号 (17px)' : scratchpadFontSize === 'md' ? '标准 (15px)' : '紧凑 (13px)'}，点击切换`}
-                >
-                  <span className="material-symbols-outlined text-[13px]">format_size</span>
-                  <span>{scratchpadFontSize === 'lg' ? '大字号' : scratchpadFontSize === 'md' ? '标准字' : '紧凑字'}</span>
-                </button>
 
-                {/* Preview / Edit Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setScratchpadPreviewMode(!scratchpadPreviewMode)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
-                    scratchpadPreviewMode
-                      ? 'bg-primary text-on-primary font-semibold'
-                      : 'bg-surface-container hover:bg-surface-container-high text-on-surface'
-                  }`}
-                  title="切换编辑/KaTeX高保真渲染"
-                >
-                  {scratchpadPreviewMode ? '源码编辑' : 'KaTeX 预览'}
-                </button>
+              <div className="flex items-center gap-1.5">
+                {scratchpadTab === 'text' && (
+                  <>
+                    {/* Font Size Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => setScratchpadFontSize((f) => (f === 'sm' ? 'md' : f === 'md' ? 'lg' : 'sm'))}
+                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-surface-container hover:bg-surface-container-high text-on-surface transition cursor-pointer flex items-center gap-1"
+                      title={`当前字号: ${scratchpadFontSize === 'lg' ? '大字号 (17px)' : scratchpadFontSize === 'md' ? '标准 (15px)' : '紧凑 (13px)'}，点击切换`}
+                    >
+                      <span className="material-symbols-outlined text-[13px]">format_size</span>
+                      <span>{scratchpadFontSize === 'lg' ? '大字号' : scratchpadFontSize === 'md' ? '标准字' : '紧凑字'}</span>
+                    </button>
+
+                    {/* Preview / Edit Toggle (only in compact mode) */}
+                    {!isScratchpadMaximized && (
+                      <button
+                        type="button"
+                        onClick={() => setScratchpadPreviewMode(!scratchpadPreviewMode)}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
+                          scratchpadPreviewMode
+                            ? 'bg-primary text-on-primary font-semibold'
+                            : 'bg-surface-container hover:bg-surface-container-high text-on-surface'
+                        }`}
+                        title="切换编辑/KaTeX高保真渲染"
+                      >
+                        {scratchpadPreviewMode ? '源码编辑' : 'KaTeX 预览'}
+                      </button>
+                    )}
+                  </>
+                )}
 
                 {/* Maximize / Restore Toggle */}
                 <button
@@ -976,7 +1012,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                 <span className="material-symbols-outlined text-[14px]">shield</span>
                 <span>考场纪律原则：可以让 AI 帮写（规范排版与 LaTeX），但绝不能帮算（严禁代解与计算代答）</span>
               </div>
-              {scratchpadNote && (
+              {scratchpadTab === 'text' && scratchpadNote && (
                 <span className="font-mono text-[10px] text-outline">
                   {scratchpadNote.length} 字
                 </span>
@@ -1002,8 +1038,11 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
 
             {/* Content Body: Flex-1 adaptive height */}
             <div className="flex-1 min-h-0 flex flex-col">
-              {isScratchpadMaximized ? (
-                /* Maximized Dual-Pane or Expanded View */
+              {scratchpadTab === 'canvas' ? (
+                /* Mode 1: Hand-drawing Canvas Work Area */
+                <ScratchpadCanvas storageKey={scratchpadCanvasStorageKey} />
+              ) : isScratchpadMaximized ? (
+                /* Mode 2: Text & LaTeX - Maximized Dual-Pane View */
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-full">
                   <div className="flex flex-col h-full bg-surface-container-low rounded-xl p-2.5 border border-outline-variant/30">
                     <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-surface-container text-[12px] text-on-surface-variant font-medium shrink-0">
@@ -1042,7 +1081,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                   </div>
                 </div>
               ) : (
-                /* Compact Floating View with Adaptive Full Height */
+                /* Mode 2: Text & LaTeX - Compact Floating View */
                 <div className="h-full flex flex-col">
                   {scratchpadPreviewMode ? (
                     <div className="w-full flex-1 p-3 bg-surface-container-low rounded-xl overflow-y-auto border border-outline-variant/30 text-body-sm leading-relaxed">
@@ -1071,58 +1110,79 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
               )}
             </div>
 
-            {/* AI Writing Assistant Toolbar */}
-            <div className="flex items-center justify-between gap-1 pt-1 border-t border-surface-container flex-wrap shrink-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => handleScratchpadAssist('format')}
-                  disabled={isScratchpadAiLoading}
-                  className="px-2.5 py-1 rounded-lg bg-primary-fixed hover:bg-primary-fixed-dim text-on-primary-fixed text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                  title="将草稿整理为规范的 Markdown 与 LaTeX 公式，严格保持原式与逻辑，绝对不代算"
-                >
-                  <span className={`material-symbols-outlined text-[13px] ${isScratchpadAiLoading ? 'animate-spin' : ''}`}>
-                    {isScratchpadAiLoading ? 'progress_activity' : 'auto_fix_high'}
-                  </span>
-                  <span>AI 帮写排版 (严禁代算)</span>
-                </button>
+            {/* Bottom Toolbar: Available in Text Notes Mode */}
+            {scratchpadTab === 'text' && (
+              <div className="flex items-center justify-between gap-1 pt-1 border-t border-surface-container flex-wrap shrink-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => handleScratchpadAssist('format')}
+                    disabled={isScratchpadAiLoading}
+                    className="px-2.5 py-1 rounded-lg bg-primary-fixed hover:bg-primary-fixed-dim text-on-primary-fixed text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title="将草稿整理为规范的 Markdown 与 LaTeX 公式，严格保持原式与逻辑，绝对不代算"
+                  >
+                    <span className={`material-symbols-outlined text-[13px] ${isScratchpadAiLoading ? 'animate-spin' : ''}`}>
+                      {isScratchpadAiLoading ? 'progress_activity' : 'auto_fix_high'}
+                    </span>
+                    <span>AI 帮写排版 (严禁代算)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleScratchpadAssist('latex_complete')}
+                    disabled={isScratchpadAiLoading}
+                    className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer disabled:opacity-50 border border-outline-variant/30"
+                    title="辅助补齐矩阵、分段函数与积分上下限等常用 LaTeX 结构"
+                  >
+                    <span className="material-symbols-outlined text-[13px] text-primary">functions</span>
+                    <span>补齐 LaTeX</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleScratchpadAssist('outline')}
+                    disabled={isScratchpadAiLoading}
+                    className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer disabled:opacity-50 border border-outline-variant/30"
+                    title="将散乱的思路提炼为条理分明的步骤设项大纲"
+                  >
+                    <span className="material-symbols-outlined text-[13px] text-secondary">format_list_bulleted</span>
+                    <span>思路提纲化</span>
+                  </button>
+
+                  {/* Quick Scribe to current question answer */}
+                  {scratchpadNote.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newAnswer = candidateDraft
+                          ? `${candidateDraft}\n\n${scratchpadNote}`
+                          : scratchpadNote;
+                        handleUpdateAnswer(newAnswer);
+                        setScratchpadAiMessage('✨ 已将草稿文本誊抄插入至当前题目的作答框中！');
+                      }}
+                      className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer border border-outline-variant/30"
+                      title="将草稿纸文本追加誊抄到本题的作答框中"
+                    >
+                      <span className="material-symbols-outlined text-[13px] text-tertiary">content_paste_go</span>
+                      <span>誊入本题作答</span>
+                    </button>
+                  )}
+                </div>
 
                 <button
                   type="button"
-                  onClick={() => handleScratchpadAssist('latex_complete')}
-                  disabled={isScratchpadAiLoading}
-                  className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer disabled:opacity-50 border border-outline-variant/30"
-                  title="辅助补齐矩阵、分段函数与积分上下限等常用 LaTeX 结构"
+                  onClick={() => {
+                    if (window.confirm('确定清空当前文本草稿内容吗？')) {
+                      setScratchpadNote('');
+                    }
+                  }}
+                  className="text-outline hover:text-error text-[11px] px-2 py-1 rounded hover:bg-surface-container transition cursor-pointer"
+                  title="清空当前文本草稿"
                 >
-                  <span className="material-symbols-outlined text-[13px] text-primary">functions</span>
-                  <span>补齐 LaTeX</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleScratchpadAssist('outline')}
-                  disabled={isScratchpadAiLoading}
-                  className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer disabled:opacity-50 border border-outline-variant/30"
-                  title="将散乱的思路提炼为条理分明的步骤设项大纲"
-                >
-                  <span className="material-symbols-outlined text-[13px] text-secondary">format_list_bulleted</span>
-                  <span>思路提纲化</span>
+                  清空草稿
                 </button>
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm('确定清空当前草稿纸内容吗？')) {
-                    setScratchpadNote('');
-                  }
-                }}
-                className="text-outline hover:text-error text-[11px] px-2 py-1 rounded hover:bg-surface-container transition cursor-pointer"
-                title="清空当前草稿"
-              >
-                清空草稿
-              </button>
-            </div>
+            )}
           </div>
         </>
       )}
