@@ -341,12 +341,14 @@ export default function ScratchpadCanvas({
   storageKey = 'examcraft_scratchpad_canvas',
   textStorageKey = 'examcraft_scratchpad_text',
   contextProblem = '',
+  questionNum = null,
   isMaximized = false,
   onToggleMaximize = null,
   onClose = null
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
+  const prevStorageKeyRef = useRef(storageKey);
 
   // ==================== 画板手绘状态 ====================
   const [tool, setTool] = useState('brush'); // 'brush' | 'eraser' | 'select'
@@ -368,6 +370,16 @@ export default function ScratchpadCanvas({
       return [];
     }
   });
+
+  // 当切换题目或存储 Key 变动时，实时载入该题的专属图元
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`${storageKey}_elements`);
+      setElements(saved ? JSON.parse(saved) : []);
+    } catch {
+      setElements([]);
+    }
+  }, [storageKey]);
 
   useEffect(() => {
     try {
@@ -425,6 +437,16 @@ export default function ScratchpadCanvas({
     }
   }, [boardText, textStorageKey]);
 
+  // 当 textStorageKey 变更时，更新当前题目的专属板书草稿
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(textStorageKey) || '';
+      setBoardText(saved);
+    } catch {
+      setBoardText('');
+    }
+  }, [textStorageKey]);
+
   // ==================== 画板尺寸自适应与高分辨率适配 ====================
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -438,7 +460,12 @@ export default function ScratchpadCanvas({
 
     let tempImgData = null;
     const ctx = canvas.getContext('2d');
-    if (canvas.width > 0 && canvas.height > 0) {
+
+    const isKeyChanged = prevStorageKeyRef.current !== storageKey;
+    if (isKeyChanged) {
+      prevStorageKeyRef.current = storageKey;
+      tempImgData = null; // 切换题目时不复用上一题的画布内存
+    } else if (canvas.width > 0 && canvas.height > 0) {
       tempImgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     }
 
@@ -469,6 +496,33 @@ export default function ScratchpadCanvas({
       } else {
         saveToHistory();
       }
+    }
+  }, [storageKey]);
+
+  // 当 storageKey 变更时，重载该题的专属画布墨水
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.width / dpr;
+    const height = canvas.height / dpr;
+
+    ctx.clearRect(0, 0, width, height);
+
+    const savedDataUrl = localStorage.getItem(storageKey);
+    if (savedDataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+      };
+      img.src = savedDataUrl;
+      setHistory([savedDataUrl]);
+      setHistoryStep(0);
+    } else {
+      setHistory([]);
+      setHistoryStep(-1);
     }
   }, [storageKey]);
 
@@ -1266,10 +1320,17 @@ export default function ScratchpadCanvas({
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 text-primary font-bold">
             <span className="material-symbols-outlined text-[19px]">draw</span>
-            <span className="text-[13px]">草稿演算工作台</span>
+            <span className="text-[13px] font-sans">
+              {questionNum ? `第 ${questionNum} 题 · 专属草稿纸` : '草稿演算工作台'}
+            </span>
           </div>
 
-          <div className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/30 border border-secondary/20 text-secondary text-[11px] font-medium">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-sans font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+            <span>题卷独立持久化</span>
+          </span>
+
+          <div className="hidden xl:flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/30 border border-secondary/20 text-secondary text-[11px] font-medium font-sans">
             <span className="material-symbols-outlined text-[13px]">shield</span>
             <span>铁律：AI 帮画帮写不帮算，只能局限于您说出的内容</span>
           </div>

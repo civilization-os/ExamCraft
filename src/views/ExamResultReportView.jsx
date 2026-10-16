@@ -54,9 +54,14 @@ export default function ExamResultReportView({
   // Expand / collapse all analyses toggle
   const [expandedAll, setExpandedAll] = useState(false);
   const [expandedMap, setExpandedMap] = useState({});
+  const [expandedScratchpadMap, setExpandedScratchpadMap] = useState({});
 
   const toggleExpand = (qId) => {
     setExpandedMap(prev => ({ ...prev, [qId]: !prev[qId] }));
+  };
+
+  const toggleScratchpad = (qId) => {
+    setExpandedScratchpadMap(prev => ({ ...prev, [qId]: !prev[qId] }));
   };
 
   const formatDuration = (totalSec) => {
@@ -672,12 +677,12 @@ export default function ExamResultReportView({
                     </div>
                   </div>
 
-                  {/* Expandable Official Analysis & AI Insight */}
-                  <div className="pt-space-xs">
+                  {/* Action Bar: Official Analysis & Linked Scratchpad Viewer */}
+                  <div className="pt-space-xs border-t border-outline-variant/20 flex flex-wrap items-center justify-between gap-2">
                     <button
                       type="button"
                       onClick={() => toggleExpand(q.id)}
-                      className="inline-flex items-center space-x-1 text-primary hover:text-primary-container font-label-sm text-label-sm font-semibold transition-colors cursor-pointer"
+                      className="inline-flex items-center space-x-1 text-primary hover:text-primary-container font-sans text-[12px] font-semibold transition-colors cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-[18px]">
                         {isExpanded ? 'keyboard_arrow_up' : 'keyboard_arrow_down'}
@@ -685,34 +690,134 @@ export default function ExamResultReportView({
                       <span>{isExpanded ? '收起官方解析与 AI 错因归因' : '查看完整分步解析与考点精讲'}</span>
                     </button>
 
-                    {isExpanded && (
-                      <div className="mt-space-sm p-space-md rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-space-md animate-in fade-in duration-200">
-                        {/* Official Analysis */}
-                        <div className="space-y-1">
-                          <span className="font-label-mono text-[11px] text-primary font-semibold flex items-center gap-1">
-                            <span className="material-symbols-outlined text-[15px]">lightbulb</span>
-                            官方分步推导解析:
-                          </span>
-                          <div className="text-body-md text-on-surface leading-relaxed pl-2 border-l-2 border-primary/40">
-                            <MathMarkdown content={q.analysis || '暂无官方详细解析'} />
-                          </div>
-                        </div>
-
-                        {/* AI Scribe / Master Insight */}
-                        {q.aiInsight && (
-                          <div className="p-space-sm rounded-lg bg-surface-container-lowest border border-outline-variant/20 space-y-1">
-                            <span className="font-label-mono text-[11px] text-tertiary font-semibold flex items-center gap-1">
-                              <span className="material-symbols-outlined text-[15px]">psychology</span>
-                              AI 名师扣分归因与考点突破点拨:
-                            </span>
-                            <p className="text-body-sm text-on-surface-variant pl-2">
-                              {q.aiInsight}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {/* Toggle Button for Linked Scratchpad */}
+                    <button
+                      type="button"
+                      onClick={() => toggleScratchpad(q.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[12px] font-sans font-medium transition cursor-pointer border ${
+                        expandedScratchpadMap[q.id]
+                          ? 'bg-primary text-white border-primary shadow-xs'
+                          : q.scratchpad?.hasContent
+                          ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/15'
+                          : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container border-outline-variant/30'
+                      }`}
+                      title={q.scratchpad?.hasContent ? '查看本题考场关联留存的手绘草图与草稿笔记' : '本题未记录独立草稿'}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">draw</span>
+                      <span>{expandedScratchpadMap[q.id] ? '收起本题草稿纸' : '查看本题留存草稿纸'}</span>
+                      {q.scratchpad?.hasContent ? (
+                        <span className="px-1.5 py-0.2 rounded-full bg-emerald-500 text-white text-[10px] font-bold">
+                          有草稿
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-outline font-normal">无草稿</span>
+                      )}
+                    </button>
                   </div>
+
+                  {/* Render Linked Scratchpad when expanded */}
+                  {expandedScratchpadMap[q.id] && (
+                    <div className="mt-space-sm p-4 rounded-xl bg-surface-container-low/70 border border-primary/20 space-y-3 animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between pb-2 border-b border-outline-variant/20 flex-wrap gap-2">
+                        <div className="flex items-center gap-1.5 text-primary font-bold text-[13px] font-sans">
+                          <span className="material-symbols-outlined text-[18px]">history_edu</span>
+                          <span>第 {q.num} 题 · 考场实录草稿纸</span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-medium">
+                            交卷已关联归档
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-on-surface-variant/70 font-sans">
+                          真实保留考场作答期间的书写草稿与手绘墨迹
+                        </span>
+                      </div>
+
+                      {q.scratchpad?.hasContent ? (
+                        <div className="space-y-3">
+                          {/* 1. Canvas Drawing Preview */}
+                          {q.scratchpad.canvasDataUrl && (
+                            <div className="space-y-1">
+                              <span className="text-[11px] font-semibold text-on-surface-variant flex items-center gap-1 font-sans">
+                                <span className="material-symbols-outlined text-[14px] text-primary">gesture</span>
+                                手绘涂鸦与矢量图形:
+                              </span>
+                              <div
+                                className="w-full max-h-72 overflow-auto rounded-xl border border-outline-variant/30 flex items-center justify-center p-3 bg-white dark:bg-slate-900 shadow-inner"
+                                style={{
+                                  backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)',
+                                  backgroundSize: '16px 16px'
+                                }}
+                              >
+                                <img
+                                  src={q.scratchpad.canvasDataUrl}
+                                  alt={`第 ${q.num} 题手绘画布`}
+                                  className="max-w-full max-h-64 object-contain shadow-xs rounded"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 2. Text / Math Notes */}
+                          {q.scratchpad.text && q.scratchpad.text.trim().length > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-[11px] font-semibold text-on-surface-variant flex items-center gap-1 font-sans">
+                                <span className="material-symbols-outlined text-[14px] text-secondary">notes</span>
+                                演算文本与公式笔记:
+                              </span>
+                              <div className="p-3 bg-surface-container-lowest rounded-lg border border-outline-variant/20 text-body-sm text-on-surface leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap font-sans">
+                                <MathMarkdown content={q.scratchpad.text} />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 3. Elements Summary */}
+                          {q.scratchpad.elements && q.scratchpad.elements.length > 0 && (
+                            <div className="flex items-center gap-2 flex-wrap text-[11px] text-on-surface-variant font-sans pt-1">
+                              <span className="font-semibold text-primary">包含画入图元 ({q.scratchpad.elements.length} 个):</span>
+                              {q.scratchpad.elements.map((el, i) => (
+                                <span key={i} className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/20">
+                                  {el.kind === 'circle' ? '⭕ 几何圆与半径' : el.kind === 'coordinate' ? '📐 直角坐标系' : '公式/文本图元'}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="py-6 text-center text-on-surface-variant/70 text-body-sm font-sans flex flex-col items-center justify-center gap-1">
+                          <span className="material-symbols-outlined text-[24px] text-outline opacity-60">draw</span>
+                          <span>考生在作答本题时未留存手绘草稿或速记笔记。</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Expandable Official Analysis & AI Insight */}
+                  {isExpanded && (
+                    <div className="mt-space-sm p-space-md rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-space-md animate-in fade-in duration-200">
+                      {/* Official Analysis */}
+                      <div className="space-y-1">
+                        <span className="font-sans text-[11px] text-primary font-semibold flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[15px]">lightbulb</span>
+                          官方分步推导解析:
+                        </span>
+                        <div className="text-body-md text-on-surface leading-relaxed pl-2 border-l-2 border-primary/40">
+                          <MathMarkdown content={q.analysis || '暂无官方详细解析'} />
+                        </div>
+                      </div>
+
+                      {/* AI Scribe / Master Insight */}
+                      {q.aiInsight && (
+                        <div className="p-space-sm rounded-lg bg-surface-container-lowest border border-outline-variant/20 space-y-1">
+                          <span className="font-sans text-[11px] text-tertiary font-semibold flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[15px]">psychology</span>
+                            AI 名师扣分归因与考点突破点拨:
+                          </span>
+                          <p className="text-body-sm text-on-surface-variant pl-2 font-sans">
+                            {q.aiInsight}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </article>
               );
             })

@@ -165,22 +165,32 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
                     >
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded bg-surface-container-lowest font-label-mono text-label-mono text-primary font-medium">
-                            {paper.source}
+                          <span className={`px-2 py-0.5 rounded font-sans text-[11px] font-medium ${
+                            paper.status === '已封卷'
+                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30'
+                              : paper.status === '考试中'
+                              ? 'bg-primary/10 text-primary border border-primary/20'
+                              : 'bg-surface-container-lowest text-primary border border-outline-variant/20'
+                          }`}>
+                            {paper.status === '已封卷' ? '🔏 已封卷 (封盘)' : paper.status === '考试中' ? '● 考试中' : paper.source}
                           </span>
                           <h4 className="font-headline-sm text-headline-sm text-on-surface group-hover:text-primary transition-colors font-semibold">
                             {paper.title}
                           </h4>
                         </div>
-                        <p className="text-body-sm text-on-surface-variant font-label-mono">
-                          共 {paper.questionCount} 题 · 满分 {paper.totalScore} 分 · 建议 {paper.duration} 分钟 · 难度 ★★★★☆
+                        <p className="text-body-sm text-on-surface-variant font-sans">
+                          共 {paper.questionCount} 题 · 满分 {paper.totalScore} 分 · {paper.secondsLeft !== undefined ? `剩余考时 ~${Math.ceil(paper.secondsLeft / 60)}m` : `建议 ${paper.duration} 分钟`}
                         </p>
                       </div>
                       <button
                         type="button"
-                        className="px-3.5 py-1.5 rounded-lg bg-primary text-on-primary font-label-sm font-semibold shadow-xs group-hover:scale-105 transition-transform"
+                        className={`px-3.5 py-1.5 rounded-lg text-white font-sans text-[12px] font-semibold shadow-xs group-hover:scale-105 transition-transform ${
+                          paper.status === '已封卷'
+                            ? 'bg-amber-500 hover:bg-amber-600'
+                            : 'bg-primary hover:bg-primary-container'
+                        }`}
                       >
-                        开考
+                        {paper.status === '已封卷' ? '启封继续' : paper.status === '考试中' ? '继续考试' : '开考'}
                       </button>
                     </div>
                   ))

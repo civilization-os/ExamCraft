@@ -543,14 +543,21 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                       );
                     }
 
+                    const isSealed = paper.status === '已封卷';
+                    const isExamining = paper.status === '考试中';
+
                     return (
                       <div className="flex items-center justify-between bg-surface-container-lowest p-2 rounded-lg shadow-xs border border-outline-variant/20">
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-                          <span className="font-label-mono text-label-sm text-on-surface-variant">STATUS:</span>
-                          <span className="font-label-mono text-label-sm text-secondary font-semibold">{paper.status}</span>
+                          <span className={`w-2 h-2 rounded-full ${isSealed ? 'bg-amber-500' : isExamining ? 'bg-primary' : 'bg-secondary'} animate-pulse`}></span>
+                          <span className="font-sans text-[11px] text-on-surface-variant font-medium">状态:</span>
+                          <span className={`font-sans text-[12px] font-semibold ${isSealed ? 'text-amber-700 dark:text-amber-400' : isExamining ? 'text-primary' : 'text-secondary'}`}>
+                            {isSealed ? '🔏 已封卷 · 封盘暂停' : isExamining ? '● 考试中 (作答中)' : (paper.status || '未作答')}
+                          </span>
                         </div>
-                        <span className="font-label-mono text-[11px] text-outline">预计平均完成用时 ~{paperMetrics.estimatedMinutes}m</span>
+                        <span className="font-sans text-[11px] text-outline">
+                          {paper.secondsLeft !== undefined ? `剩余考时 ~${Math.ceil(paper.secondsLeft / 60)}m` : `预计用时 ~${paperMetrics.estimatedMinutes}m`}
+                        </span>
                       </div>
                     );
                   })()}
@@ -562,6 +569,8 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                     (s) => s.paperId === paper.id || s.paperTitle === paper.title
                   );
                   const latestSub = paperSubs[0] || null;
+                  const isSealed = paper.status === '已封卷';
+                  const isExamining = paper.status === '考试中';
 
                   return (
                     <div className="bg-surface-container-low px-space-lg py-2.5 flex items-center justify-between gap-space-sm border-t border-outline-variant/20 flex-wrap">
@@ -569,10 +578,18 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                         <button
                           type="button"
                           onClick={() => onStartExam(paper)}
-                          className="inline-flex items-center gap-1 px-3 h-7.5 rounded bg-primary-container hover:bg-primary text-on-primary font-label-sm text-label-sm transition-all shadow-xs cursor-pointer active:scale-95 font-medium"
+                          className={`inline-flex items-center gap-1 px-3 h-7.5 rounded font-label-sm text-label-sm transition-all shadow-xs cursor-pointer active:scale-95 font-medium ${
+                            isSealed
+                              ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                              : isExamining
+                              ? 'bg-primary hover:bg-primary-container text-white'
+                              : 'bg-primary-container hover:bg-primary text-on-primary'
+                          }`}
                         >
-                          <span className="material-symbols-outlined text-[15px]">fullscreen</span>
-                          进入考场 (专注模式)
+                          <span className="material-symbols-outlined text-[15px]">
+                            {isSealed ? 'lock_open' : isExamining ? 'play_arrow' : 'fullscreen'}
+                          </span>
+                          {isSealed ? '启封继续考试' : isExamining ? '继续考试' : '进入考场 (专注模式)'}
                         </button>
 
                         {/* Direct Jump to Latest Submission Review */}

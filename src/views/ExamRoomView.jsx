@@ -3,19 +3,75 @@ import MathMarkdown from '../components/MathMarkdown';
 import ScratchpadCanvas from '../components/ScratchpadCanvas';
 import { getQuestionDifficulty } from '../utils/paperMetrics';
 
-export default function ExamRoomView({ activePaper, questions, onExit, onOpenMistakes, onSubmitExam }) {
+export default function ExamRoomView({
+  activePaper,
+  questions,
+  onExit,
+  onOpenMistakes,
+  onSubmitExam,
+  onUpdatePaper
+}) {
   const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [questionList, setQuestionList] = useState(questions || []);
+
+  // Initialize questionList: try to restore saved answers if user previously sealed or paused
+  const [questionList, setQuestionList] = useState(() => {
+    if (!activePaper?.id) return questions || [];
+    try {
+      const saved = localStorage.getItem(`examcraft_answers_${activePaper.id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return questions || [];
+  });
 
   useEffect(() => {
+    if (!activePaper?.id) {
+      setQuestionList(questions || []);
+      setCurrentQIndex(0);
+      return;
+    }
+    try {
+      const saved = localStorage.getItem(`examcraft_answers_${activePaper.id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setQuestionList(parsed);
+          return;
+        }
+      }
+    } catch {}
     setQuestionList(questions || []);
-    setCurrentQIndex(0);
-  }, [questions]);
+  }, [questions, activePaper?.id]);
+
+  // Exam Lifecycle Status: 考试中 vs 已封卷 (围棋封盘)
+  const isInitiallySealed = activePaper?.status === '已封卷';
+  const [isSealed, setIsSealed] = useState(isInitiallySealed);
+  const [sealedAt, setSealedAt] = useState(activePaper?.sealedAt || '');
+
+  // Auto-mark paper as '考试中' if not already sealed or completed
+  useEffect(() => {
+    if (activePaper?.id && activePaper.status !== '已封卷' && !String(activePaper.status).startsWith('已完成')) {
+      const updated = { ...activePaper, status: '考试中' };
+      if (onUpdatePaper) onUpdatePaper(updated);
+      try {
+        const raw = localStorage.getItem('examcraft_papers');
+        if (raw) {
+          const list = JSON.parse(raw);
+          const next = list.map((p) => (p.id === activePaper.id ? { ...p, status: '考试中' } : p));
+          localStorage.setItem('examcraft_papers', JSON.stringify(next));
+        }
+      } catch {}
+    }
+  }, [activePaper?.id]);
   
-  // Timer state based on activePaper.duration
-  const initialDurationSeconds = (activePaper?.duration ? activePaper.duration * 60 : 5400);
+  // Timer state based on activePaper.secondsLeft or duration
+  const initialDurationSeconds = activePaper?.secondsLeft !== undefined
+    ? activePaper.secondsLeft
+    : (activePaper?.duration ? activePaper.duration * 60 : 5400);
   const [secondsLeft, setSecondsLeft] = useState(initialDurationSeconds);
-  const [isTimerRunning, setIsTimerRunning] = useState(true);
+  const [isTimerRunning, setIsTimerRunning] = useState(!isInitiallySealed);
 
   // Submitting state for AI grading
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -50,12 +106,16 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
     }, 3200);
   };
 
-  // Scratchpad toggle & persistent storage keys
-  const scratchpadStorageKey = activePaper?.id ? `examcraft_scratchpad_${activePaper.id}` : 'examcraft_scratchpad_default';
-  const scratchpadCanvasStorageKey = activePaper?.id ? `examcraft_scratchpad_canvas_${activePaper.id}` : 'examcraft_scratchpad_canvas_default';
+  // 每一题都有自己独立的草稿纸 Key，并且独立持久化
+  const currentQKey = currentQ?.id || `q_${currentQ?.num || currentQIndex}`;
+  const scratchpadStorageKey = activePaper?.id
+    ? `examcraft_scratchpad_${activePaper.id}_${currentQKey}`
+    : `examcraft_scratchpad_default_${currentQKey}`;
+  const scratchpadCanvasStorageKey = activePaper?.id
+    ? `examcraft_scratchpad_canvas_${activePaper.id}_${currentQKey}`
+    : `examcraft_scratchpad_canvas_default_${currentQKey}`;
   const [showScratchpad, setShowScratchpad] = useState(false);
   const [isScratchpadMaximized, setIsScratchpadMaximized] = useState(false);
-
 
   // Submit Modal
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
@@ -67,14 +127,14 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
     setScribedLatex(questionList[currentQIndex]?.aiTranscription || '');
   }, [currentQIndex]);
 
-  // Countdown timer effect
+  // Countdown timer effect (freezes when sealed or paused)
   useEffect(() => {
-    if (!isTimerRunning) return;
+    if (!isTimerRunning || isSealed) return;
     const interval = setInterval(() => {
       setSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
     return () => clearInterval(interval);
-  }, [isTimerRunning]);
+  }, [isTimerRunning, isSealed]);
 
   const formatTimer = (totalSec) => {
     const hrs = Math.floor(totalSec / 3600);
@@ -87,13 +147,68 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
 
   const handleUpdateAnswer = (val) => {
     setCandidateDraft(val);
-    setQuestionList((prev) =>
-      prev.map((q, idx) =>
+    setQuestionList((prev) => {
+      const next = prev.map((q, idx) =>
         idx === currentQIndex
           ? { ...q, userAnswer: val, status: val.trim() ? 'answered' : 'unanswered' }
           : q
-      )
-    );
+      );
+      if (activePaper?.id) {
+        try {
+          localStorage.setItem(`examcraft_answers_${activePaper.id}`, JSON.stringify(next));
+        } catch {}
+      }
+      return next;
+    });
+  };
+
+  // 封卷操作（类似围棋封盘：考卷进入防作弊密封，计时完全冻结，安全暂存）
+  const handleSealExam = () => {
+    setIsTimerRunning(false);
+    setIsSealed(true);
+    const nowStr = new Date().toLocaleString('zh-CN', { hour12: false });
+    setSealedAt(nowStr);
+    const updated = {
+      ...activePaper,
+      status: '已封卷',
+      secondsLeft,
+      sealedAt: nowStr
+    };
+    if (onUpdatePaper) onUpdatePaper(updated);
+    try {
+      const raw = localStorage.getItem('examcraft_papers');
+      if (raw) {
+        const list = JSON.parse(raw);
+        const next = list.map((p) =>
+          p.id === activePaper?.id ? { ...p, status: '已封卷', secondsLeft, sealedAt: nowStr } : p
+        );
+        localStorage.setItem('examcraft_papers', JSON.stringify(next));
+      }
+    } catch {}
+    showExamToast('🔏 考卷已正式封卷（封盘保护状态），考题密封，计时冻结', 'warn');
+  };
+
+  // 启封操作（解封考卷，继续作答）
+  const handleUnsealExam = () => {
+    setIsSealed(false);
+    setIsTimerRunning(true);
+    const updated = {
+      ...activePaper,
+      status: '考试中',
+      secondsLeft
+    };
+    if (onUpdatePaper) onUpdatePaper(updated);
+    try {
+      const raw = localStorage.getItem('examcraft_papers');
+      if (raw) {
+        const list = JSON.parse(raw);
+        const next = list.map((p) =>
+          p.id === activePaper?.id ? { ...p, status: '考试中', secondsLeft } : p
+        );
+        localStorage.setItem('examcraft_papers', JSON.stringify(next));
+      }
+    } catch {}
+    showExamToast('✨ 考卷已成功启封，继续作答并恢复倒计时', 'success');
   };
 
   // Call real model_core AI scribe
@@ -147,7 +262,26 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
     let calculatedScore = 0;
     let correctCount = 0;
 
-    const gradedQuestions = questionList.map((q) => {
+    const gradedQuestions = questionList.map((q, idx) => {
+      const qKey = q.id || `q_${q.num || idx}`;
+      const textKey = `examcraft_scratchpad_${activePaper?.id || 'paper'}_${qKey}`;
+      const canvasKey = `examcraft_scratchpad_canvas_${activePaper?.id || 'paper'}_${qKey}`;
+      const elementsKey = `examcraft_scratchpad_canvas_${activePaper?.id || 'paper'}_${qKey}_elements`;
+
+      const scratchpadText = localStorage.getItem(textKey) || '';
+      const scratchpadCanvas = localStorage.getItem(canvasKey) || null;
+      let scratchpadElements = [];
+      try {
+        const rawEl = localStorage.getItem(elementsKey);
+        if (rawEl) scratchpadElements = JSON.parse(rawEl);
+      } catch {}
+
+      const hasScratchpad = Boolean(
+        (scratchpadText && scratchpadText.trim().length > 0) ||
+        scratchpadCanvas ||
+        (scratchpadElements && scratchpadElements.length > 0)
+      );
+
       const userAns = (q.userAnswer || '').trim();
       const stdAns = (q.standardAnswer || '').trim();
       const maxScore = q.score || 5;
@@ -192,7 +326,13 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
         standardAnswer: stdAns,
         aiInsight: isCorrect
           ? '核心推导严谨规范，公式通式与采分点已全部达成。'
-          : `作答演算步骤或选项辨析出现偏差，标准答案为【${stdAns || '详见分步解析'}】。`
+          : `作答演算步骤或选项辨析出现偏差，标准答案为【${stdAns || '详见分步解析'}】。`,
+        scratchpad: {
+          text: scratchpadText,
+          canvasDataUrl: scratchpadCanvas,
+          elements: scratchpadElements,
+          hasContent: hasScratchpad
+        }
       };
     });
 
@@ -267,6 +407,23 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
       const existingList = existingRaw ? JSON.parse(existingRaw) : [];
       const updatedList = [submissionRecord, ...existingList];
       localStorage.setItem('examcraft_submissions', JSON.stringify(updatedList));
+
+      // Update activePaper status to '已完成' and clear in-progress answers cache
+      if (activePaper?.id) {
+        localStorage.removeItem(`examcraft_answers_${activePaper.id}`);
+        const updatedPaper = {
+          ...activePaper,
+          status: `已完成 (得分 ${calculatedScore}/${totalPaperScore})`,
+          score: calculatedScore
+        };
+        if (onUpdatePaper) onUpdatePaper(updatedPaper);
+        const rawPapers = localStorage.getItem('examcraft_papers');
+        if (rawPapers) {
+          const list = JSON.parse(rawPapers);
+          const next = list.map((p) => (p.id === activePaper.id ? updatedPaper : p));
+          localStorage.setItem('examcraft_papers', JSON.stringify(next));
+        }
+      }
     } catch (e) {
       console.warn('Failed to save submission to localStorage:', e);
     }
@@ -363,47 +520,65 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
 
         {/* Right: Telemetry & Actions */}
         <div className="flex items-center space-x-space-sm sm:space-x-space-md">
-          {/* Countdown Timer with Pause/Resume Toggle */}
+          {/* Status Pill: 考试中 vs 已封卷 */}
+          <span className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-sans font-semibold border ${
+            isSealed
+              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30'
+              : 'bg-primary/10 text-primary border-primary/20'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isSealed ? 'bg-amber-500' : 'bg-primary animate-pulse'}`}></span>
+            <span>{isSealed ? '已封卷 (封盘)' : '考试作答中'}</span>
+          </span>
+
+          {/* Countdown Timer with 封卷 / 启封 Toggle */}
           <div className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1 rounded-lg border transition-all ${
             isTimerRunning
               ? 'bg-surface-container-low border-outline-variant/40 text-tertiary'
               : 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
           }`}>
             <span className="material-symbols-outlined text-[18px]">
-              {isTimerRunning ? 'timer' : 'pause_circle'}
+              {isTimerRunning ? 'timer' : 'lock'}
             </span>
             <span className="font-code-md text-code-md font-semibold tracking-wider font-mono">
               {formatTimer(secondsLeft)}
             </span>
             <button
               type="button"
-              onClick={() => setIsTimerRunning(!isTimerRunning)}
-              className={`ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium flex items-center gap-0.5 transition-colors cursor-pointer ${
+              onClick={isTimerRunning ? handleSealExam : handleUnsealExam}
+              className={`ml-1 px-2 py-0.5 rounded text-[11px] font-sans font-medium flex items-center gap-1 transition-colors cursor-pointer ${
                 isTimerRunning
-                  ? 'bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface'
-                  : 'bg-amber-500 text-white font-bold shadow-xs hover:bg-amber-600'
+                  ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                  : 'bg-primary text-white font-bold shadow-xs hover:bg-primary-container'
               }`}
-              title={isTimerRunning ? '暂停考试倒计时' : '继续考试倒计时'}
+              title={isTimerRunning ? '正式封卷并冻结倒计时（如同围棋封盘规则）' : '启封考卷并继续作答'}
             >
               <span className="material-symbols-outlined text-[14px]">
-                {isTimerRunning ? 'pause' : 'play_arrow'}
+                {isTimerRunning ? 'lock' : 'lock_open'}
               </span>
-              <span>{isTimerRunning ? '暂停' : '继续'}</span>
+              <span>{isTimerRunning ? '封卷 (封盘)' : '启封'}</span>
             </button>
           </div>
 
-          {/* Quick Scratchpad Toggle */}
+          {/* Quick Scratchpad Toggle with Active Indicator */}
           <button
             type="button"
             onClick={() => setShowScratchpad(!showScratchpad)}
-            className={`hidden sm:inline-flex items-center space-x-1 px-space-md py-1 font-label-md text-label-md rounded border transition cursor-pointer ${
+            className={`hidden sm:inline-flex items-center space-x-1.5 px-3 py-1 font-sans text-[12px] font-medium rounded-lg border transition cursor-pointer ${
               showScratchpad
-                ? 'bg-primary text-on-primary border-primary'
+                ? 'bg-primary text-on-primary border-primary shadow-xs'
                 : 'bg-surface text-on-surface-variant hover:text-on-surface border-outline-variant/50 hover:bg-surface-container'
             }`}
+            title={`打开第 ${currentQ?.num} 题专属草稿演算本`}
           >
             <span className="material-symbols-outlined text-[17px]">draw</span>
-            <span>便签草稿纸</span>
+            <span>第 {currentQ?.num} 题草稿</span>
+            {Boolean(
+              localStorage.getItem(scratchpadStorageKey) ||
+              localStorage.getItem(scratchpadCanvasStorageKey) ||
+              localStorage.getItem(`${scratchpadCanvasStorageKey}_elements`)
+            ) && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="本题已有专属草稿存档"></span>
+            )}
           </button>
 
           {/* Focus Mode Pill */}
@@ -908,6 +1083,8 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
             }`}
           >
             <ScratchpadCanvas
+              key={`${activePaper?.id || 'paper'}_${currentQKey}`}
+              questionNum={currentQ?.num}
               storageKey={scratchpadCanvasStorageKey}
               textStorageKey={scratchpadStorageKey}
               contextProblem={currentQ ? `${currentQ.prompt} ${currentQ.mathExpression || ''}` : ''}
@@ -974,54 +1151,80 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
         </div>
       )}
 
-      {/* Exam Paused Overlay Modal */}
-      {!isTimerRunning && !isSubmitting && !isSubmitModalOpen && (
-        <div className="fixed inset-0 z-50 bg-on-background/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 text-center space-y-space-md animate-in zoom-in-95 duration-150">
-            <div className="w-16 h-16 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
-              <span className="material-symbols-outlined text-[36px]">pause_circle</span>
+      {/* Exam Sealed / Paused Formal Overlay Modal */}
+      {(isSealed || (!isTimerRunning && !isSubmitting && !isSubmitModalOpen)) && (
+        <div className="fixed inset-0 z-50 bg-on-background/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-outline-variant/40 text-center space-y-5 animate-in zoom-in-95 duration-150">
+            {/* Sealed Badge & Icon */}
+            <div className="relative mx-auto w-20 h-20 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/30 shadow-inner">
+                <span className="material-symbols-outlined text-[36px]">lock</span>
+              </div>
+              <span className="absolute -bottom-1 -right-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold tracking-wider uppercase shadow-xs">
+                封盘状态
+              </span>
             </div>
             
-            <div className="space-y-1">
-              <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
-                考试计时已暂停
+            <div className="space-y-1.5">
+              <h3 className="font-headline-sm text-headline-sm font-bold text-on-surface flex items-center justify-center gap-1.5 font-sans">
+                <span>考卷已封卷保护（封盘状态）</span>
               </h3>
-              <p className="text-body-sm text-on-surface-variant">
-                倒计时已冻结，考卷作答进度已自动暂存。您可以稍作离席休息，调整状态。
+              <p className="text-body-sm text-on-surface-variant leading-relaxed px-2 font-sans">
+                如同围棋封盘规则，考题与各题作答区已正式密封保护，考试倒计时已完全冻结。所有题目的已答进度及<span className="text-primary font-semibold">独立专属草稿纸</span>均已安全暂存。
               </p>
             </div>
 
-            <div className="p-space-md bg-surface-container-low rounded-xl border border-outline-variant/20 grid grid-cols-2 gap-2 text-center font-label-mono">
+            {/* Metrics Breakdown Grid */}
+            <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/20 grid grid-cols-3 gap-2 text-center font-sans">
               <div className="flex flex-col">
-                <span className="text-[11px] text-outline uppercase">答题进度</span>
-                <span className="text-headline-sm font-bold text-primary mt-0.5">
-                  {answeredCount} / {questionList.length}
+                <span className="text-[11px] text-outline">已答进度</span>
+                <span className="text-headline-sm font-bold text-primary mt-0.5 font-mono">
+                  {answeredCount} <span className="text-[12px] text-outline font-normal">/ {questionList.length}</span>
                 </span>
               </div>
-              <div className="flex flex-col border-l border-surface-container">
-                <span className="text-[11px] text-outline uppercase">剩余时长</span>
-                <span className="text-headline-sm font-bold text-tertiary mt-0.5">
+              <div className="flex flex-col border-x border-outline-variant/20">
+                <span className="text-[11px] text-outline">剩余考时</span>
+                <span className="text-headline-sm font-bold text-tertiary mt-0.5 font-mono">
                   {formatTimer(secondsLeft)}
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[11px] text-outline">封卷时间</span>
+                <span className="text-[12px] font-medium text-on-surface mt-1 truncate font-mono">
+                  {sealedAt || '刚刚'}
                 </span>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 pt-2">
+            {/* Action Buttons */}
+            <div className="flex flex-col gap-2.5 pt-1">
               <button
                 type="button"
-                onClick={() => setIsTimerRunning(true)}
-                className="w-full py-2.5 rounded-xl bg-primary text-on-primary font-label-md font-semibold shadow-sm hover:bg-primary-container transition cursor-pointer flex items-center justify-center gap-2"
+                onClick={handleUnsealExam}
+                className="w-full py-2.5 rounded-xl bg-primary hover:bg-primary-container text-white font-label-md font-semibold shadow-sm transition cursor-pointer flex items-center justify-center gap-2 active:scale-98"
               >
-                <span className="material-symbols-outlined text-[20px]">play_arrow</span>
-                <span>恢复考试并继续计时</span>
+                <span className="material-symbols-outlined text-[20px]">lock_open</span>
+                <span>启封考卷并继续作答 (恢复计时)</span>
               </button>
-              <button
-                type="button"
-                onClick={onExit}
-                className="w-full py-2 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition font-label-sm text-label-sm cursor-pointer"
-              >
-                中途退出考场（保留已存试卷）
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onExit}
+                  className="flex-1 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface font-label-sm text-[12px] font-medium transition cursor-pointer flex items-center justify-center gap-1.5"
+                  title="离开考场，在试卷库中保持封卷状态，稍后随时可启封继续"
+                >
+                  <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                  <span>离开考场 (保持封卷)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSubmitModalOpen(true)}
+                  className="py-2 px-3 rounded-xl hover:bg-error-container/30 text-error font-label-sm text-[12px] font-medium transition cursor-pointer flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                  <span>提前交卷</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

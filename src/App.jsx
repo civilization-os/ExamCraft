@@ -101,8 +101,12 @@ export default function App() {
       setCurrentPath('exam-generator');
       return;
     }
-    setActivePaper(paper);
-    handleSavePaper(paper, false);
+    const updatedPaper = {
+      ...paper,
+      status: paper.status === '已封卷' ? '已封卷' : '考试中'
+    };
+    setActivePaper(updatedPaper);
+    handleSavePaper(updatedPaper, false);
     setQuestions(paper.questions && paper.questions.length > 0 ? paper.questions : []);
     setCurrentPath('exam-room');
   };
@@ -194,9 +198,10 @@ export default function App() {
           <ExamRoomView
             activePaper={activePaper}
             questions={questions}
-            onExit={() => setCurrentPath('exam-generator')}
+            onExit={() => setCurrentPath('paper-library')}
             onOpenMistakes={() => setCurrentPath('question-bank')}
             onSubmitExam={handleSubmitExam}
+            onUpdatePaper={handleSavePaper}
           />
         )}
 
