@@ -117,6 +117,72 @@ export default function ExamRoomView({
   const [showScratchpad, setShowScratchpad] = useState(false);
   const [isScratchpadMaximized, setIsScratchpadMaximized] = useState(false);
 
+  // 草稿纸窗口自由拖拽移动与透视透明度状态
+  const [scratchpadPos, setScratchpadPos] = useState(null);
+  const [scratchpadOpacity, setScratchpadOpacity] = useState(() => {
+    try {
+      const saved = localStorage.getItem('examcraft_scratchpad_opacity');
+      return saved ? Number(saved) : 100;
+    } catch {
+      return 100;
+    }
+  });
+  const [isDraggingScratchpad, setIsDraggingScratchpad] = useState(false);
+  const scratchpadModalRef = useRef(null);
+
+  const handleScratchpadOpacityChange = (newVal) => {
+    const clamped = Math.max(30, Math.min(100, Math.round(Number(newVal))));
+    setScratchpadOpacity(clamped);
+    try {
+      localStorage.setItem('examcraft_scratchpad_opacity', String(clamped));
+    } catch {}
+  };
+
+  const handleScratchpadDragStart = (e) => {
+    if (isScratchpadMaximized) return;
+    if (e.button !== 0) return; // 仅响应鼠标左键
+    if (e.target.closest('button, input, select, textarea, [data-no-drag]')) return;
+
+    const modalEl = scratchpadModalRef.current;
+    if (!modalEl) return;
+
+    e.preventDefault();
+    const rect = modalEl.getBoundingClientRect();
+    const startLeft = rect.left;
+    const startTop = rect.top;
+    const startMouseX = e.clientX;
+    const startMouseY = e.clientY;
+
+    setIsDraggingScratchpad(true);
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (moveEvt) => {
+      const deltaX = moveEvt.clientX - startMouseX;
+      const deltaY = moveEvt.clientY - startMouseY;
+
+      const modalW = modalEl.offsetWidth || 760;
+      const modalH = modalEl.offsetHeight || 580;
+      const winW = window.innerWidth;
+      const winH = window.innerHeight;
+
+      // 保证草稿纸不被完全拖出视口边界
+      const newX = Math.max(0, Math.min(winW - Math.min(modalW, 120), startLeft + deltaX));
+      const newY = Math.max(0, Math.min(winH - Math.min(modalH, 40), startTop + deltaY));
+
+      setScratchpadPos({ x: Math.round(newX), y: Math.round(newY) });
+    };
+
+    const onMouseUp = () => {
+      setIsDraggingScratchpad(false);
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
   // Submit Modal
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
@@ -1071,15 +1137,27 @@ export default function ExamRoomView({
           {isScratchpadMaximized && (
             <div
               onClick={() => setIsScratchpadMaximized(false)}
-              className="fixed inset-0 z-45 bg-on-background/40 backdrop-blur-xs animate-in fade-in duration-200"
+              className="fixed inset-0 z-45 bg-on-background/25 backdrop-blur-xs animate-in fade-in duration-200"
             />
           )}
 
           <div
-            className={`z-50 shadow-2xl transition-all duration-200 ${
+            ref={scratchpadModalRef}
+            style={{
+              left: !isScratchpadMaximized && scratchpadPos ? `${scratchpadPos.x}px` : undefined,
+              top: !isScratchpadMaximized && scratchpadPos ? `${scratchpadPos.y}px` : undefined,
+              bottom: !isScratchpadMaximized && !scratchpadPos ? '20px' : undefined,
+              right: !isScratchpadMaximized && !scratchpadPos ? '20px' : undefined,
+              opacity: scratchpadOpacity / 100,
+            }}
+            className={`z-50 shadow-2xl ${
+              isDraggingScratchpad
+                ? 'transition-none select-none'
+                : 'transition-opacity duration-150'
+            } ${
               isScratchpadMaximized
                 ? 'fixed inset-2 sm:inset-4 lg:inset-6 animate-in zoom-in-95'
-                : 'fixed bottom-5 right-5 w-[760px] max-w-[96vw] h-[580px] max-h-[88vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
+                : 'fixed w-[760px] max-w-[96vw] h-[580px] max-h-[88vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
             }`}
           >
             <ScratchpadCanvas
@@ -1095,6 +1173,11 @@ export default function ExamRoomView({
                 setIsScratchpadMaximized(false);
                 setShowScratchpad(false);
               }}
+              opacity={scratchpadOpacity}
+              onOpacityChange={handleScratchpadOpacityChange}
+              onWindowDragStart={handleScratchpadDragStart}
+              isMoved={scratchpadPos !== null}
+              onResetPosition={() => setScratchpadPos(null)}
             />
           </div>
         </>

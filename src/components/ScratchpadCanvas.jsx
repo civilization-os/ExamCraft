@@ -463,7 +463,12 @@ export default function ScratchpadCanvas({
   questionData = null,
   isMaximized = false,
   onToggleMaximize = null,
-  onClose = null
+  onClose = null,
+  opacity = 100,
+  onOpacityChange = null,
+  onWindowDragStart = null,
+  isMoved = false,
+  onResetPosition = null
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -1506,7 +1511,7 @@ export default function ScratchpadCanvas({
   };
 
   return (
-    <div className="relative flex flex-col h-full w-full select-none overflow-hidden bg-surface-container-lowest rounded-2xl">
+    <div className="relative flex flex-col h-full w-full select-none overflow-hidden bg-surface-container-lowest/95 backdrop-blur-md rounded-2xl border border-outline-variant/30">
       {/* 统一 Toast 顶部提示条 */}
       {toast.show && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-60 animate-in fade-in slide-in-from-top-3 duration-200 pointer-events-none">
@@ -1565,30 +1570,47 @@ export default function ScratchpadCanvas({
         </div>
       )}
 
-      {/* 顶部主工作台控制工具栏 */}
-      <div className="flex items-center justify-between gap-1.5 px-3 py-2 border-b border-surface-container shrink-0 flex-wrap text-[12px] bg-surface-container-low/40">
+      {/* 顶部主工作台控制工具栏（支持自由拖拽移动整个草稿纸窗口；双击切换最大化） */}
+      <div
+        className={`flex items-center justify-between gap-1.5 px-3 py-2 border-b border-surface-container shrink-0 flex-wrap text-[12px] bg-surface-container-low/50 select-none ${
+          !isMaximized ? 'cursor-move' : ''
+        }`}
+        onMouseDown={onWindowDragStart}
+        onDoubleClick={onToggleMaximize}
+        title={!isMaximized ? "按住顶部工具栏可自由拖动草稿纸；双击可最大化/还原" : "双击可还原便签窗口"}
+      >
         {/* 左区：画板与考场学术诚信防线标志 */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-primary font-bold">
+          <div
+            className={`flex items-center gap-1.5 text-primary font-bold ${
+              !isMaximized ? 'cursor-grab active:cursor-grabbing' : ''
+            }`}
+            title={!isMaximized ? "按住拖拽草稿纸移动位置" : ""}
+          >
+            {!isMaximized && (
+              <span className="material-symbols-outlined text-[17px] text-primary/70 hover:text-primary transition">
+                drag_indicator
+              </span>
+            )}
             <span className="material-symbols-outlined text-[19px]">draw</span>
             <span className="text-[13px] font-sans">
               {questionNum ? `第 ${questionNum} 题 · 专属草稿纸` : '草稿演算工作台'}
             </span>
           </div>
 
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-sans font-medium">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-sans font-medium" data-no-drag>
             <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
             <span>题卷独立持久化</span>
           </span>
 
-          <div className="hidden xl:flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/30 border border-secondary/20 text-secondary text-[11px] font-medium font-sans">
+          <div className="hidden xl:flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/30 border border-secondary/20 text-secondary text-[11px] font-medium font-sans" data-no-drag>
             <span className="material-symbols-outlined text-[13px]">shield</span>
             <span>铁律：AI 帮画帮写不帮算，只能局限于您说出的内容</span>
           </div>
         </div>
 
         {/* 中区：手绘画笔/橡皮/粗细/颜色/背景底纹 */}
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap" data-no-drag>
           {/* 画笔 / 橡皮 / 拖动整体 */}
           <div className="flex items-center bg-surface-container-lowest p-0.5 rounded-lg border border-outline-variant/30">
             <button
@@ -1742,8 +1764,54 @@ export default function ScratchpadCanvas({
           </div>
         </div>
 
-        {/* 右区：侧栏收放、全屏与关闭控制 */}
-        <div className="flex items-center gap-1">
+        {/* 右区：侧栏收放、透明度调节、复位、全屏与关闭控制 */}
+        <div className="flex items-center gap-1.5 flex-wrap" data-no-drag>
+          {/* 透明度调节控制器 */}
+          <div
+            className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-surface-container-lowest border border-outline-variant/30 text-[11px] shadow-2xs"
+            title="调节草稿纸透视透明度（30% ~ 100%），方便透过草稿纸查看下方试卷与题目；点击图标快速切换预设"
+          >
+            <button
+              type="button"
+              onClick={() => onOpacityChange && onOpacityChange(opacity === 100 ? 75 : opacity <= 50 ? 100 : 50)}
+              className="p-0.5 hover:text-primary transition cursor-pointer flex items-center"
+              title="点击快速切换常用透明度预设 (100% / 75% / 50%)"
+            >
+              <span className={`material-symbols-outlined text-[15px] ${opacity < 100 ? 'text-primary font-bold' : 'text-on-surface-variant'}`}>
+                opacity
+              </span>
+            </button>
+            <span className="text-[10px] text-on-surface-variant font-medium hidden sm:inline">透明度</span>
+            <input
+              type="range"
+              min="30"
+              max="100"
+              step="5"
+              value={opacity}
+              onChange={(e) => onOpacityChange && onOpacityChange(Number(e.target.value))}
+              className="w-12 sm:w-16 h-1.5 accent-primary cursor-pointer"
+            />
+            <span
+              onClick={() => onOpacityChange && onOpacityChange(100)}
+              className="font-mono text-[10px] font-bold text-primary w-7 text-right cursor-pointer hover:underline"
+              title="点击恢复 100% 不透明"
+            >
+              {opacity}%
+            </span>
+          </div>
+
+          {/* 当窗口被移动后，显示一键复位到默认位置按钮 */}
+          {isMoved && !isMaximized && onResetPosition && (
+            <button
+              type="button"
+              onClick={onResetPosition}
+              className="p-1 rounded text-on-surface-variant hover:text-primary hover:bg-surface-container transition cursor-pointer flex items-center"
+              title="复位草稿纸到右下角默认位置"
+            >
+              <span className="material-symbols-outlined text-[16px]">restart_alt</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setIsNotesCollapsed(!isNotesCollapsed)}
@@ -1757,7 +1825,7 @@ export default function ScratchpadCanvas({
             <span className="material-symbols-outlined text-[14px]">
               {isNotesCollapsed ? 'splitscreen_left' : 'splitscreen'}
             </span>
-            <span>{isNotesCollapsed ? '展开板书栏' : '收起板书'}</span>
+            <span className="hidden md:inline">{isNotesCollapsed ? '展开板书' : '收起板书'}</span>
           </button>
 
           {onToggleMaximize && (
