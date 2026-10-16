@@ -1,6 +1,74 @@
 import React, { useState } from 'react';
 import { INITIAL_SUBMISSIONS } from '../data/mockData';
 
+// Dynamically compute real question and section breakdown from paper
+function getPaperStructure(paper) {
+  if (!paper) return [];
+  const questions = paper.questions || [];
+
+  if (questions.length > 0) {
+    const sectionMap = new Map();
+    const typeMap = new Map();
+
+    questions.forEach((q) => {
+      const sec = (q.section || '').trim();
+      const type = (q.type || '单项选择题').trim();
+      const score = Number(q.score) || 0;
+
+      if (sec) {
+        const cur = sectionMap.get(sec) || { count: 0, score: 0, types: new Set() };
+        cur.types.add(type);
+        sectionMap.set(sec, { count: cur.count + 1, score: cur.score + score, types: cur.types });
+      }
+
+      const curType = typeMap.get(type) || { count: 0, score: 0 };
+      typeMap.set(type, { count: curType.count + 1, score: curType.score + score });
+    });
+
+    if (sectionMap.size > 0) {
+      return Array.from(sectionMap.entries()).map(([name, data]) => ({
+        name,
+        count: data.count,
+        score: data.score,
+        typeSummary: Array.from(data.types).join(' / ')
+      }));
+    }
+
+    if (typeMap.size > 0) {
+      return Array.from(typeMap.entries()).map(([name, data]) => ({
+        name,
+        count: data.count,
+        score: data.score,
+        typeSummary: ''
+      }));
+    }
+  }
+
+  // Fallback to typeBreakdown if questions array is not yet present
+  if (paper.typeBreakdown) {
+    const list = [];
+    if (paper.typeBreakdown.choices) {
+      list.push({ name: '单项选择题', count: paper.typeBreakdown.choices, score: null, typeSummary: '客观题' });
+    }
+    if (paper.typeBreakdown.blanks) {
+      list.push({ name: '填空题', count: paper.typeBreakdown.blanks, score: null, typeSummary: '填空' });
+    }
+    if (paper.typeBreakdown.solutions) {
+      list.push({ name: '综合主观与解答题', count: paper.typeBreakdown.solutions, score: null, typeSummary: '主观题' });
+    }
+    if (list.length > 0) return list;
+  }
+
+  return [
+    {
+      name: '综合考查试题',
+      count: paper.questionCount || 0,
+      score: paper.totalScore || 0,
+      typeSummary: '全真试题'
+    }
+  ];
+}
+
 export default function PaperLibraryView({ papers, onStartExam, onNavigate, onViewSubmission }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('全部');
@@ -35,7 +103,6 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
     setTimeout(() => setToastMessage(''), 3000);
   };
 
-
   // Modals
   const [selectedPreviewPaper, setSelectedPreviewPaper] = useState(null);
   const [selectedReportPaper, setSelectedReportPaper] = useState(null);
@@ -45,24 +112,16 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
 
   // AI Import Paper State
   const [importRawText, setImportRawText] = useState('');
-  const [importFileName, setImportFileName] = useState('2025届高数期末测试卷.pdf');
+  const [importFileName, setImportFileName] = useState('');
   const [isAiImporting, setIsAiImporting] = useState(false);
   const [importSuccessPaper, setImportSuccessPaper] = useState(null);
 
   const handleAiImportPaper = async () => {
-    const textToParse = importRawText.trim() || `2025届高等数学期末统考真题
-一、单项选择题
-1. 当 x 趋于 0 时，极限 lim x->0 (sin 3x) / x 等于多少？
-A. 1  B. 3  C. 0  D. 不存在
-答案是B，因为等价无穷小sin3x ~ 3x。
-
-二、填空题
-2. 计算定积分 ∫_0^1 (3x^2 + 2x) dx 的值。
-答案是 2。原式 = [x^3 + x^2]_0^1 = 2。
-
-三、综合计算解答题
-3. 求不定积分 ∫ x^2 ln(x+1) dx 的解析通解。
-解析: 采用分部积分法，设 u = ln(x+1), dv = x^2 dx。`;
+    const textToParse = importRawText.trim();
+    if (!textToParse) {
+      alert('请先输入或粘贴试卷文本，或上传本地试卷文件。');
+      return;
+    }
 
     setIsAiImporting(true);
     try {
@@ -606,8 +665,8 @@ A. 1  B. 3  C. 0  D. 不存在
       {/* Modal 1: 大试卷总览 Modal */}
       {selectedPreviewPaper && (
         <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-space-xl shadow-xl border border-outline-variant/40 space-y-space-md animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-space-xl shadow-xl border border-outline-variant/40 space-y-space-md animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container shrink-0">
               <div>
                 <span className="px-2 py-0.5 rounded bg-primary-fixed text-primary font-label-mono text-label-mono">
                   试卷结构总览
@@ -625,26 +684,79 @@ A. 1  B. 3  C. 0  D. 不存在
               </button>
             </div>
 
-            <div className="space-y-space-sm text-body-md text-on-surface-variant">
-              <div className="grid grid-cols-3 gap-2 text-center p-space-sm bg-surface-container-low rounded-lg font-label-mono">
-                <div>总题量: <span className="font-bold text-on-surface">{selectedPreviewPaper.questionCount} 题</span></div>
+            <div className="space-y-space-md text-body-md text-on-surface-variant overflow-y-auto pr-1 flex-1">
+              <div className="grid grid-cols-3 gap-2 text-center p-space-sm bg-surface-container-low rounded-lg font-label-mono text-body-sm">
+                <div>总题量: <span className="font-bold text-on-surface">{selectedPreviewPaper.questionCount || (selectedPreviewPaper.questions ? selectedPreviewPaper.questions.length : 0)} 题</span></div>
                 <div>总分值: <span className="font-bold text-primary">{selectedPreviewPaper.totalScore} 分</span></div>
                 <div>时限: <span className="font-bold text-on-surface">{selectedPreviewPaper.duration} 分钟</span></div>
               </div>
+
               <div className="p-space-md bg-surface-container-low rounded-lg space-y-2">
-                <p className="font-semibold text-on-surface">题型结构构成：</p>
-                <ul className="list-disc pl-5 space-y-1 font-body-sm">
-                  <li>第一部分：单项选择题（8 题，每题 5 分，共 40 分）</li>
-                  <li>第二部分：填空题（5 题，每题 4 分，共 20 分）</li>
-                  <li>第三部分：综合计算与解答证明题（4 题，每题 10 分，共 40 分）</li>
-                </ul>
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-on-surface">题型结构与模块划分：</p>
+                  <span className="text-[12px] text-outline font-label-mono">AI 真实解析结构</span>
+                </div>
+                {(() => {
+                  const struct = getPaperStructure(selectedPreviewPaper);
+                  if (struct.length === 0) {
+                    return <p className="text-body-sm text-outline italic">暂无细分题型信息</p>;
+                  }
+                  return (
+                    <div className="space-y-2">
+                      {struct.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2.5 rounded-lg bg-surface-container/60 text-body-sm border border-outline-variant/30">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-primary-fixed text-primary font-bold text-[11px] flex items-center justify-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            <span className="font-medium text-on-surface">{item.name}</span>
+                            {item.typeSummary && (
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant font-label-mono">
+                                {item.typeSummary}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-label-mono text-outline text-right text-[13px] shrink-0">
+                            <span className="text-on-surface font-semibold">{item.count}</span> 题
+                            {item.score > 0 && (
+                              <span className="ml-2 text-primary font-semibold">({item.score} 分)</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
-              <p className="text-body-sm italic">
-                备忘说明：{selectedPreviewPaper.note || '暂无标注'}
+
+              {selectedPreviewPaper.questions && selectedPreviewPaper.questions.length > 0 && (
+                <div className="p-space-md bg-surface-container-low/70 rounded-lg space-y-2">
+                  <p className="text-label-mono text-[11px] text-outline uppercase font-semibold">
+                    试卷内容前瞻（前 {Math.min(5, selectedPreviewPaper.questions.length)} 题示例）
+                  </p>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                    {selectedPreviewPaper.questions.slice(0, 5).map((q, idx) => (
+                      <div key={q.id || idx} className="text-[12px] p-2 rounded bg-surface-container-lowest text-on-surface-variant flex items-start gap-2 border border-outline-variant/20">
+                        <span className="font-mono text-primary font-bold">#{idx + 1}</span>
+                        <p className="line-clamp-1 flex-1 text-on-surface">{q.stem || q.question || '题目文本'}</p>
+                        <span className="text-[11px] text-outline whitespace-nowrap">{q.type || '试题'} · {q.score || 0}分</span>
+                      </div>
+                    ))}
+                  </div>
+                  {selectedPreviewPaper.questions.length > 5 && (
+                    <p className="text-center text-[11px] text-outline pt-1">
+                      ... 其余 {selectedPreviewPaper.questions.length - 5} 道试题已完成校验，开考后完整呈现
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <p className="text-body-sm text-outline italic">
+                备注说明：{selectedPreviewPaper.note || '本试卷已通过真实题库导入并校验，格式结构已标准化。'}
               </p>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container shrink-0">
               <button
                 type="button"
                 onClick={() => setSelectedPreviewPaper(null)}
@@ -659,9 +771,10 @@ A. 1  B. 3  C. 0  D. 不存在
                   setSelectedPreviewPaper(null);
                   onStartExam(p);
                 }}
-                className="px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md shadow-sm hover:bg-primary-container cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md shadow-sm hover:bg-primary-container cursor-pointer flex items-center gap-1.5"
               >
-                立即进入该考场
+                <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+                <span>立即进入该考场</span>
               </button>
             </div>
           </div>
@@ -669,66 +782,138 @@ A. 1  B. 3  C. 0  D. 不存在
       )}
 
       {/* Modal 2: 诊断报告 Modal */}
-      {selectedReportPaper && (
-        <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-space-xl shadow-xl border border-outline-variant/40 space-y-space-md">
-            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container">
-              <div>
-                <span className="px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container font-label-mono text-label-mono">
-                  AI 知识点攻防诊断报告
-                </span>
-                <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mt-1">
-                  {selectedReportPaper.title}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedReportPaper(null)}
-                className="text-outline hover:text-on-surface p-1 rounded-full hover:bg-surface-container cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
-            </div>
+      {selectedReportPaper && (() => {
+        const reportSubs = submissions.filter(
+          (s) => s && (s.paperId === selectedReportPaper.id || s.paperTitle === selectedReportPaper.title)
+        );
+        const latestSub = reportSubs[0] || null;
+        const highestScore = reportSubs.length > 0
+          ? Math.max(...reportSubs.map((s) => Number(s.score) || 0))
+          : (selectedReportPaper.highestScore ?? null);
+        const attemptsCount = reportSubs.length > 0 ? reportSubs.length : (selectedReportPaper.attempts || 0);
+        const wrongList = latestSub && Array.isArray(latestSub.results)
+          ? latestSub.results.filter((r) => !r.isCorrect)
+          : [];
 
-            <div className="space-y-space-md text-body-md">
-              <div className="flex items-center justify-between p-space-md bg-surface-container-low rounded-xl">
+        return (
+          <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-space-xl shadow-xl border border-outline-variant/40 space-y-space-md animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex items-start justify-between pb-space-xs border-b border-surface-container">
                 <div>
-                  <p className="text-label-mono text-on-surface-variant">HISTORIC HIGHEST</p>
-                  <p className="text-headline-lg font-bold text-secondary font-label-mono">
-                    {selectedReportPaper.highestScore ?? '--'} <span className="text-body-md font-normal">/ {selectedReportPaper.totalScore}</span>
-                  </p>
+                  <span className="px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container font-label-mono text-label-mono">
+                    AI 知识点攻防诊断报告
+                  </span>
+                  <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mt-1">
+                    {selectedReportPaper.title}
+                  </h3>
                 </div>
-                <div className="text-right">
-                  <p className="text-label-mono text-on-surface-variant">ATTEMPTS</p>
-                  <p className="text-headline-lg font-bold text-on-surface font-label-mono">{selectedReportPaper.attempts} 次</p>
+                <button
+                  type="button"
+                  onClick={() => setSelectedReportPaper(null)}
+                  className="text-outline hover:text-on-surface p-1 rounded-full hover:bg-surface-container cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[20px]">close</span>
+                </button>
+              </div>
+
+              <div className="space-y-space-md text-body-md">
+                <div className="flex items-center justify-between p-space-md bg-surface-container-low rounded-xl">
+                  <div>
+                    <p className="text-label-mono text-on-surface-variant">HISTORIC HIGHEST</p>
+                    <p className="text-headline-lg font-bold text-secondary font-label-mono">
+                      {highestScore !== null && highestScore !== undefined ? highestScore : '--'}{' '}
+                      <span className="text-body-md font-normal text-on-surface-variant">/ {selectedReportPaper.totalScore}</span>
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-label-mono text-on-surface-variant">ATTEMPTS</p>
+                    <p className="text-headline-lg font-bold text-on-surface font-label-mono">
+                      {attemptsCount} 次
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="font-semibold text-on-surface text-label-md flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-primary text-[18px]">psychology</span>
+                    <span>AI 知识点攻防与学情归因：</span>
+                  </h4>
+
+                  {attemptsCount === 0 || !latestSub ? (
+                    <div className="p-space-md bg-surface-container-low rounded-xl border border-outline-variant/30 text-center space-y-2">
+                      <span className="material-symbols-outlined text-[36px] text-outline">history_edu</span>
+                      <p className="text-on-surface font-medium text-body-sm">当前试卷尚未产生任何作答提交记录</p>
+                      <p className="text-outline text-body-xs max-w-md mx-auto">
+                        进入考场完成作答并交卷后，系统将自动调用 AI 认知分析引擎，逐题比对考点掌握度，并自动生成针对该卷的专属错因攻防雷达。
+                      </p>
+                    </div>
+                  ) : wrongList.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      <p className="text-body-xs text-outline font-label-mono">最近一次作答检测到 {wrongList.length} 道错题，重点攻防建议如下：</p>
+                      {wrongList.slice(0, 3).map((w, idx) => (
+                        <div key={idx} className="p-space-sm bg-error-container/20 border border-error-container/40 rounded-lg space-y-1">
+                          <p className="text-on-error-container font-medium text-body-sm">
+                            ⚠️ 错题 #{w.questionNumber || idx + 1}：{w.stem || w.question || '题目考点待强化'}
+                          </p>
+                          <p className="text-on-surface-variant text-code-sm">
+                            解析与归因：{w.explanation || '未能准确匹配正确答案，建议重温该题型题眼并复盘知识要点。'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-space-md bg-primary-fixed/30 border border-primary/20 rounded-xl space-y-1">
+                      <p className="text-primary font-medium text-body-sm">
+                        🎉 最近一次测试表现优异，全部作答正确！
+                      </p>
+                      <p className="text-on-surface-variant text-body-xs">
+                        该试卷涉及考点已全部达成防守指标。可继续挑战更高难度试卷或进入专项模拟冲刺。
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <h4 className="font-semibold text-on-surface text-label-md">检测到的典型易错考点：</h4>
-                <div className="p-space-sm bg-error-container/30 border border-error-container rounded-lg space-y-1">
-                  <p className="text-on-error-container font-medium text-body-sm">
-                    ⚠️ 第 16 题：分部积分法与有理假分式长除符号漏乘
-                  </p>
-                  <p className="text-on-surface-variant text-code-sm">
-                    归因分析：负号分配律错误导致最后通解相差常数项。建议强化多项式长除与换元拆解。
-                  </p>
-                </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+                {latestSub && onViewSubmission && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedReportPaper(null);
+                      onViewSubmission(latestSub);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-secondary text-on-secondary hover:bg-secondary/90 font-label-md cursor-pointer flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">visibility</span>
+                    <span>查看完整评卷详情</span>
+                  </button>
+                )}
+                {attemptsCount === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const p = selectedReportPaper;
+                      setSelectedReportPaper(null);
+                      onStartExam(p);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary-container font-label-md cursor-pointer flex items-center gap-1 shadow-sm"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+                    <span>开始首次测评</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedReportPaper(null)}
+                  className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer"
+                >
+                  关闭
+                </button>
               </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
-              <button
-                type="button"
-                onClick={() => setSelectedReportPaper(null)}
-                className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer"
-              >
-                确认
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Modal 3: AI 智能导入试卷 Modal */}
       {isImportModalOpen && (
