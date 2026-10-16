@@ -1,27 +1,16 @@
 import React, { useState } from 'react';
-import { INITIAL_SUBMISSIONS, OFFICIAL_SAMPLE_PAPERS } from '../data/mockData';
+import { INITIAL_SUBMISSIONS } from '../data/mockData';
 
 export default function PaperLibraryView({ papers, onStartExam, onNavigate, onViewSubmission }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('全部');
   const [sortBy, setSortBy] = useState('date-desc');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
-  const [paperList, setPaperList] = useState(() => (papers && papers.length > 0 ? papers : OFFICIAL_SAMPLE_PAPERS));
+  const [paperList, setPaperList] = useState(() => (papers || []));
 
   React.useEffect(() => {
-    if (papers && papers.length > 0) {
-      setPaperList(papers);
-    }
+    setPaperList(papers || []);
   }, [papers]);
-
-  const handleRestoreSamplePapers = () => {
-    const nextPapers = [...OFFICIAL_SAMPLE_PAPERS];
-    setPaperList(nextPapers);
-    try {
-      localStorage.setItem('examcraft_papers', JSON.stringify(nextPapers));
-    } catch {}
-    showToast('已成功载入 3 套精选官方真题与统考模拟卷样例！');
-  };
 
   // Submissions history state from localStorage with zero mock data
   const [submissions, setSubmissions] = useState(() => {
@@ -155,15 +144,6 @@ A. 1  B. 3  C. 0  D. 不存在
 
           {/* Action Buttons */}
           <div className="flex items-center gap-space-sm shrink-0 flex-wrap">
-            <button
-              type="button"
-              onClick={handleRestoreSamplePapers}
-              className="inline-flex items-center gap-space-xs px-3 h-9 rounded bg-surface-container hover:bg-surface-container-high text-primary font-label-md text-label-md shadow-xs transition-all border border-primary/20 cursor-pointer"
-              title="一键载入教育部统考数学二、高数期末与英语长篇阅读等精选试卷样例"
-            >
-              <span className="material-symbols-outlined text-[17px]">auto_stories</span>
-              <span>快速套用试卷样例</span>
-            </button>
             <button
               type="button"
               onClick={() => setIsImportModalOpen(true)}

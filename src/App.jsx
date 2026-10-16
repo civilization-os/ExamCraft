@@ -11,7 +11,15 @@ import { INITIAL_PAPERS, MOCK_EXAM_QUESTIONS } from './data/mockData';
 
 // Helper to automatically purge legacy hardcoded mock items from user's localStorage
 function purgeLegacyMockData() {
-  const legacyPaperIds = new Set(['paper-math-2024a', 'paper-ode-04', 'paper-math-kaoyan-2023', 'paper-linalg-matrix']);
+  const legacyPaperIds = new Set([
+    'paper-math-2024a',
+    'paper-ode-04',
+    'paper-math-kaoyan-2023',
+    'paper-linalg-matrix',
+    'sample-math-2024a',
+    'sample-kaoyan-2026',
+    'sample-english-2026'
+  ]);
   const legacySubIds = new Set(['sub-2024a-v1', 'sub-2024a-v2']);
   const legacyMistakeIds = new Set(['m-1', 'm-2', 'm-3']);
 
@@ -58,13 +66,13 @@ export default function App() {
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {}
-    return INITIAL_PAPERS;
+    return [];
   });
   const [activePaper, setActivePaper] = useState(() => papers[0] || null);
-  const [questions, setQuestions] = useState(() => (activePaper?.questions || MOCK_EXAM_QUESTIONS));
+  const [questions, setQuestions] = useState(() => (activePaper?.questions || []));
   const [activeSubmission, setActiveSubmission] = useState(null);
 
   const handleStartExam = (paper) => {

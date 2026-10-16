@@ -2,212 +2,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import { extractExamMeta, sliceMarkdownIntoChunks } from '../utils/examChunker';
 
-const SAMPLE_MATH_MD = `# 2026 年全国硕士研究生入学统一考试（数学二）试题与解析
-- 建议时限: 180分钟
-- 设定总分: 150分
-
-## 一、选择题
-\`1~10\` 小题，每小题 \`5\` 分，共 \`50\` 分. 下列每题给出的四个选项中，只有一个选项符合题目要求.
-
-### 1
-已知当 $x \\to 0$ 时，$a x^{2} + b x + \\arcsin x$ 与 $\\sqrt[3]{1 + x^{2}} - 1$ 是等价无穷小，则
-- A. $a = \\frac{1}{3},\\ b = -1$
-- B. $a = \\frac{1}{3},\\ b = 1$
-- C. $a = \\frac{2}{3},\\ b = -1$
-- D. $a = \\frac{2}{3},\\ b = 1$
-
-**答案：** A
-
-**解析：**  
-当 $x \\to 0$ 时，
-$$
-\\sqrt[3]{1+x^2}-1 \\sim \\frac13 x^2,\\qquad \\arcsin x = x + o(x^2).
-$$
-故
-$$
-ax^2+bx+\\arcsin x=(b+1)x+ax^2+o(x^2).
-$$
-与 $\\frac13 x^2$ 等价，必有
-$$
-b+1=0,\\qquad a=\\frac13.
-$$
-故选 **A**.
-
-### 2
-设 $y_1(x),y_2(x)$ 是某二阶非齐次线性微分方程的两个特解.若常数 $\\lambda,\\mu$ 使得 $2\\lambda y_1(x)+\\mu y_2(x)$ 是该方程的解，$\\lambda y_1(x)-2\\mu y_2(x)$ 是该方程对应齐次方程的解，则
-- A. $\\lambda=\\frac15,\\ \\mu=\\frac25$
-- B. $\\lambda=\\frac25,\\ \\mu=\\frac15$
-- C. $\\lambda=\\frac14,\\ \\mu=\\frac12$
-- D. $\\lambda=\\frac12,\\ \\mu=\\frac14$
-
-**答案：** B
-
-**解析：**  
-非齐次解线性组合仍为原方程解时，特解系数和应为 $1$；齐次解对应系数和应为 $0$.故
-$$
-2\\lambda+\\mu=1,\\qquad \\lambda-2\\mu=0.
-$$
-解得 $\\lambda=\\frac25,\\ \\mu=\\frac15$. 选 **B**.
-
-## 二、填空题
-\`11~16\` 小题，每小题 \`5\` 分，共 \`30\` 分.
-
-### 11
-定积分 $\\int_0^1 (3x^2 + 2x) \\, dx$ 的计算结果为 ______。
-
-**答案：** 2
-
-**解析：**  
-原式 $= [x^3 + x^2]_0^1 = (1 + 1) - 0 = 2$.
-
-## 三、解答证明题
-\`17~22\` 小题，共 \`70\` 分.解答应写出文字说明、证明过程或演算步骤.
-
-### 21
-（本题满分 \`12\` 分）
-
-求微分方程
-$$
-x^2y''-2xy'-(y')^2=0\\qquad (x>2)
-$$
-满足条件
-$$
-y\\big|_{x=3}=\\frac12,\\qquad y'\\big|_{x=3}=-9
-$$
-的解.
-
-**解：**  
-方程不显含 $y$，令 $p=y'$，则 $x^2p'-2xp-p^2=0$。
-化为 $p'-\\frac{2}{x}p=\\frac{p^2}{x^2}$。
-再令 $z=\\frac1p$，则 $z'=-\\frac{p'}{p^2}$，代入得一阶线性方程：
-$$
-z'+\\frac{2}{x}z=-\\frac1{x^2}.
-$$
-解得 $z=-\\frac1x+\\frac{C}{x^2}$。由 $z(3)=\\frac1{y'(3)}=-\\frac19$ 得 $C=2$。
-故 $p=\\frac{x^2}{2-x}$。积分得 $y=-(x+2)^2/2 - 4\\ln(x-2) + C_1$。
-`;
-
-const SAMPLE_ENGLISH_MD = `# 2026年全国硕士研究生入学统一考试（英语一）全真模拟精选
-- 建议时限: 180分钟
-- 设定总分: 100分
-
-## Section I Use of English
-Directions: Read the following text. Choose the best word(s) for each numbered blank and mark A, B, C or D. (10 points)
-
-### 1
-The concept of artificial intelligence has transitioned from science fiction to everyday reality. While early pioneers envisioned machines that could think like humans, modern systems focus on specific tasks.
-- A. although
-- B. because
-- C. unless
-- D. while
-
-**答案: ** D
-
-**解析: **
-根据上下文语义，此处引导让步状语从句，表示“尽管早期先驱构想机器能像人类一样思考，但现代系统聚焦于特定任务”。故选 D。
-
-## Section II Reading Comprehension
-### Part A
-#### Text 1
-Over the past two decades, the global scientific landscape has witnessed an unprecedented revolution driven by computational intelligence. High-throughput sequencing, quantum modeling, and deep learning algorithms have converged to fundamentally transform how researchers formulate hypotheses, conduct experiments, and synthesize empirical findings.
-
-Historically, paradigm shifts in scientific discovery unfolded across centuries. The transition from Newtonian mechanics to relativistic physics required generations of theoretical refinement. Today, however, machine-learning systems accelerate this cycle by identifying subtle multidimensional patterns across petabytes of experimental data within seconds. In structural biology, for instance, neural networks can now predict three-dimensional macromolecular architectures with sub-angstrom accuracy, solving problems that resisted crystallographic methods for over half a century.
-
-Yet this rapid technological integration is not without peril. Prominent epistemologists caution against treating automated discovery pipelines as infallible "black boxes." When algorithmic models make predictions based on correlational proxies rather than causal physical principles, science risks producing uninterpretable results that resist peer review and replication. Furthermore, the immense computational infrastructure required to train foundational models concentrates discovery power in a small number of elite corporate and academic consortiums, exacerbating scientific inequality.
-
-To preserve the intellectual integrity of modern scholarship, academic institutions must establish rigorous methodological frameworks that pair synthetic automated pattern-matching with traditional hypothesis-driven rigor. Only by harmonizing computational velocity with human skepticism can science navigate the frontiers of the 21st century.
-
-### 21
-According to Paragraph 1, the convergence of computational technologies has
-- A. delayed theoretical breakthroughs
-- B. revolutionized research methodologies
-- C. rendered empirical experiments obsolete
-- D. replaced human researchers in laboratories
-
-**答案: ** B
-
-**解析: **
-定位第一段最后一句 "have converged to fundamentally transform how researchers formulate hypotheses, conduct experiments, and synthesize empirical findings"，说明计算技术的融合根本性地变革了科学研究方法。故选 B。
-
-### 22
-Structural biology is mentioned in Paragraph 2 primarily to illustrate
-- A. the limitations of machine learning in physical sciences
-- B. the historical rivalry between crystallography and neural networks
-- C. the dramatic acceleration of discovery enabled by automated systems
-- D. the prolonged delay in solving macromolecular puzzles
-
-**答案: ** C
-
-**解析: **
-第二段主旨在于阐述自动化系统如何极速缩短发现周期 ("Today, however, machine-learning systems accelerate this cycle...")，紧接着以结构生物学为例 ("In structural biology, for instance...") 说明几秒内解决困扰半个世纪的难题，因此是为了说明计算系统极大加速了发现过程。故选 C。
-
-### 23
-The author uses the term "black boxes" (Para. 3) to emphasize that
-- A. automated models often lack causal interpretability
-- B. commercial algorithms are strictly protected by copyright
-- C. high-performance hardware consumes excessive energy
-- D. scientific laboratories operate in physical secrecy
-
-**答案: ** A
-
-**解析: **
-定位第三段 "When algorithmic models make predictions based on correlational proxies rather than causal physical principles, science risks producing uninterpretable results..."，可见 "black boxes" 强调的是算法缺乏因果可解释性。故选 A。
-`;
-
-const SAMPLE_LINALG_MD = `# 《线性代数矩阵特征值专项强化卷》
-- 建议时限: 90分钟
-- 设定总分: 100分
-
-## 一、单项选择题
-### 1
-设 3 阶方阵 $A$ 的特征值为 $1, -1, 2$，则伴随矩阵的行列式 $|A^*|$ 等于：
-- A. -2
-- B. 2
-- C. 4
-- D. -4
-
-**答案: ** C
-
-**解析**
-因为 $|A| = 1 \\times (-1) \\times 2 = -2$。
-根据伴随矩阵行列式性质，$|A^*| = |A|^{n-1} = (-2)^{3-1} = (-2)^2 = 4$。选 **C**。
-
-### 2
-若向量组 $\\boldsymbol{\\alpha}_1, \\boldsymbol{\\alpha}_2, \\boldsymbol{\\alpha}_3$ 线性无关，则下列向量组中线性无关的是：
-- A. $\\boldsymbol{\\alpha}_1 - \\boldsymbol{\\alpha}_2, \\boldsymbol{\\alpha}_2 - \\boldsymbol{\\alpha}_3, \\boldsymbol{\\alpha}_3 - \\boldsymbol{\\alpha}_1$
-- B. $\\boldsymbol{\\alpha}_1 + \\boldsymbol{\\alpha}_2, \\boldsymbol{\\alpha}_2 + \\boldsymbol{\\alpha}_3, \\boldsymbol{\\alpha}_3 + \\boldsymbol{\\alpha}_1$
-- C. $\\boldsymbol{\\alpha}_1 + \\boldsymbol{\\alpha}_2 + \\boldsymbol{\\alpha}_3, 2\\boldsymbol{\\alpha}_1 + 2\\boldsymbol{\\alpha}_2 + 2\\boldsymbol{\\alpha}_3$
-- D. $\\mathbf{0}, \\boldsymbol{\\alpha}_1, \\boldsymbol{\\alpha}_2$
-
-**答案: ** B
-
-## 二、解答题
-### 3
-求下列矩阵的特征值与特征向量：
-$$
-A = \\begin{pmatrix} 2 & 1 \\\\ 1 & 2 \\end{pmatrix}
-$$
-
-**解析**
-计算特征方程：
-$$
-|\\lambda E - A| = \\begin{vmatrix} \\lambda - 2 & -1 \\\\ -1 & \\lambda - 2 \\end{vmatrix} = (\\lambda - 2)^2 - 1 = (\\lambda - 1)(\\lambda - 3) = 0
-$$
-解得特征值为 $\\lambda_1 = 1, \\lambda_2 = 3$。
-`;
-
 export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
   const [activeMode, setActiveMode] = useState('markdown'); // Default to markdown
   
   // Custom Spec State (Entry 2)
-  const [customTitle, setCustomTitle] = useState('《概率论与数理统计阶段模拟测验》');
+  const [customTitle, setCustomTitle] = useState('');
   const [totalScore, setTotalScore] = useState(100);
   const [duration, setDuration] = useState(120);
   const [difficulty, setDifficulty] = useState('进阶拓展');
   const [isGenerating, setIsGenerating] = useState(false);
   
   // Markdown Generator State (Entry 3)
-  const [markdownText, setMarkdownText] = useState(SAMPLE_MATH_MD);
+  const [markdownText, setMarkdownText] = useState('');
   const [parsedExam, setParsedExam] = useState(null);
   const [isParsingAI, setIsParsingAI] = useState(false);
   const [showAnswers, setShowAnswers] = useState(true);
@@ -228,16 +34,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
   const [isAiCloning, setIsAiCloning] = useState(false);
   const [cloneStage, setCloneStage] = useState(0); // 0: idle, 1: reading, 2: parsing, 3: latex, 4: done
   const [clonedPaperResult, setClonedPaperResult] = useState(null);
-  const [uploadedFile, setUploadedFile] = useState({
-    name: '2026年考研数学二真题与解析.md',
-    size: '18KB',
-    status: '已就绪',
-    progress: 100,
-    matchedQuestions: 22,
-    choices: 10,
-    blanks: 6,
-    solutions: 6
-  });
+  const [uploadedFile, setUploadedFile] = useState(null);
 
   const debounceTimerRef = useRef(null);
   const activeJobIdRef = useRef(0);
@@ -251,75 +48,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
   // Toggle reading passage visibility
   const togglePassage = (id) => {
     setExpandedPassages(prev => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  // Quick apply sample paper presets across all workbench modes
-  const handleApplySample = (type) => {
-    if (type === 'math') {
-      setMarkdownText(SAMPLE_MATH_MD);
-      setCloneRawText(`2026年全国硕士研究生入学统一考试（数学二）试题与解析
-一、选择题 (1~10小题，每小题5分，共50分)
-1. 当 x 趋于 0 时，已知 ax^2 + bx + arcsin x 与 (1+x^2)^(1/3) - 1 是等价无穷小，则
-A. a=1/3, b=-1
-B. a=1/3, b=1
-C. a=2/3, b=-1
-D. a=2/3, b=1
-答案: A
-解析: 当 x->0 时，(1+x^2)^(1/3)-1 ~ (1/3)x^2，arcsin x = x + o(x^2)。故 ax^2+bx+arcsin x = (b+1)x + ax^2 + o(x^2)。与 (1/3)x^2 等价必有 b+1=0, a=1/3。选 A。
-
-二、填空题 (11~16小题，每小题5分，共30分)
-11. 定积分 ∫_0^1 (3x^2 + 2x) dx 的值为 ______。
-答案: 2
-解析: 原式 = [x^3 + x^2]_0^1 = 2。
-
-三、解答证明题 (17~22小题，共70分)
-21. (本题满分 12 分)
-求微分方程 x^2 y'' - 2xy' - (y')^2 = 0 满足条件 y(3)=1/2, y'(3)=-9 的解。`);
-      setCustomTitle('《2026年全国硕士研究生入学统一考试（数学二）》');
-      setTotalScore(150);
-      setDuration(180);
-      setDifficulty('考研统考');
-    } else if (type === 'english') {
-      setMarkdownText(SAMPLE_ENGLISH_MD);
-      setCloneRawText(`2026年全国硕士研究生入学统一考试（英语一）全真模拟精选
-Section I Use of English
-1. The concept of artificial intelligence has transitioned from science fiction to everyday reality...
-A. although  B. because  C. unless  D. while
-答案: D
-
-Section II Reading Comprehension
-Text 1
-Over the past two decades, the global scientific landscape has witnessed an unprecedented revolution driven by computational intelligence...
-21. According to Paragraph 1, the convergence of computational technologies has
-A. delayed theoretical breakthroughs
-B. revolutionized research methodologies
-C. rendered empirical experiments obsolete
-D. replaced human researchers in laboratories
-答案: B`);
-      setCustomTitle('《2026年考研英语一长篇阅读与词汇精选》');
-      setTotalScore(100);
-      setDuration(180);
-      setDifficulty('进阶拓展');
-    } else if (type === 'linalg') {
-      setMarkdownText(SAMPLE_LINALG_MD);
-      setCloneRawText(`《线性代数矩阵特征值专项强化卷》
-一、单项选择题
-1. 设 3 阶方阵 A 的特征值为 1, -1, 2，则伴随矩阵的行列式 |A*| 等于：
-A. -2  B. 2  C. 4  D. -4
-答案: C
-解析: |A| = 1*(-1)*2 = -2, |A*| = |A|^(3-1) = (-2)^2 = 4。选 C。
-
-2. 若向量组 α1, α2, α3 线性无关，则下列向量组中线性无关的是：
-A. α1-α2, α2-α3, α3-α1
-B. α1+α2, α2+α3, α3+α1
-C. α1+α2+α3, 2α1+2α2+2α3
-D. 0, α1, α2
-答案: B`);
-      setCustomTitle('《高等数学与线性代数期末统考专项强化》');
-      setTotalScore(100);
-      setDuration(120);
-      setDifficulty('基础达标');
-    }
   };
 
   // Progressive Chunked AI Parser
@@ -836,56 +564,6 @@ D. 0, α1, α2
           </button>
         </div>
 
-        {/* Global Quick Sample Paper Bar */}
-        <div className="bg-surface-container-lowest p-space-sm px-space-md rounded-xl shadow-xs border border-outline-variant/30 flex items-center justify-between gap-space-md flex-wrap">
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 text-primary">
-              <span className="material-symbols-outlined text-[18px]">auto_stories</span>
-              <span className="font-label-sm text-label-sm font-semibold text-on-surface">快速套用试卷样例:</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                handleApplySample('math');
-                setActiveMode('markdown');
-              }}
-              className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm font-semibold transition-colors cursor-pointer border border-primary/20 flex items-center gap-1"
-              title="载入考研数学二试卷样例 (含选择、填空与大题)"
-            >
-              <span>2026考研数学二真题</span>
-              <span className="text-[11px] opacity-75">(22题·解析全)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                handleApplySample('english');
-                setActiveMode('markdown');
-              }}
-              className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-secondary font-label-sm font-semibold transition-colors cursor-pointer border border-secondary/20 flex items-center gap-1"
-              title="载入考研英语长篇阅读切片试卷样例"
-            >
-              <span>2026考研英语阅读长文专项</span>
-              <span className="text-[11px] opacity-75">(篇章切片)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                handleApplySample('linalg');
-                setActiveMode('markdown');
-              }}
-              className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm transition-colors cursor-pointer border border-outline-variant/30 flex items-center gap-1"
-              title="载入线性代数矩阵特征值专项试卷样例"
-            >
-              <span>线性代数特征值专项</span>
-              <span className="text-[11px] opacity-75">(期末强化)</span>
-            </button>
-          </div>
-          <div className="text-on-surface-variant font-label-mono text-[11px] flex items-center gap-1">
-            <span className="material-symbols-outlined text-[15px] text-primary">verified</span>
-            <span>官方样例真题库已全面保留：真题全套题干、LaTeX 与标答就绪，0 伪造数据</span>
-          </div>
-        </div>
-
         {/* MODE 1: 1:1 PDF & Raw Exam Text AI Clone */}
         {activeMode === 'clone' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-xl items-stretch">
@@ -931,29 +609,6 @@ D. 0, α1, α2
                       <span className="material-symbols-outlined text-[16px] text-primary">edit_note</span>
                       或直接在此粘贴试卷文本/题干内容：
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setCloneRawText(`2026年考研数学二真题与解析
-一、选择题 (1~10小题，每小题5分，共50分)
-1. 当 x 趋于 0 时，已知 ax^2 + bx + arcsin x 与 (1+x^2)^(1/3) - 1 是等价无穷小，则
-A. a=1/3, b=-1
-B. a=1/3, b=1
-C. a=2/3, b=-1
-D. a=2/3, b=1
-答案: A
-解析: 利用泰勒展开式计算...
-
-二、填空题 (11~16小题，每小题5分，共30分)
-11. 定积分 ∫_0^1 (3x^2 + 2x) dx 的值为多少？
-答案: 2
-
-三、解答证明题 (17~22小题，共70分)
-21. (本题满分 12 分)
-求微分方程 x^2 y'' - 2xy' - (y')^2 = 0 满足条件 y(3)=1/2, y'(3)=-9 的解。`)}
-                      className="text-primary hover:underline font-label-sm text-[12px] cursor-pointer"
-                    >
-                      填入示例真题文本
-                    </button>
                   </div>
                   <textarea
                     value={cloneRawText}
@@ -993,8 +648,8 @@ D. a=2/3, b=1
               <div className="pt-space-md">
                 <button
                   type="button"
-                  onClick={() => triggerAiCloneWithText(cloneRawText.trim() || undefined, uploadedFile.name)}
-                  disabled={isAiCloning}
+                  onClick={() => triggerAiCloneWithText(cloneRawText.trim() || undefined, uploadedFile?.name || 'custom_exam.md')}
+                  disabled={isAiCloning || (!cloneRawText.trim() && !uploadedFile)}
                   className="w-full h-11 px-space-lg rounded-lg bg-primary-container hover:bg-primary text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
                 >
                   <span className={`material-symbols-outlined text-[20px] ${isAiCloning ? 'animate-spin' : ''}`}>
@@ -1269,31 +924,11 @@ D. a=2/3, b=1
         {/* MODE 3: Markdown Generation Workbench with Full KaTeX UI & Seamless AI Ingestion */}
         {activeMode === 'markdown' && (
           <div className="flex flex-col gap-space-lg">
-            {/* Quick Presets & Control Bar (No Manual AI button: AI is automatically active) */}
+            {/* Control Bar */}
             <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex items-center justify-between gap-space-md flex-wrap">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-label-sm text-label-sm text-on-surface-variant font-semibold">快速套用试卷样例:</span>
-                <button
-                  type="button"
-                  onClick={() => setMarkdownText(SAMPLE_MATH_MD)}
-                  className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm font-semibold transition-colors cursor-pointer border border-primary/20"
-                >
-                  2026考研数学二真题 (22题)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMarkdownText(SAMPLE_ENGLISH_MD)}
-                  className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-secondary font-label-sm font-semibold transition-colors cursor-pointer border border-secondary/20"
-                >
-                  2026考研英语阅读长文专项 (长篇切片)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMarkdownText(SAMPLE_LINALG_MD)}
-                  className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm transition-colors cursor-pointer border border-outline-variant/30"
-                >
-                  线性代数矩阵特征值
-                </button>
+              <div className="flex items-center gap-2 text-on-surface-variant font-label-sm">
+                <span className="material-symbols-outlined text-[18px] text-primary">edit_note</span>
+                <span>在左侧编写或粘贴 Markdown 试题，大模型自动实时按篇章切片并同步至 KaTeX 排版预览</span>
               </div>
 
               <div className="flex items-center gap-2">
@@ -2025,25 +1660,24 @@ D. a=2/3, b=1
               </div>
             ))}
 
-            {/* Blueprint Template Card */}
+            {/* Blueprint Action Card */}
             <div
               onClick={() => {
                 setActiveMode('markdown');
-                setMarkdownText(SAMPLE_MATH_MD);
               }}
               className="rounded-xl bg-surface-container-low p-space-md flex flex-col justify-between hover:bg-surface-container transition-colors group cursor-pointer border border-dashed border-outline-variant/60"
             >
               <div className="space-y-space-xs">
                 <div className="flex items-center justify-between">
                   <span className="px-space-xs py-0.5 rounded bg-surface-container-lowest text-on-surface-variant font-label-mono text-label-mono">
-                    Markdown 范本
+                    Markdown 快速组卷
                   </span>
                   <span className="material-symbols-outlined text-[16px] text-on-surface-variant">markdown</span>
                 </div>
                 <h4 className="font-headline-sm text-headline-sm text-on-surface font-semibold truncate">
-                  一键载入标准 Markdown 试卷
+                  即时编写或导入 Markdown
                 </h4>
-                <p className="font-body-sm text-body-sm text-on-surface-variant">即时解析排版与进入考场全真测试</p>
+                <p className="font-body-sm text-body-sm text-on-surface-variant">由大模型自动分批切片并规整为矢量 KaTeX 试卷</p>
               </div>
               <div className="mt-space-md pt-space-xs flex items-center justify-between font-label-mono text-label-mono text-primary font-medium">
                 <span>进入 Markdown 组卷</span>
