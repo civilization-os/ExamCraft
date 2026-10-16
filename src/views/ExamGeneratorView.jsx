@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import { extractExamMeta, sliceMarkdownIntoChunks } from '../utils/examChunker';
 
-export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
+export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, onNavigate }) {
   const [activeMode, setActiveMode] = useState('markdown'); // Default to markdown
+  const [saveToast, setSaveToast] = useState(null); // { title: string, id: string }
   
   // Custom Spec State (Entry 2)
   const [customTitle, setCustomTitle] = useState('');
@@ -394,13 +395,40 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
     }
   };
 
+  const handleSaveClone = (goToLibrary = false) => {
+    if (!clonedPaperResult) return;
+    if (onSavePaper) {
+      onSavePaper(clonedPaperResult, goToLibrary);
+    }
+    setSaveToast({ title: clonedPaperResult.title, id: clonedPaperResult.id });
+    setTimeout(() => setSaveToast(null), 4000);
+  };
+
   const handleLaunchClone = () => {
     if (clonedPaperResult) {
       onStartExam(clonedPaperResult);
       return;
     }
-    const paper = papers.find(p => p.id === 'paper-math-2024a') || papers[0];
-    onStartExam(paper);
+    const paper = papers[0];
+    if (paper) onStartExam(paper);
+  };
+
+  const buildCustomPaperObject = (highlightQuestion = null) => {
+    return {
+      id: 'custom-' + Date.now(),
+      title: customTitle || '《自由规格智能生成试卷》',
+      source: '自由规格智能生成 (model_core 驱动)',
+      sourceType: 'custom',
+      date: '刚刚',
+      questionCount: 17,
+      totalScore: totalScore,
+      duration: duration,
+      difficulty: difficulty === '考研冲刺' ? 5 : difficulty === '进阶拓展' ? 4 : 3,
+      tags: ['#自定义组卷', `#${difficulty}`, '#model_core生成'],
+      status: '未作答 (全新排版完毕)',
+      typeBreakdown: { choices: 8, blanks: 5, solutions: 4 },
+      highlightQuestion
+    };
   };
 
   const handleLaunchCustom = async () => {
@@ -412,7 +440,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: customTitle,
+          title: customTitle || '《自由规格智能生成试卷》',
           subject: '高等数学与微积分',
           totalScore,
           duration,
@@ -432,33 +460,54 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
       setIsGenerating(false);
     }
 
-    const customPaper = {
-      id: 'custom-' + Date.now(),
-      title: customTitle,
-      source: '自由规格智能生成 (model_core 驱动)',
-      sourceType: 'custom',
-      date: '刚刚',
-      questionCount: 17,
-      totalScore: totalScore,
-      duration: duration,
-      difficulty: difficulty === '考研冲刺' ? 5 : difficulty === '进阶拓展' ? 4 : 3,
-      tags: ['#自定义组卷', `#${difficulty}`, '#model_core生成'],
-      status: '未作答 (全新排版完毕)',
-      typeBreakdown: { choices: 8, blanks: 5, solutions: 4 },
-      highlightQuestion: generatedQuestion
-    };
-
+    const customPaper = buildCustomPaperObject(generatedQuestion);
     onStartExam(customPaper);
   };
 
-  const handleLaunchMarkdownExam = () => {
-    if (!parsedExam || !parsedExam.questions || parsedExam.questions.length === 0) {
-      alert('未能从 Markdown 中解析到有效试题，请检查文本格式。');
-      return;
+  const handleSaveCustom = async (goToLibrary = false) => {
+    setIsGenerating(true);
+    let generatedQuestion = null;
+
+    try {
+      const res = await fetch('/api/model/generate-paper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: customTitle || '《自由规格智能生成试卷》',
+          subject: '高等数学与微积分',
+          totalScore,
+          duration,
+          difficulty,
+          choicesCount: 8,
+          blanksCount: 5,
+          solutionsCount: 4
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.data?.highlightQuestion) {
+        generatedQuestion = data.data.highlightQuestion;
+      }
+    } catch (e) {
+      console.warn('Backend paper generation notice:', e.message);
+    } finally {
+      setIsGenerating(false);
     }
 
-    const mdPaper = {
-      id: 'md-exam-' + Date.now(),
+    const customPaper = buildCustomPaperObject(generatedQuestion);
+    if (onSavePaper) {
+      onSavePaper(customPaper, goToLibrary);
+    }
+    setSaveToast({ title: customPaper.title, id: customPaper.id });
+    setTimeout(() => setSaveToast(null), 4000);
+  };
+
+  const buildMarkdownPaperObject = () => {
+    if (!parsedExam || !parsedExam.questions || parsedExam.questions.length === 0) {
+      return null;
+    }
+
+    return {
+      id: parsedExam.id || ('md-exam-' + Date.now()),
       title: parsedExam.title || '《Markdown 自定义试卷》',
       source: 'Markdown 题稿生成 (AI 深度规整)',
       sourceType: 'markdown',
@@ -467,12 +516,36 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
       totalScore: parsedExam.totalScore || 100,
       duration: parsedExam.duration || 120,
       difficulty: 4,
-      tags: ['#Markdown录入', '#KaTeX公式渲染', '#即时开考'],
-      status: '未作答 (全新排版完毕)',
+      tags: ['#Markdown录入', '#KaTeX公式渲染', '#已存试卷库'],
+      status: '未作答 (已保存)',
       questions: parsedExam.questions
     };
+  };
 
-    onStartExam(mdPaper);
+  const handleSaveMarkdownExam = (goToLibrary = false) => {
+    const paper = buildMarkdownPaperObject();
+    if (!paper) {
+      alert('未能从 Markdown 中解析到有效试题，请先在左侧输入试卷内容。');
+      return;
+    }
+
+    // Persist parsedExam id so repeated saves modify the same paper
+    setParsedExam(prev => ({ ...prev, id: paper.id }));
+    if (onSavePaper) {
+      onSavePaper(paper, goToLibrary);
+    }
+    setSaveToast({ title: paper.title, id: paper.id });
+    setTimeout(() => setSaveToast(null), 4000);
+  };
+
+  const handleLaunchMarkdownExam = () => {
+    const paper = buildMarkdownPaperObject();
+    if (!paper) {
+      alert('未能从 Markdown 中解析到有效试题，请检查文本格式。');
+      return;
+    }
+
+    onStartExam(paper);
   };
 
   return (
@@ -788,14 +861,37 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
 
               {/* Action buttons */}
               <div className="space-y-2 pt-2 border-t border-surface-container">
-                <button
-                  type="button"
-                  onClick={handleLaunchClone}
-                  className="w-full h-10 px-space-lg rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px]">play_circle</span>
-                  <span>{clonedPaperResult ? '🚀 立即以此 AI 克隆试卷进入考场' : '直接进入预置考场'}</span>
-                </button>
+                {clonedPaperResult ? (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveClone(false)}
+                      className="flex-1 h-10 px-3 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-headline-sm text-label-md flex items-center justify-center gap-1.5 border border-primary/30 shadow-xs transition-all active:scale-[0.99] cursor-pointer"
+                      title="保存试卷到试卷库，后续可随时开考或管理"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
+                      <span>保存试卷到试卷库</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleLaunchClone}
+                      className="flex-[1.2] h-10 px-4 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-label-md flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.99] cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">play_circle</span>
+                      <span>确认并进入考场</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleLaunchClone}
+                    disabled={!papers || papers.length === 0}
+                    className="w-full h-10 px-space-lg rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">play_circle</span>
+                    <span>进入考场</span>
+                  </button>
+                )}
                 {clonedPaperResult && (
                   <button
                     type="button"
@@ -905,12 +1001,22 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
               </div>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                onClick={() => handleSaveCustom(false)}
+                disabled={isGenerating}
+                className="flex-1 h-11 px-4 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-headline-sm text-label-md flex items-center justify-center gap-2 border border-primary/30 shadow-xs transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                title="生成并直接保存至试卷库，暂不开考"
+              >
+                <span className="material-symbols-outlined text-[19px]">bookmark_add</span>
+                <span>生成并存入试卷库</span>
+              </button>
               <button
                 type="button"
                 onClick={handleLaunchCustom}
                 disabled={isGenerating}
-                className="w-full h-11 px-space-lg rounded-lg bg-inverse-surface hover:bg-on-background text-inverse-on-surface font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                className="flex-[1.2] h-11 px-space-lg rounded-lg bg-inverse-surface hover:bg-on-background text-inverse-on-surface font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
               >
                 <span className={`material-symbols-outlined text-[20px] ${isGenerating ? 'animate-spin' : ''}`}>
                   {isGenerating ? 'progress_activity' : 'psychology'}
@@ -1595,13 +1701,24 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
                   </div>
                 </div>
 
-                {/* Action CTA: Enter Exam Room with this parsed exam */}
-                <div className="pt-2 border-t border-surface-container">
+                {/* Action CTA: Save Paper & Enter Exam Room */}
+                <div className="pt-3 border-t border-surface-container flex flex-col sm:flex-row items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveMarkdownExam(false)}
+                    disabled={!parsedExam || !parsedExam.questions || parsedExam.questions.length === 0}
+                    className="w-full sm:flex-1 h-11 px-4 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-headline-sm text-label-md flex items-center justify-center gap-2 border border-primary/30 shadow-xs transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                    title="将当前已排版试卷保存到试卷库中，不强制进入考场"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">bookmark_add</span>
+                    <span>保存试卷到试卷库</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={handleLaunchMarkdownExam}
                     disabled={!parsedExam || !parsedExam.questions || parsedExam.questions.length === 0}
-                    className="w-full h-11 px-space-lg rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                    className="w-full sm:flex-[1.2] h-11 px-4 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-label-md flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
                   >
                     <span className="material-symbols-outlined text-[20px]">play_circle</span>
                     <span>确认此试卷并进入全真考场</span>
@@ -1687,6 +1804,31 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
           </div>
         </section>
       </div>
+
+      {/* Toast Notification for Saved Paper */}
+      {saveToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-inverse-surface text-inverse-on-surface px-4 py-3 rounded-xl shadow-xl border border-outline-variant/30 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <span className="material-symbols-outlined text-secondary text-[22px]">check_circle</span>
+          <div className="text-body-sm">
+            <span className="font-semibold block max-w-xs truncate">{saveToast.title}</span>
+            <span className="text-[12px] opacity-80">已成功保存至试卷库！</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('paper-library')}
+            className="ml-2 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:bg-primary-container cursor-pointer transition-colors shadow-xs"
+          >
+            去试卷库查看
+          </button>
+          <button
+            type="button"
+            onClick={() => setSaveToast(null)}
+            className="text-on-surface-variant hover:text-on-surface cursor-pointer p-0.5 ml-1"
+          >
+            <span className="material-symbols-outlined text-[16px]">close</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

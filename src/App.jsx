@@ -75,22 +75,34 @@ export default function App() {
   const [questions, setQuestions] = useState(() => (activePaper?.questions || []));
   const [activeSubmission, setActiveSubmission] = useState(null);
 
+  const handleSavePaper = (paper, navigateToLibrary = false) => {
+    if (!paper) return;
+    setPapers((prev) => {
+      const existsIndex = prev.findIndex((p) => p.id === paper.id);
+      let next;
+      if (existsIndex >= 0) {
+        next = [...prev];
+        next[existsIndex] = paper;
+      } else {
+        next = [paper, ...prev];
+      }
+      try {
+        localStorage.setItem('examcraft_papers', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    if (navigateToLibrary) {
+      setCurrentPath('paper-library');
+    }
+  };
+
   const handleStartExam = (paper) => {
     if (!paper) {
       setCurrentPath('exam-generator');
       return;
     }
     setActivePaper(paper);
-    setPapers((prev) => {
-      if (!prev.some((p) => p.id === paper.id)) {
-        const next = [paper, ...prev];
-        try {
-          localStorage.setItem('examcraft_papers', JSON.stringify(next));
-        } catch {}
-        return next;
-      }
-      return prev;
-    });
+    handleSavePaper(paper, false);
     setQuestions(paper.questions && paper.questions.length > 0 ? paper.questions : []);
     setCurrentPath('exam-room');
   };
@@ -154,6 +166,7 @@ export default function App() {
           <ExamGeneratorView
             papers={papers}
             onStartExam={handleStartExam}
+            onSavePaper={handleSavePaper}
             onNavigate={setCurrentPath}
           />
         )}
