@@ -207,12 +207,11 @@ const parseMixedTextSegments = (rawLine) => {
 };
 
 /**
- * 可自由拖拽与独立管理的草稿图元卡片
- * 支持整体拖动、坐标重绘、独立删除
+ * 纯净纸质图元（无生硬外框与白底，墨水直接落在稿纸上，支持整体拖拽与橡皮擦除）
  */
 function DraggableCanvasElement({
   element,
-  isActiveToolMove,
+  tool,
   onUpdatePosition,
   onDelete,
   drawActions
@@ -220,6 +219,8 @@ function DraggableCanvasElement({
   const canvasRef = useRef(null);
   const dragStartRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const isMoveTool = tool === 'select';
+  const isEraserTool = tool === 'eraser';
 
   useEffect(() => {
     if (canvasRef.current && element.actions) {
@@ -228,8 +229,11 @@ function DraggableCanvasElement({
   }, [element.actions, element.width, element.height, drawActions]);
 
   const handlePointerDown = (e) => {
+    // 橡皮擦模式下完全穿透，不拦截事件
+    if (isEraserTool) return;
+
     const isHandle = e.target.closest('[data-drag-handle="true"]');
-    if (!isHandle && !isActiveToolMove) return;
+    if (!isHandle && !isMoveTool) return;
 
     e.stopPropagation();
     try {
@@ -280,46 +284,50 @@ function DraggableCanvasElement({
         height: `${element.height}px`,
         touchAction: 'none'
       }}
-      className={`group rounded-xl border select-none transition-shadow duration-150 ${
-        isDragging
-          ? 'shadow-2xl ring-2 ring-primary border-primary bg-surface-container-lowest z-40'
-          : 'shadow-xs hover:shadow-md border-outline-variant/60 bg-surface-container-lowest/90 hover:border-primary/50 z-20'
+      className={`group select-none transition-all duration-150 ${
+        isEraserTool
+          ? 'pointer-events-none' // 橡皮擦模式完全穿透，绝不挡住擦除
+          : isMoveTool
+          ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-primary/50 bg-primary/5 rounded-xl shadow-xs'
+          : 'hover:border hover:border-dashed hover:border-primary/40 rounded-xl'
+      } ${
+        isDragging ? 'shadow-lg border-2 border-primary bg-primary/10 z-40' : 'z-20'
       }`}
     >
-      {/* 顶部轻量浮动操作手柄条 */}
-      <div
-        data-drag-handle="true"
-        className={`flex items-center justify-between px-2.5 py-1 rounded-t-xl border-b border-outline-variant/30 text-[11px] font-medium transition cursor-grab active:cursor-grabbing ${
-          isDragging
-            ? 'bg-primary/10 text-primary'
-            : 'bg-surface-container-low/80 group-hover:bg-surface-container text-on-surface-variant group-hover:text-on-surface'
-        }`}
-        title="按住此栏可整体拖动该图元到草稿纸任意位置"
-      >
-        <div className="flex items-center gap-1.5 truncate pointer-events-none">
-          <span className="material-symbols-outlined text-[15px] text-primary">drag_indicator</span>
-          <span className="truncate font-semibold text-[11px]">{element.title || '画入草稿整体'}</span>
-        </div>
+      {/* 顶部轻量浮动操作手柄（平时完全透明无框，仅在 hover 或移动模式下显示） */}
+      {!isEraserTool && (
+        <div
+          data-drag-handle="true"
+          className={`absolute -top-7 left-0 right-0 flex items-center justify-between px-2 py-0.5 rounded-lg bg-surface-container-highest/90 backdrop-blur-xs text-[11px] font-medium border border-outline-variant/40 shadow-xs transition-opacity duration-150 cursor-grab active:cursor-grabbing ${
+            isMoveTool || isDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
+          title="按住此处可整体拖动画入图形"
+        >
+          <div className="flex items-center gap-1.5 truncate pointer-events-none text-primary">
+            <span className="material-symbols-outlined text-[14px]">drag_pan</span>
+            <span className="truncate font-semibold text-[11px]">{element.title || '草稿图形'}</span>
+          </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          <span className="text-[10px] text-outline hidden sm:inline select-none pointer-events-none">可拖拽</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(element.id);
-            }}
-            className="p-0.5 rounded hover:bg-error/10 hover:text-error text-outline transition cursor-pointer"
-            title="移除该画入图元"
-          >
-            <span className="material-symbols-outlined text-[14px]">close</span>
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[10px] text-outline hidden sm:inline pointer-events-none">可拖拽</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(element.id);
+              }}
+              className="p-0.5 rounded hover:bg-error/15 hover:text-error text-outline transition cursor-pointer"
+              title="擦除/移除该图元"
+            >
+              <span className="material-symbols-outlined text-[13px]">close</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* 内部矢量渲染 Canvas */}
-      <div className="relative w-full h-[calc(100%-28px)] overflow-hidden rounded-b-xl flex items-center justify-center pointer-events-none">
-        <canvas ref={canvasRef} className="block w-full h-full" />
+      {/* 内部矢量渲染 Canvas（完全透明背景，线条直接落在稿纸上） */}
+      <div className="relative w-full h-full overflow-hidden rounded-xl flex items-center justify-center pointer-events-none">
+        <canvas ref={canvasRef} className="block w-full h-full bg-transparent" />
       </div>
     </div>
   );
@@ -624,6 +632,26 @@ export default function ScratchpadCanvas({
     };
   };
 
+  // 橡皮擦对画入图形的碰撞擦除检测 (Object / Stroke Eraser)
+  const checkEraserCollision = (point) => {
+    if (tool !== 'eraser' || elements.length === 0) return;
+    const pad = brushSize * 5;
+
+    const hit = elements.find((el) => {
+      return (
+        point.x >= el.x - pad &&
+        point.x <= el.x + el.width + pad &&
+        point.y >= el.y - pad &&
+        point.y <= el.y + el.height + pad
+      );
+    });
+
+    if (hit) {
+      setElements((prev) => prev.filter((el) => el.id !== hit.id));
+      showToast(`已擦除草稿图形：${hit.title}`, 'info');
+    }
+  };
+
   // 手绘事件
   const handlePointerDown = (e) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -638,6 +666,7 @@ export default function ScratchpadCanvas({
     if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.fill();
+      checkEraserCollision(pos);
     } else {
       ctx.globalCompositeOperation = 'source-over';
       ctx.fillStyle = brushColor;
@@ -660,6 +689,7 @@ export default function ScratchpadCanvas({
     if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.lineWidth = brushSize * 5;
+      checkEraserCollision(currentPoint);
     } else {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = brushColor;
@@ -1422,7 +1452,7 @@ export default function ScratchpadCanvas({
             <DraggableCanvasElement
               key={el.id}
               element={el}
-              isActiveToolMove={tool === 'select'}
+              tool={tool}
               onUpdatePosition={handleUpdateElementPosition}
               onDelete={handleDeleteElement}
               drawActions={drawActionsOnCanvas}
