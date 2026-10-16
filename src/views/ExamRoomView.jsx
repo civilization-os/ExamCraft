@@ -343,10 +343,13 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
         {/* Center: Global Progress Bar & Current Type */}
         <div className="hidden lg:flex flex-col items-center justify-center min-w-[260px]">
           <div className="flex items-center justify-between w-full mb-1">
-            <span className="text-on-surface-variant font-label-mono text-label-mono">
-              答题卡填涂: {answeredCount} / {questionList.length}
+            <span className="text-on-surface-variant font-sans text-[12px] font-medium flex items-center gap-1">
+              <span>答题进度:</span>
+              <span className="font-mono font-bold text-primary">{answeredCount}</span>
+              <span className="text-outline-variant">/</span>
+              <span className="font-mono">{questionList.length}</span>
             </span>
-            <span className="px-1.5 py-0.2 bg-surface-container text-on-surface-variant font-label-mono text-label-mono rounded">
+            <span className="px-2 py-0.5 bg-surface-container text-on-surface-variant font-sans text-[11px] font-medium rounded-md">
               {currentQ.type}
             </span>
           </div>
@@ -428,49 +431,81 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
       {/* Main Focus Runner Layout */}
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-margin-tablet lg:px-margin-desktop py-space-xl flex flex-col space-y-space-xl pb-24">
         {/* Navigation Sheet Pill Bar */}
-        <section className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex items-center justify-between gap-space-md overflow-x-auto">
-          <div className="flex items-center gap-space-sm shrink-0">
-            <span className="font-label-mono text-label-mono text-on-surface-variant font-semibold">答题卡矩阵:</span>
+        <section className="bg-surface-container-lowest rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 shadow-xs border border-outline-variant/30 flex flex-wrap lg:flex-nowrap items-center justify-between gap-3 sm:gap-4 overflow-x-auto">
+          {/* Left: Matrix Title & Progress Badge */}
+          <div className="flex items-center gap-3 shrink-0 select-none">
             <div className="flex items-center gap-1.5">
-              {questionList.map((q, idx) => {
-                const isCurrent = idx === currentQIndex;
-                const isAnswered = q.userAnswer && q.userAnswer.trim().length > 0;
-                return (
-                  <button
-                    key={q.id}
-                    type="button"
-                    onClick={() => setCurrentQIndex(idx)}
-                    className={`w-7.5 h-7.5 rounded text-[11px] font-label-mono transition-all flex items-center justify-center cursor-pointer ${
-                      isCurrent
-                        ? 'ring-2 ring-primary bg-primary text-on-primary font-bold shadow-xs'
-                        : isAnswered
-                        ? 'bg-secondary-container/40 text-secondary border border-secondary/30 font-medium'
-                        : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container'
-                    }`}
-                  >
-                    {q.num}
-                  </button>
-                );
-              })}
+              <span className="material-symbols-outlined text-[20px] text-primary">grid_view</span>
+              <span className="font-sans text-[14px] font-bold text-on-surface tracking-tight">答题卡矩阵</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-sans font-medium bg-surface-container-low text-on-surface-variant border border-outline-variant/25">
+              <span className={`w-1.5 h-1.5 rounded-full ${answeredCount === questionList.length ? 'bg-emerald-500' : 'bg-primary'}`}></span>
+              <span>已答</span>
+              <span className="font-mono font-bold text-primary">{answeredCount}</span>
+              <span className="text-outline-variant">/</span>
+              <span className="font-mono text-on-surface-variant font-medium">{questionList.length}</span>
+            </div>
+
+            <div className="hidden xl:block h-4 w-[1px] bg-outline-variant/30"></div>
+
+            {/* Quick Status Legend */}
+            <div className="hidden 2xl:flex items-center gap-2.5 text-[11px] font-sans text-on-surface-variant/70">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary ring-1 ring-primary/40"></span>当前</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>已填涂</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-outline-variant/60"></span>未答</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Middle: Question Pills with 5-Question Visual Rhythm */}
+          <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto py-1 max-w-full">
+            {questionList.map((q, idx) => {
+              const isCurrent = idx === currentQIndex;
+              const isAnswered = q.userAnswer && q.userAnswer.trim().length > 0;
+              const isGroupEnd = (idx + 1) % 5 === 0 && idx !== questionList.length - 1;
+              return (
+                <button
+                  key={q.id}
+                  type="button"
+                  onClick={() => setCurrentQIndex(idx)}
+                  className={`w-8 h-8 min-w-[32px] rounded-lg text-[12px] font-mono transition-all duration-150 flex items-center justify-center cursor-pointer select-none ${
+                    isGroupEnd ? 'mr-1.5 sm:mr-2' : ''
+                  } ${
+                    isCurrent
+                      ? 'ring-2 ring-primary ring-offset-2 ring-offset-surface-container-lowest bg-primary text-on-primary font-bold shadow-sm scale-105 z-10'
+                      : isAnswered
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-700/60 font-semibold hover:bg-emerald-100/80'
+                      : 'bg-surface-container-low text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-container border border-outline-variant/25 hover:border-outline-variant/60 font-medium'
+                  }`}
+                  title={`第 ${q.num} 题 (${isCurrent ? '当前正在作答' : isAnswered ? '已完成作答' : '未作答'})`}
+                >
+                  {q.num}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Right: Prev & Next Question Actions */}
+          <div className="flex items-center gap-2 shrink-0 select-none">
             <button
               type="button"
               disabled={currentQIndex === 0}
               onClick={() => setCurrentQIndex((i) => Math.max(0, i - 1))}
-              className="px-2.5 py-1 rounded bg-surface-container hover:bg-surface-container-high disabled:opacity-40 text-label-sm font-label-sm cursor-pointer disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface text-[12px] font-sans font-medium border border-outline-variant/30 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed active:scale-95"
+              title="切换至上一题"
             >
-              上一题
+              <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+              <span className="hidden sm:inline">上一题</span>
             </button>
             <button
               type="button"
               disabled={currentQIndex === questionList.length - 1}
               onClick={() => setCurrentQIndex((i) => Math.min(questionList.length - 1, i + 1))}
-              className="px-2.5 py-1 rounded bg-surface-container hover:bg-surface-container-high disabled:opacity-40 text-label-sm font-label-sm cursor-pointer disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-white text-[12px] font-sans font-medium shadow-xs transition-all cursor-pointer disabled:opacity-35 disabled:bg-surface-container-low disabled:text-on-surface-variant disabled:shadow-none disabled:cursor-not-allowed active:scale-95 font-semibold"
+              title="切换至下一题"
             >
-              下一题
+              <span className="hidden sm:inline">下一题</span>
+              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
             </button>
           </div>
         </section>
@@ -496,9 +531,9 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                 <span>添加笔记</span>
               </button>
               <span className="text-outline-variant">|</span>
-              <span className="text-on-surface-variant font-label-mono text-label-mono flex items-center gap-1">
-                难度: <span className="text-tertiary tracking-wider">{getQuestionDifficulty(currentQ).stars}</span>
-                <span className="text-[10px] px-1 py-0.2 rounded bg-surface-container text-outline">
+              <span className="text-on-surface-variant font-sans text-[12px] flex items-center gap-1">
+                难度: <span className="text-tertiary tracking-wider font-mono">{getQuestionDifficulty(currentQ).stars}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-outline font-sans">
                   {getQuestionDifficulty(currentQ).label}
                 </span>
               </span>
