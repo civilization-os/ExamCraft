@@ -207,6 +207,125 @@ const parseMixedTextSegments = (rawLine) => {
 };
 
 /**
+ * 可自由拖拽与独立管理的草稿图元卡片
+ * 支持整体拖动、坐标重绘、独立删除
+ */
+function DraggableCanvasElement({
+  element,
+  isActiveToolMove,
+  onUpdatePosition,
+  onDelete,
+  drawActions
+}) {
+  const canvasRef = useRef(null);
+  const dragStartRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    if (canvasRef.current && element.actions) {
+      drawActions(canvasRef.current, element.actions, element.width, element.height);
+    }
+  }, [element.actions, element.width, element.height, drawActions]);
+
+  const handlePointerDown = (e) => {
+    const isHandle = e.target.closest('[data-drag-handle="true"]');
+    if (!isHandle && !isActiveToolMove) return;
+
+    e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
+    dragStartRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initialX: element.x,
+      initialY: element.y
+    };
+    setIsDragging(true);
+  };
+
+  const handlePointerMove = (e) => {
+    if (!isDragging) return;
+    e.stopPropagation();
+
+    const dx = e.clientX - dragStartRef.current.startX;
+    const dy = e.clientY - dragStartRef.current.startY;
+
+    const newX = Math.max(10, dragStartRef.current.initialX + dx);
+    const newY = Math.max(10, dragStartRef.current.initialY + dy);
+
+    onUpdatePosition(element.id, newX, newY);
+  };
+
+  const handlePointerUp = (e) => {
+    if (!isDragging) return;
+    e.stopPropagation();
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+    setIsDragging(false);
+  };
+
+  return (
+    <div
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      style={{
+        position: 'absolute',
+        transform: `translate3d(${element.x}px, ${element.y}px, 0)`,
+        width: `${element.width}px`,
+        height: `${element.height}px`,
+        touchAction: 'none'
+      }}
+      className={`group rounded-xl border select-none transition-shadow duration-150 ${
+        isDragging
+          ? 'shadow-2xl ring-2 ring-primary border-primary bg-surface-container-lowest z-40'
+          : 'shadow-xs hover:shadow-md border-outline-variant/60 bg-surface-container-lowest/90 hover:border-primary/50 z-20'
+      }`}
+    >
+      {/* 顶部轻量浮动操作手柄条 */}
+      <div
+        data-drag-handle="true"
+        className={`flex items-center justify-between px-2.5 py-1 rounded-t-xl border-b border-outline-variant/30 text-[11px] font-medium transition cursor-grab active:cursor-grabbing ${
+          isDragging
+            ? 'bg-primary/10 text-primary'
+            : 'bg-surface-container-low/80 group-hover:bg-surface-container text-on-surface-variant group-hover:text-on-surface'
+        }`}
+        title="按住此栏可整体拖动该图元到草稿纸任意位置"
+      >
+        <div className="flex items-center gap-1.5 truncate pointer-events-none">
+          <span className="material-symbols-outlined text-[15px] text-primary">drag_indicator</span>
+          <span className="truncate font-semibold text-[11px]">{element.title || '画入草稿整体'}</span>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-[10px] text-outline hidden sm:inline select-none pointer-events-none">可拖拽</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(element.id);
+            }}
+            className="p-0.5 rounded hover:bg-error/10 hover:text-error text-outline transition cursor-pointer"
+            title="移除该画入图元"
+          >
+            <span className="material-symbols-outlined text-[14px]">close</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 内部矢量渲染 Canvas */}
+      <div className="relative w-full h-[calc(100%-28px)] overflow-hidden rounded-b-xl flex items-center justify-center pointer-events-none">
+        <canvas ref={canvasRef} className="block w-full h-full" />
+      </div>
+    </div>
+  );
+}
+
+/**
  * ScratchpadCanvas / Workbench
  * 一体化考场草稿演算工作台
  */
@@ -222,7 +341,7 @@ export default function ScratchpadCanvas({
   const canvasRef = useRef(null);
 
   // ==================== 画板手绘状态 ====================
-  const [tool, setTool] = useState('brush'); // 'brush' | 'eraser'
+  const [tool, setTool] = useState('brush'); // 'brush' | 'eraser' | 'select'
   const [brushColor, setBrushColor] = useState('#0f172a'); // 墨黑
   const [brushSize, setBrushSize] = useState(3); // 2 | 4 | 7
   const [paperPattern, setPaperPattern] = useState('grid'); // 'grid' | 'lined' | 'blank'
@@ -231,6 +350,24 @@ export default function ScratchpadCanvas({
   const lastPointRef = useRef({ x: 0, y: 0 });
   const [history, setHistory] = useState([]);
   const [historyStep, setHistoryStep] = useState(-1);
+
+  // ==================== 画入图元对象状态（支持独立拖拽与自动防重叠布局） ====================
+  const [elements, setElements] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`${storageKey}_elements`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${storageKey}_elements`, JSON.stringify(elements));
+    } catch (e) {
+      console.warn('Elements save error:', e);
+    }
+  }, [elements, storageKey]);
 
   // ==================== 文本与板书笔记状态 ====================
   const [boardText, setBoardText] = useState(() => {
@@ -404,24 +541,28 @@ export default function ScratchpadCanvas({
     }
   };
 
-  // 清空手绘（统一内嵌 UI）
+  // 清空手绘与画入图元（统一内嵌 UI）
   const handleClearCanvasClick = () => {
     setConfirmDialog({
       isOpen: true,
-      title: '清空手绘草稿',
-      message: '确定要清空当前画布上的所有手绘笔迹吗？清空后将无法恢复。',
+      title: '清空草稿纸画布',
+      message: elements.length > 0
+        ? '确定要清空画布吗？这将会同时清空当前的所有手绘笔迹以及已画入的函数图表与几何图元。'
+        : '确定要清空当前画布上的所有手绘笔迹吗？清空后将无法恢复。',
       confirmText: '确认清空',
       confirmType: 'danger',
       onConfirm: () => {
         const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.restore();
-        saveToHistory();
-        showToast('手绘画板已清空', 'info');
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.restore();
+          saveToHistory();
+        }
+        setElements([]);
+        showToast('画板笔迹与画入图元已全部清空', 'info');
       }
     });
   };
@@ -441,24 +582,35 @@ export default function ScratchpadCanvas({
     });
   };
 
-  // 导出图片
+  // 导出图片（自动将手绘笔迹与各可拖拽图元合成一张完整草稿图片）
   const handleDownload = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = canvas.width;
     exportCanvas.height = canvas.height;
     const expCtx = exportCanvas.getContext('2d');
 
-    expCtx.fillStyle = '#f8fafc';
+    // 1. 底色
+    expCtx.fillStyle = '#fafaf9';
     expCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+    // 2. 底层手绘笔画
     expCtx.drawImage(canvas, 0, 0);
+
+    // 3. 合成各个可拖拽整体图元
+    elements.forEach((el) => {
+      const tempCanvas = document.createElement('canvas');
+      drawActionsOnCanvas(tempCanvas, el.actions, el.width, el.height);
+      expCtx.drawImage(tempCanvas, el.x * dpr, el.y * dpr, el.width * dpr, el.height * dpr);
+    });
 
     const link = document.createElement('a');
     link.download = `考场草稿手绘_${new Date().toISOString().slice(0, 10)}.png`;
     link.href = exportCanvas.toDataURL('image/png');
     link.click();
-    showToast('草稿手绘图已导出保存', 'success');
+    showToast('草稿手绘图已导出保存（包含画入图形与板书）', 'success');
   };
 
   // 手绘坐标计算
@@ -529,43 +681,50 @@ export default function ScratchpadCanvas({
     saveToHistory();
   };
 
-  // ==================== 智能 Canvas 绘图与写字执行引擎 ====================
-  // AI 真正可以在 Canvas 画板上帮画直角坐标系、函数曲线、几何三角形/圆，以及手写板书文字！
-  const executeCanvasActions = useCallback((actions) => {
-    const canvas = canvasRef.current;
+  // ==================== 智能 Canvas 绘图与矢量渲染核心 ====================
+  // 在指定尺寸的 canvas 内部精准居中绘制各项动作（支持自适应居中与高保真矢量排版）
+  const drawActionsOnCanvas = useCallback((canvas, actions, width, height) => {
     if (!canvas || !actions || actions.length === 0) return;
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
-    const width = canvas.width / dpr;
-    const height = canvas.height / dpr;
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
 
     ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
 
-    let textCursorY = 55;
+    const cx = width / 2;
+    const cy = height / 2 + 8;
+    const scaleX = Math.min(26, width / 12);
+    const scaleY = Math.min(26, height / 12);
+    const axisLen = Math.min(width * 0.42, height * 0.42, 120);
+
+    let textCursorY = 32;
 
     actions.forEach((act) => {
       if (act.type === 'write' && act.content) {
-        // 1. 在 Canvas 上手写工整板书与高保真数学公式
+        // 1. 手写工整板书与高保真数学公式
         const lines = act.content.split('\n');
         lines.forEach((line) => {
           if (!line.trim()) {
-            textCursorY += 16;
+            textCursorY += 14;
             return;
           }
 
           const segments = parseMixedTextSegments(line);
-          let startX = 36;
-          const maxWidth = width - 60;
+          let startX = 16;
+          const maxWidth = width - 24;
 
           segments.forEach((seg) => {
             if (seg.isMath) {
-              // 数学公式：斜体矢量数学排版与考场蓝
-              ctx.font = 'italic 700 17px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
+              ctx.font = 'italic 700 16px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
               ctx.fillStyle = '#1d4ed8';
             } else {
-              // 普通文字：端庄手写板书体与墨黑色
-              ctx.font = '600 16px "KaTeX_Main", "STKaiti", "KaiTi", "Microsoft YaHei", sans-serif';
+              ctx.font = '600 15px "KaTeX_Main", "STKaiti", "KaiTi", "Microsoft YaHei", sans-serif';
               ctx.fillStyle = act.color || '#0f172a';
             }
 
@@ -577,8 +736,8 @@ export default function ScratchpadCanvas({
               const piece = chars[i];
               const pieceWidth = ctx.measureText(piece).width;
               if (startX + pieceWidth > maxWidth) {
-                startX = 36;
-                textCursorY += 28;
+                startX = 16;
+                textCursorY += 26;
               }
               ctx.fillText(piece, startX, textCursorY);
               startX += pieceWidth;
@@ -586,16 +745,12 @@ export default function ScratchpadCanvas({
             startX += seg.isMath ? 4 : 2;
           });
 
-          textCursorY += 30;
+          textCursorY += 28;
         });
-        textCursorY += 10;
+        textCursorY += 8;
 
       } else if (act.type === 'axes') {
-        // 2. 在 Canvas 上绘制直角坐标系
-        const cx = Math.min(width * 0.45, 240);
-        const cy = Math.min(height * 0.55, 270);
-        const axisLen = 120;
-
+        // 2. 绘制直角坐标系
         ctx.strokeStyle = '#334155';
         ctx.lineWidth = 1.8;
         ctx.lineCap = 'round';
@@ -627,12 +782,7 @@ export default function ScratchpadCanvas({
         ctx.fillText('O', cx - 14, cy + 14);
 
       } else if (act.type === 'plot') {
-        // 3. 在 Canvas 上绘制函数图像曲线
-        const cx = Math.min(width * 0.45, 240);
-        const cy = Math.min(height * 0.55, 270);
-        const scaleX = 26;
-        const scaleY = 26;
-
+        // 3. 绘制函数图像曲线
         ctx.strokeStyle = act.color || '#1d4ed8';
         ctx.lineWidth = 2.4;
         ctx.lineCap = 'round';
@@ -671,7 +821,7 @@ export default function ScratchpadCanvas({
           if (!isNaN(y) && isFinite(y)) {
             const canvasX = cx + x * scaleX;
             const canvasY = cy - y * scaleY;
-            if (canvasY >= cy - 130 && canvasY <= cy + 130 && canvasX >= cx - 130 && canvasX <= cx + 130) {
+            if (canvasY >= cy - axisLen && canvasY <= cy + axisLen && canvasX >= cx - axisLen && canvasX <= cx + axisLen) {
               if (isFirst) {
                 ctx.moveTo(canvasX, canvasY);
                 isFirst = false;
@@ -691,7 +841,7 @@ export default function ScratchpadCanvas({
           const formattedLabel = formatMathExpression(act.label);
           ctx.fillStyle = act.color || '#1d4ed8';
           ctx.font = 'italic 700 15px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
-          ctx.fillText(formattedLabel, cx + 50, cy - 70);
+          ctx.fillText(formattedLabel, cx + 45, cy - 60);
         }
 
       } else if (act.type === 'shape') {
@@ -701,34 +851,32 @@ export default function ScratchpadCanvas({
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
-        const originX = Math.min(width * 0.45, 240) - 60;
-        const originY = Math.min(height * 0.55, 270) - 40;
+        const originX = cx - 55;
+        const originY = cy - 40;
 
         if (act.shapeType === 'right_triangle') {
           ctx.beginPath();
-          ctx.moveTo(originX, originY + 100);
-          ctx.lineTo(originX + 130, originY + 100);
+          ctx.moveTo(originX, originY + 90);
+          ctx.lineTo(originX + 120, originY + 90);
           ctx.lineTo(originX, originY);
           ctx.closePath();
           ctx.stroke();
 
           // 直角标
           ctx.beginPath();
-          ctx.moveTo(originX, originY + 86);
-          ctx.lineTo(originX + 14, originY + 86);
-          ctx.lineTo(originX + 14, originY + 100);
+          ctx.moveTo(originX, originY + 76);
+          ctx.lineTo(originX + 14, originY + 76);
+          ctx.lineTo(originX + 14, originY + 90);
           ctx.stroke();
 
           ctx.fillStyle = act.color || '#047857';
           ctx.font = 'bold 14px serif';
           ctx.fillText(act.labels?.[0] || 'A', originX - 16, originY);
-          ctx.fillText(act.labels?.[1] || 'C', originX - 16, originY + 115);
-          ctx.fillText(act.labels?.[2] || 'B', originX + 135, originY + 115);
+          ctx.fillText(act.labels?.[1] || 'C', originX - 16, originY + 105);
+          ctx.fillText(act.labels?.[2] || 'B', originX + 125, originY + 105);
 
         } else if (act.shapeType === 'circle') {
-          const cx = originX + 60;
-          const cy = originY + 50;
-          const r = 50;
+          const r = 45;
           ctx.beginPath();
           ctx.arc(cx, cy, r, 0, Math.PI * 2);
           ctx.stroke();
@@ -743,21 +891,21 @@ export default function ScratchpadCanvas({
           ctx.fillStyle = act.color || '#047857';
           ctx.font = 'bold 13px serif';
           ctx.fillText('O', cx - 12, cy - 4);
-          ctx.fillText('r', cx + 22, cy - 6);
+          ctx.fillText('r', cx + 18, cy - 6);
         } else {
           // 一般三角形
           ctx.beginPath();
-          ctx.moveTo(originX + 60, originY);
-          ctx.lineTo(originX + 130, originY + 90);
-          ctx.lineTo(originX, originY + 90);
+          ctx.moveTo(cx, originY);
+          ctx.lineTo(originX + 120, originY + 85);
+          ctx.lineTo(originX - 10, originY + 85);
           ctx.closePath();
           ctx.stroke();
 
           ctx.fillStyle = act.color || '#047857';
           ctx.font = 'bold 14px serif';
-          ctx.fillText(act.labels?.[0] || 'A', originX + 55, originY - 8);
-          ctx.fillText(act.labels?.[1] || 'B', originX - 14, originY + 105);
-          ctx.fillText(act.labels?.[2] || 'C', originX + 135, originY + 105);
+          ctx.fillText(act.labels?.[0] || 'A', cx - 5, originY - 8);
+          ctx.fillText(act.labels?.[1] || 'B', originX - 22, originY + 98);
+          ctx.fillText(act.labels?.[2] || 'C', originX + 125, originY + 98);
         }
 
       } else if (act.type === 'line') {
@@ -765,10 +913,10 @@ export default function ScratchpadCanvas({
         ctx.strokeStyle = act.color || '#b91c1c';
         ctx.lineWidth = 1.8;
         if (act.lineType === 'dashed') ctx.setLineDash([5, 5]);
-        const lx1 = 120;
-        const ly1 = 180;
-        const lx2 = 280;
-        const ly2 = 120;
+        const lx1 = cx - 70;
+        const ly1 = cy + 30;
+        const lx2 = cx + 70;
+        const ly2 = cy - 40;
         ctx.beginPath();
         ctx.moveTo(lx1, ly1);
         ctx.lineTo(lx2, ly2);
@@ -784,8 +932,72 @@ export default function ScratchpadCanvas({
     });
 
     ctx.restore();
-    saveToHistory();
-  }, [saveToHistory]);
+  }, []);
+
+  // 智能寻找不重叠的空闲槽位坐标（充分利用大草稿纸横纵向空间）
+  const findNextAvailablePosition = useCallback((elemWidth, elemHeight) => {
+    const container = containerRef.current;
+    const containerW = container ? container.clientWidth : 900;
+    const containerH = container ? container.clientHeight : 600;
+    const pad = 24;
+    const startX = 30;
+    const startY = 30;
+
+    if (!elements || elements.length === 0) {
+      return { x: startX, y: startY };
+    }
+
+    // 1. 尝试紧随最后一个元素右侧水平排布
+    const last = elements[elements.length - 1];
+    const rightCandidateX = last.x + last.width + pad;
+    const rightCandidateY = last.y;
+
+    if (rightCandidateX + elemWidth <= containerW - pad) {
+      const collides = elements.some((el) => {
+        return (
+          rightCandidateX < el.x + el.width &&
+          rightCandidateX + elemWidth > el.x &&
+          rightCandidateY < el.y + el.height &&
+          rightCandidateY + elemHeight > el.y
+        );
+      });
+      if (!collides) {
+        return { x: rightCandidateX, y: rightCandidateY };
+      }
+    }
+
+    // 2. 水平排不下，换行到下一排：找到当前所有元素的最大底部
+    let maxBottom = 0;
+    elements.forEach((el) => {
+      if (el.y + el.height > maxBottom) {
+        maxBottom = el.y + el.height;
+      }
+    });
+
+    const nextRowY = maxBottom + pad;
+    if (nextRowY + elemHeight <= containerH + 300) {
+      return { x: startX, y: nextRowY };
+    }
+
+    // 3. 兜底微偏移排列
+    return {
+      x: Math.min((last.x + 36) % Math.max(containerW - elemWidth - pad, 100) + startX, containerW - elemWidth - pad),
+      y: (last.y + 36) % Math.max(containerH - elemHeight - pad, 100) + startY
+    };
+  }, [elements]);
+
+  // 更新图元坐标
+  const handleUpdateElementPosition = useCallback((id, x, y) => {
+    setElements((prev) =>
+      prev.map((el) => (el.id === id ? { ...el, x, y } : el))
+    );
+  }, []);
+
+  // 删除单个画入图元
+  const handleDeleteElement = useCallback((id) => {
+    setElements((prev) => prev.filter((el) => el.id !== id));
+    showToast('已移除该草稿图元', 'info');
+  }, []);
 
   // ==================== 核心 Agent Loop 执行逻辑 ====================
   const handleTriggerAgentLoop = async (customPrompt = '') => {
@@ -826,9 +1038,61 @@ export default function ScratchpadCanvas({
         setAgentMessage(`⚠️ ${agentData.audit.reason}：只能帮画/帮写您说出的内容，严禁代算代答！`);
         showToast('检测到计算诱导，已触碰考场防作弊纪律红线', 'warn');
       } else {
-        // 1. 在 Canvas 画板上真正绘制图形和书写文字！
+        // 1. 将 AI 画入内容编译为一个独立、可自由拖拽、自动防重叠的草稿图元！
         if (agentData.canvasActions && agentData.canvasActions.length > 0) {
-          executeCanvasActions(agentData.canvasActions);
+          const acts = agentData.canvasActions;
+          let elemTitle = '草稿演算图元';
+          let elemWidth = 320;
+          let elemHeight = 270;
+
+          const hasPlot = acts.some(a => a.type === 'plot');
+          const hasAxes = acts.some(a => a.type === 'axes');
+          const hasShape = acts.some(a => a.type === 'shape');
+          const hasWrite = acts.some(a => a.type === 'write');
+
+          if (hasPlot) {
+            const plotAct = acts.find(a => a.type === 'plot');
+            const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
+            elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
+            elemWidth = 320;
+            elemHeight = 280;
+          } else if (hasAxes) {
+            elemTitle = '📈 直角坐标系';
+            elemWidth = 320;
+            elemHeight = 280;
+          } else if (hasShape) {
+            const shapeAct = acts.find(a => a.type === 'shape');
+            const shapeNameMap = {
+              right_triangle: '直角三角形',
+              circle: '圆形与半径',
+              triangle: '三角形'
+            };
+            elemTitle = `📐 几何图形: ${shapeNameMap[shapeAct?.shapeType] || '几何图形'}`;
+            elemWidth = 280;
+            elemHeight = 250;
+          } else if (hasWrite) {
+            const writeAct = acts.find(a => a.type === 'write');
+            const lineCount = (writeAct?.content || '').split('\n').length;
+            elemTitle = '📝 规范板书演算';
+            elemWidth = Math.min(360, (containerRef.current?.clientWidth || 700) - 60);
+            elemHeight = Math.max(130, Math.min(360, lineCount * 32 + 55));
+          }
+
+          // 智能防重叠排版寻址
+          const pos = findNextAvailablePosition(elemWidth, elemHeight);
+
+          const newElem = {
+            id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            title: elemTitle,
+            x: pos.x,
+            y: pos.y,
+            width: elemWidth,
+            height: elemHeight,
+            actions: acts,
+            createdAt: Date.now()
+          };
+
+          setElements((prev) => [...prev, newElem]);
         }
 
         // 2. 同步追加到右侧规范板书笔记（过滤闲聊元话语，只留纯正板书）
@@ -933,7 +1197,7 @@ export default function ScratchpadCanvas({
 
         {/* 中区：手绘画笔/橡皮/粗细/颜色/背景底纹 */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          {/* 画笔 / 橡皮 */}
+          {/* 画笔 / 橡皮 / 拖动整体 */}
           <div className="flex items-center bg-surface-container-lowest p-0.5 rounded-lg border border-outline-variant/30">
             <button
               type="button"
@@ -941,7 +1205,7 @@ export default function ScratchpadCanvas({
               className={`flex items-center gap-1 px-2 py-0.5 rounded font-medium transition cursor-pointer ${
                 tool === 'brush' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
               }`}
-              title="手绘笔（画图、画坐标轴、推导式子）"
+              title="手绘笔（在画布空白处涂鸦、演算）"
             >
               <span className="material-symbols-outlined text-[14px]">edit</span>
               <span className="text-[11px]">笔</span>
@@ -952,10 +1216,21 @@ export default function ScratchpadCanvas({
               className={`flex items-center gap-1 px-2 py-0.5 rounded font-medium transition cursor-pointer ${
                 tool === 'eraser' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
               }`}
-              title="橡皮擦（擦除前景笔画）"
+              title="橡皮擦（擦除手绘笔迹）"
             >
               <span className="material-symbols-outlined text-[14px]">ink_eraser</span>
               <span className="text-[11px]">擦</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool('select')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded font-medium transition cursor-pointer ${
+                tool === 'select' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+              title="拖动整体（可直接点击并移动任意画入的坐标系、图形与公式）"
+            >
+              <span className="material-symbols-outlined text-[14px]">pan_tool</span>
+              <span className="text-[11px]">拖动</span>
             </button>
           </div>
 
@@ -1114,7 +1389,9 @@ export default function ScratchpadCanvas({
         {/* 左侧：手绘涂鸦主画板 */}
         <div
           ref={containerRef}
-          className={`relative h-full rounded-xl border border-outline-variant/40 overflow-hidden cursor-crosshair touch-none shadow-inner transition-all duration-200 ${
+          className={`relative h-full rounded-xl border border-outline-variant/40 overflow-hidden touch-none shadow-inner transition-all duration-200 ${
+            tool === 'select' ? 'cursor-grab' : 'cursor-crosshair'
+          } ${
             isNotesCollapsed ? 'w-full' : 'flex-1 min-w-[320px]'
           }`}
           style={{
@@ -1128,19 +1405,41 @@ export default function ScratchpadCanvas({
             backgroundSize: paperPattern === 'grid' ? '24px 24px' : paperPattern === 'lined' ? '100% 28px' : 'auto'
           }}
         >
+          {/* 底层手绘涂鸦 Canvas */}
           <canvas
             ref={canvasRef}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
-            className="absolute inset-0 block w-full h-full touch-none"
+            onPointerDown={tool !== 'select' ? handlePointerDown : undefined}
+            onPointerMove={tool !== 'select' ? handlePointerMove : undefined}
+            onPointerUp={tool !== 'select' ? handlePointerUp : undefined}
+            onPointerCancel={tool !== 'select' ? handlePointerUp : undefined}
+            className={`absolute inset-0 block w-full h-full touch-none ${
+              tool === 'select' ? 'pointer-events-none' : ''
+            }`}
           />
 
-          {history.length <= 1 && (
+          {/* 上层浮动可拖拽图元层（支持按住手柄或拖动工具任意挪动位置，彻底解决重叠） */}
+          {elements.map((el) => (
+            <DraggableCanvasElement
+              key={el.id}
+              element={el}
+              isActiveToolMove={tool === 'select'}
+              onUpdatePosition={handleUpdateElementPosition}
+              onDelete={handleDeleteElement}
+              drawActions={drawActionsOnCanvas}
+            />
+          ))}
+
+          {history.length <= 1 && elements.length === 0 && (
             <div className="absolute bottom-3 left-3 pointer-events-none text-[11px] text-outline/60 flex items-center gap-1 font-mono">
               <span className="material-symbols-outlined text-[14px]">gesture</span>
-              <span>手绘画板：支持鼠标/触控笔自由涂鸦，右侧可让 AI 帮画坐标系、函数图与手写板书</span>
+              <span>手绘画板：支持鼠标/触控笔涂鸦，右侧可让 AI 帮画坐标系、函数图与板书（自动排版防重叠、支持整体自由拖动）</span>
+            </div>
+          )}
+
+          {elements.length > 0 && (
+            <div className="absolute bottom-2.5 right-3 pointer-events-none text-[11px] bg-surface-container-lowest/85 backdrop-blur-xs px-2.5 py-1 rounded-full border border-outline-variant/30 text-on-surface-variant flex items-center gap-1.5 shadow-xs">
+              <span className="material-symbols-outlined text-[14px] text-primary">drag_pan</span>
+              <span>按住图元顶部手柄或使用【拖动】工具，可任意挪动画入内容</span>
             </div>
           )}
         </div>
