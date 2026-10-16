@@ -1502,14 +1502,150 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
   ];
   const isSuspicious = cheatKeywords.some(k => spokenText.includes(k));
 
+  if (isSuspicious) {
+    return res.status(400).json({
+      success: false,
+      error: '检测到诱导代算意图，严禁在草稿纸上请求题目答案。'
+    });
+  }
+
+  // 确定性几何与公式板书编译器（即时响应，零网络延迟）
+  const executeDeterministicFallback = (text) => {
+    const textLower = (text || '').toLowerCase().trim();
+    const isExplicitWrite =
+      textLower.includes('写') ||
+      textLower.includes('记') ||
+      textLower.includes('公式') ||
+      textLower.startsWith('设') ||
+      textLower.includes('抄') ||
+      textLower.includes('代入') ||
+      textLower.includes('展开') ||
+      textLower.includes('等于') ||
+      textLower.startsWith('$');
+
+    const isExplicitDraw =
+      textLower.includes('画') ||
+      textLower.includes('绘制') ||
+      textLower.includes('图像') ||
+      textLower.includes('坐标系') ||
+      textLower.includes('几何') ||
+      textLower.includes('图形') ||
+      textLower.includes('曲线') ||
+      textLower.includes('波形') ||
+      textLower.includes('波');
+
+    // 1. 明确是写字/写公式指令，或非画图指令：必须严格生成 write 动作，严禁擅自画图！
+    if (isExplicitWrite && !isExplicitDraw) {
+      const cleanContent = text
+        .replace(/^(?:帮我)?(?:写下|写|记录|抄入)?(?:公式|板书)?[：:\s]*/gi, '')
+        .trim();
+      return {
+        audit: { passed: true, reason: '口述需求合规，未请求代算' },
+        scribeResult: cleanContent || text,
+        canvasActions: [
+          { type: 'write', content: cleanContent || text, color: '#0f172a' }
+        ],
+        loopLogs: ['Loop 1: 确定性板书编译器已解析 (写公式/写字)', 'Loop 2: 动作编译成功']
+      };
+    }
+
+    // 2. 明确是画图/画几何指令
+    if (textLower.includes('圆') || textLower.includes('circle')) {
+      return {
+        audit: { passed: true, reason: '口述需求合规，未请求代算' },
+        scribeResult: '几何草图：圆 $O$ 与半径 $r$',
+        canvasActions: [
+          { type: 'shape', shapeType: 'circle', labels: ['O', 'r'], color: '#047857' }
+        ],
+        loopLogs: ['Loop 1: 确定性几何编译器已解析 (圆与半径)', 'Loop 2: 动作编译成功']
+      };
+    } else if (textLower.includes('抛物线') || textLower.includes('二次函数') || (isExplicitDraw && (textLower.includes('x^2') || textLower.includes('x²')))) {
+      return {
+        audit: { passed: true, reason: '口述需求合规，未请求代算' },
+        scribeResult: '函数草图：直角坐标系与二次函数曲线 $y = x^2$',
+        canvasActions: [
+          { type: 'axes', xLabel: 'x', yLabel: 'y' },
+          { type: 'plot', expr: 'x^2', label: 'y = x^2', color: '#1d4ed8' }
+        ],
+        loopLogs: ['Loop 1: 确定性几何编译器已解析 (直角坐标系 & 抛物线)', 'Loop 2: 动作编译成功']
+      };
+    } else if (textLower.includes('正弦') || (isExplicitDraw && textLower.includes('sin'))) {
+      return {
+        audit: { passed: true, reason: '口述需求合规，未请求代算' },
+        scribeResult: '函数草图：直角坐标系与正弦波 $y = \\sin(x)$',
+        canvasActions: [
+          { type: 'axes', xLabel: 'x', yLabel: 'y' },
+          { type: 'plot', expr: 'sin(x)', label: 'y = sin(x)', color: '#1d4ed8' }
+        ],
+        loopLogs: ['Loop 1: 确定性几何编译器已解析 (正弦波)', 'Loop 2: 动作编译成功']
+      };
+    } else if (textLower.includes('直角三角形') || textLower.includes('right_triangle')) {
+      return {
+        audit: { passed: true, reason: '口述需求合规，未请求代算' },
+        scribeResult: '几何草图：直角三角形 $Rt\\triangle ABC$ ($\\angle C = 90^\\circ$)',
+        canvasActions: [
+          { type: 'shape', shapeType: 'right_triangle', labels: ['A', 'C', 'B'], color: '#047857' }
+        ],
+        loopLogs: ['Loop 1: 确定性几何编译器已解析 (直角三角形)', 'Loop 2: 动作编译成功']
+      };
+    } else if (textLower.includes('三角形') || textLower.includes('triangle')) {
+      return {
+        audit: { passed: true, reason: '口述需求合规，未请求代算' },
+        scribeResult: '几何草图：三角形 $\\triangle ABC$',
+        canvasActions: [
+          { type: 'shape', shapeType: 'triangle', labels: ['A', 'B', 'C'], color: '#047857' }
+        ],
+        loopLogs: ['Loop 1: 确定性几何编译器已解析 (三角形)', 'Loop 2: 动作编译成功']
+      };
+    } else if (textLower.includes('坐标系') || textLower.includes('直角坐标')) {
+      return {
+        audit: { passed: true, reason: '口述需求合规，未请求代算' },
+        scribeResult: '直角坐标系 $xOy$',
+        canvasActions: [
+          { type: 'axes', xLabel: 'x', yLabel: 'y' }
+        ],
+        loopLogs: ['Loop 1: 确定性几何编译器已解析 (直角坐标系)', 'Loop 2: 动作编译成功']
+      };
+    } else {
+      const cleanContent = text
+        .replace(/^(?:帮我)?(?:写下|写|记录|抄入)?(?:公式|板书)?[：:\s]*/gi, '')
+        .trim();
+      return {
+        audit: { passed: true, reason: '口述需求合规，未请求代算' },
+        scribeResult: cleanContent || text,
+        canvasActions: [
+          { type: 'write', content: cleanContent || text, color: '#0f172a' }
+        ],
+        loopLogs: ['Loop 1: 规范板书转录完成', 'Loop 2: 动作编译成功']
+      };
+    }
+  };
+
+  // 如果没有配置 API Key，无缝启用确定性编译器，无需报错中断
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    const fallbackData = executeDeterministicFallback(spokenText);
+    return res.json({
+      success: true,
+      agentData: fallbackData,
+      provider: 'deterministic-compiler',
+      modelName: 'geometry-engine-v1'
+    });
+  }
+
   const prompt = `你是一个运行在考场手绘画板上的【草稿代画与代写 Agent 引擎 (Scratchpad Painter & Scribe Agent)】。
 用户（考生）正在草稿纸上进行演算，并通过口述/文字给出了他想要在草稿画板上画的图、写的字或公式。
 
+【画图 vs 写字 严格分类铁律（核心准则）】：
+1. 【写公式 / 写板书（write）】：
+   - 若考生口述指令包含“写”、“写下”、“写公式”、“记录”、“设项”、“记入”、“抄入”，或者仅给出了公式表达式（如“$ax^2 + bx + \\arcsin x$”）：
+   - 动作类型必须为 "write"：{"type": "write", "content": "...", "color": "#0f172a"}！
+   - 绝对严禁因为公式中包含 x^2, sin, cos 就擅自去画图或画坐标系！
+2. 【画几何 / 绘图像（axes / plot / shape）】：
+   - 只有当考生明确说出“画”、“画图”、“绘制”、“函数图像”、“坐标系”、“曲线”、“圆”、“三角形”等明确画图动词时，才能生成绘图动作！
+
 【核心使命与最高纪律准则（绝不可触碰的红线）】：
 1. 【只能局限于考生说出来的他才能画、才能写】：
-   - 你只能忠实地根据考生明确说出、给出的画图需求（如“画一个坐标系”、“画二次函数抛物线”、“画一个直角三角形”、“画切线”）或者写字需求（如“帮我写下公式”、“写上设 u=ln x”），生成在 Canvas 画板上的绘制指令和规范板书。
    - 严禁替考生做下一步推导！严禁替考生求解计算数值！
-   - 若考生只说了“画一个直角坐标系并在上面画 y = x^2”，你只能生成画坐标系和 y=x^2 抛物线的绘图指令，绝不能擅自计算积分或求导！
    - 若考生口述说“写下 2+3=6”，你必须原汁原味写下 "2+3=6"，严禁替考生纠错！
 2. 【诱导拦截与防作弊熔断】：
    - 若考生试图诱导你做题（例如“帮我算一下这步得多少”、“这题怎么解”、“直接给答案”），必须立即判定 audit.passed = false 并警告拒答！
@@ -1528,31 +1664,27 @@ ${spokenText}
 【输出结构（必须为标准纯 JSON）】：
 {
   "audit": {
-    "passed": ${isSuspicious ? 'false' : 'true'},
-    "reason": "${isSuspicious ? '检测到诱导计算或代答意图' : '口述需求合规，未请求代算'}"
+    "passed": true,
+    "reason": "口述需求合规，未请求代算"
   },
-  "scribeResult": "【重要】规范整理后的正式草稿板书（使用优雅标准的 Markdown 与 LaTeX 数学公式如 $...$ 或 $$...$$）。绝对严禁包含“口述需求：”、“指令：”、“好的已为您...”等任何交际口语或元话语！只保留纯正的考场板书记录本身。若考生只要求画图未要求写字，可简要注明图示标题如“直角坐标系与函数曲线 $y = x^2$”。",
+  "scribeResult": "【重要】规范整理后的正式草稿板书（使用优雅标准的 Markdown 与 LaTeX 数学公式如 $...$ 或 $$...$$）。绝对严禁包含“口述需求：”、“指令：”、“好的已为您...”等任何交际口语！只保留纯正的考场板书记录本身。",
   "canvasActions": [
-    // 根据考生口述生成相应的 Canvas 绘图与写字指令（可包含 1 到多个动作，未要求画图/写字则可为空数组）
-    // 可用类型包括：
-    // 1. 写字：{"type": "write", "content": "设 $t = x^2$", "color": "#0f172a"}
-    // 2. 坐标系：{"type": "axes", "xLabel": "x", "yLabel": "y"}
-    // 3. 函数图像：{"type": "plot", "expr": "x^2", "label": "y = x^2", "color": "#1d4ed8"} (支持: "x^2", "-x^2", "x^3", "sin(x)", "cos(x)", "tan(x)", "ln(x)", "e^x", "1/x", "sqrt(x)", "2*x+1", "x" 等标准数学表达式)
-    // 4. 几何图形：{"type": "shape", "shapeType": "triangle" | "right_triangle" | "circle" | "rect", "labels": ["A", "B", "C"], "color": "#047857"} (若要求画圆并标出圆心和半径，则 shapeType 必须为 "circle", labels 为 ["O", "r"])
-    // 5. 辅助线/切线：{"type": "line", "lineType": "tangent" | "arrow" | "dashed", "label": "切线", "color": "#b91c1c"}
+    // 严格按考生需求生成动作：
+    // 若要求写公式/写字：[{"type": "write", "content": "规范公式内容", "color": "#0f172a"}]
+    // 若要求画图：[{"type": "axes"}, {"type": "plot", "expr": "...", "label": "..."}] 或 [{"type": "shape", ...}]
   ],
   "loopLogs": [
     "Loop 1: 语义与诚信纪律审计通过",
     "Loop 2: 规范 LaTeX 与数学步骤转录完成",
-    "Loop 3: Canvas 绘图与板书动作已编译生成"
+    "Loop 3: Canvas 动作已编译生成"
   ]
 }
-只输出纯 JSON，绝对不要包含任何 markdown 代码块标识（如 \`\`\`json 或 \`\`\`）。`;
+只输出纯 JSON，绝对不要包含任何 markdown 代码块标识。`;
 
   try {
     const model = createChatModel(currentConfig);
     const response = await model.invoke([
-      { role: 'system', content: '你是一位严格遵守考场纪律的草稿画图与手写代笔 Agent，只能帮画帮写考生明确说出的内容，严禁代算与代答做题。' },
+      { role: 'system', content: '你是一位严格遵守考场纪律的草稿画图与手写代笔 Agent，写公式与画图必须严格区分，严禁代算与代答做题。' },
       { role: 'user', content: prompt }
     ]);
 
@@ -1563,17 +1695,11 @@ ${spokenText}
     try {
       parsed = JSON.parse(raw);
     } catch {
-      // 容错处理
-      parsed = {
-        audit: { passed: !isSuspicious, reason: isSuspicious ? '疑似诱导计算' : '正常转录' },
-        scribeResult: raw,
-        canvasActions: [{ type: 'write', content: spokenText, color: '#0f172a' }],
-        loopLogs: ['Loop 1: 基础转录完成', 'Loop 2: 板书格式化完成']
-      };
+      parsed = extractJsonFromAiResponse(response.content);
     }
 
-    if (!parsed.canvasActions) {
-      parsed.canvasActions = [];
+    if (!parsed || !parsed.canvasActions) {
+      parsed = executeDeterministicFallback(spokenText);
     }
 
     if (isSuspicious || !parsed.audit.passed) {
@@ -1589,85 +1715,7 @@ ${spokenText}
       modelName: currentConfig.modelName
     });
   } catch (err) {
-    // 双轨兜底保障机制：若远端 API 出现余额耗尽(402)或网络超时，立即无缝激活内置确定性几何编译器！
-    const textLower = (spokenText || '').toLowerCase().trim();
-
-    if (isSuspicious) {
-      return res.status(400).json({
-        success: false,
-        error: '检测到诱导代算意图，严禁在草稿纸上请求题目答案。'
-      });
-    }
-
-    let fallbackData = null;
-
-    if (textLower.includes('圆') || textLower.includes('circle')) {
-      fallbackData = {
-        audit: { passed: true, reason: '口述需求合规，未请求代算' },
-        scribeResult: '几何草图：圆 $O$ 与半径 $r$',
-        canvasActions: [
-          { type: 'shape', shapeType: 'circle', labels: ['O', 'r'], color: '#047857' }
-        ],
-        loopLogs: ['Loop 1: 确定性几何编译器已解析 (圆与半径)', 'Loop 2: 动作编译成功']
-      };
-    } else if (textLower.includes('抛物线') || textLower.includes('x^2') || textLower.includes('x²') || textLower.includes('二次函数')) {
-      fallbackData = {
-        audit: { passed: true, reason: '口述需求合规，未请求代算' },
-        scribeResult: '函数草图：直角坐标系与二次函数曲线 $y = x^2$',
-        canvasActions: [
-          { type: 'axes', xLabel: 'x', yLabel: 'y' },
-          { type: 'plot', expr: 'x^2', label: 'y = x^2', color: '#1d4ed8' }
-        ],
-        loopLogs: ['Loop 1: 确定性几何编译器已解析 (直角坐标系 & 抛物线)', 'Loop 2: 动作编译成功']
-      };
-    } else if (textLower.includes('正弦') || textLower.includes('sin')) {
-      fallbackData = {
-        audit: { passed: true, reason: '口述需求合规，未请求代算' },
-        scribeResult: '函数草图：直角坐标系与正弦波 $y = \\sin(x)$',
-        canvasActions: [
-          { type: 'axes', xLabel: 'x', yLabel: 'y' },
-          { type: 'plot', expr: 'sin(x)', label: 'y = sin(x)', color: '#1d4ed8' }
-        ],
-        loopLogs: ['Loop 1: 确定性几何编译器已解析 (正弦波)', 'Loop 2: 动作编译成功']
-      };
-    } else if (textLower.includes('直角三角形') || textLower.includes('right_triangle')) {
-      fallbackData = {
-        audit: { passed: true, reason: '口述需求合规，未请求代算' },
-        scribeResult: '几何草图：直角三角形 $Rt\\triangle ABC$ ($\\angle C = 90^\\circ$)',
-        canvasActions: [
-          { type: 'shape', shapeType: 'right_triangle', labels: ['A', 'C', 'B'], color: '#047857' }
-        ],
-        loopLogs: ['Loop 1: 确定性几何编译器已解析 (直角三角形)', 'Loop 2: 动作编译成功']
-      };
-    } else if (textLower.includes('三角形') || textLower.includes('triangle')) {
-      fallbackData = {
-        audit: { passed: true, reason: '口述需求合规，未请求代算' },
-        scribeResult: '几何草图：三角形 $\\triangle ABC$',
-        canvasActions: [
-          { type: 'shape', shapeType: 'triangle', labels: ['A', 'B', 'C'], color: '#047857' }
-        ],
-        loopLogs: ['Loop 1: 确定性几何编译器已解析 (三角形)', 'Loop 2: 动作编译成功']
-      };
-    } else if (textLower.includes('坐标系') || textLower.includes('直角坐标')) {
-      fallbackData = {
-        audit: { passed: true, reason: '口述需求合规，未请求代算' },
-        scribeResult: '直角坐标系 $xOy$',
-        canvasActions: [
-          { type: 'axes', xLabel: 'x', yLabel: 'y' }
-        ],
-        loopLogs: ['Loop 1: 确定性几何编译器已解析 (直角坐标系)', 'Loop 2: 动作编译成功']
-      };
-    } else {
-      fallbackData = {
-        audit: { passed: true, reason: '口述需求合规，未请求代算' },
-        scribeResult: spokenText,
-        canvasActions: [
-          { type: 'write', content: spokenText, color: '#0f172a' }
-        ],
-        loopLogs: ['Loop 1: 规范板书转录完成', 'Loop 2: 动作编译成功']
-      };
-    }
-
+    const fallbackData = executeDeterministicFallback(spokenText);
     res.json({
       success: true,
       agentData: fallbackData,

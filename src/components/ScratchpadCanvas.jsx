@@ -293,6 +293,22 @@ export const extractFormulasFromProblem = (questionData, contextProblem = '') =>
 };
 
 /**
+ * 判定草稿图元类型：属于「1. 画图」还是「2. 写公式」
+ */
+export const isElementFormula = (elem) => {
+  if (!elem) return false;
+  if (elem.zone === 'formula') return true;
+  if (elem.zone === 'draw') return false;
+  if (!elem.actions || elem.actions.length === 0) return false;
+  const hasPlot = elem.actions.some((a) => a.type === 'plot');
+  const hasAxes = elem.actions.some((a) => a.type === 'axes');
+  const hasShape = elem.actions.some((a) => a.type === 'shape' || a.type === 'circle');
+  const hasWrite = elem.actions.some((a) => a.type === 'write');
+  if (hasWrite && !hasPlot && !hasAxes && !hasShape) return true;
+  return false;
+};
+
+/**
  * 纯净纸质图元（无生硬外框与白底，墨水直接落在稿纸上，支持整体拖拽与橡皮擦除）
  */
 function DraggableCanvasElement({
@@ -1160,57 +1176,86 @@ export default function ScratchpadCanvas({
     ctx.restore();
   }, []);
 
-  // 智能寻找不重叠的空闲槽位坐标（充分利用大草稿纸横纵向空间）
-  const findNextAvailablePosition = useCallback((elemWidth, elemHeight) => {
+  // 智能寻找不重叠的空闲槽位坐标（精准分区：1是画图区，2是写公式区，彻底解决重叠冲突）
+  const findNextAvailablePosition = useCallback((elemWidth, elemHeight, zone = 'draw') => {
     const container = containerRef.current;
     const containerW = container ? container.clientWidth : 900;
     const containerH = container ? container.clientHeight : 600;
-    const pad = 24;
-    const startX = 30;
-    const startY = 30;
+    const pad = 16;
+    const headerOffset = 48; // 给顶部区域标识留出空间
 
-    if (!elements || elements.length === 0) {
-      return { x: startX, y: startY };
+    const midX = Math.floor(containerW / 2);
+    const isFormula = zone === 'formula';
+
+    // 1. 分区坐标范围约束：
+    // 画图区 (1. 画图)：[18, midX - 16]
+    // 写公式区 (2. 写公式)：[midX + 16, containerW - 18]
+    const zoneStartX = isFormula ? midX + 16 : 18;
+    const zoneEndX = isFormula ? containerW - 18 : midX - 16;
+    const availableZoneW = Math.max(zoneEndX - zoneStartX, 100);
+
+    // 找出当前属于该分区的全部已有元素
+    const zoneElements = elements.filter((el) => {
+      const elIsFormula = isElementFormula(el);
+      return isFormula ? elIsFormula : !elIsFormula;
+    });
+
+    if (zoneElements.length === 0) {
+      return { x: zoneStartX, y: headerOffset + 8 };
     }
 
-    // 1. 尝试紧随最后一个元素右侧水平排布
-    const last = elements[elements.length - 1];
-    const rightCandidateX = last.x + last.width + pad;
-    const rightCandidateY = last.y;
-
-    if (rightCandidateX + elemWidth <= containerW - pad) {
-      const collides = elements.some((el) => {
-        return (
-          rightCandidateX < el.x + el.width &&
-          rightCandidateX + elemWidth > el.x &&
-          rightCandidateY < el.y + el.height &&
-          rightCandidateY + elemHeight > el.y
-        );
-      });
-      if (!collides) {
-        return { x: rightCandidateX, y: rightCandidateY };
-      }
-    }
-
-    // 2. 水平排不下，换行到下一排：找到当前所有元素的最大底部
-    let maxBottom = 0;
-    elements.forEach((el) => {
+    // 2. 纵向堆叠：找到当前分区所有元素的最大底部
+    let maxBottom = headerOffset;
+    zoneElements.forEach((el) => {
       if (el.y + el.height > maxBottom) {
         maxBottom = el.y + el.height;
       }
     });
 
-    const nextRowY = maxBottom + pad;
-    if (nextRowY + elemHeight <= containerH + 300) {
-      return { x: startX, y: nextRowY };
+    const candidateY = maxBottom + pad;
+    if (candidateY + elemHeight <= containerH + 600) {
+      return { x: zoneStartX, y: candidateY };
     }
 
-    // 3. 兜底微偏移排列
+    // 3. 兜底微偏移排列（绝对限制在各自所属分区的 X 轴范围内，绝不越界重叠）
+    const last = zoneElements[zoneElements.length - 1];
     return {
-      x: Math.min((last.x + 36) % Math.max(containerW - elemWidth - pad, 100) + startX, containerW - elemWidth - pad),
-      y: (last.y + 36) % Math.max(containerH - elemHeight - pad, 100) + startY
+      x: Math.min(zoneStartX + ((last.x - zoneStartX + 24) % Math.max(availableZoneW - elemWidth, 40)), zoneEndX - elemWidth),
+      y: (last.y + 24) % Math.max(containerH - elemHeight, 100) + headerOffset
     };
   }, [elements]);
+
+  // 一键规整两大部分（1是画图区，2是写公式区），彻底消除重叠冲突！
+  const handleTidyAllElements = useCallback(() => {
+    const container = containerRef.current;
+    const containerW = container ? container.clientWidth : 900;
+    const midX = Math.floor(containerW / 2);
+    const headerOffset = 48;
+    const pad = 16;
+
+    let drawY = headerOffset;
+    let formulaY = headerOffset;
+
+    const newElements = elements.map((el) => {
+      const isFormula = isElementFormula(el);
+      if (isFormula) {
+        const x = midX + 16;
+        const y = formulaY;
+        const w = Math.min(el.width, containerW - midX - 36);
+        formulaY += el.height + pad;
+        return { ...el, x, y, width: w, zone: 'formula' };
+      } else {
+        const x = 18;
+        const y = drawY;
+        const w = Math.min(el.width, midX - 36);
+        drawY += el.height + pad;
+        return { ...el, x, y, width: w, zone: 'draw' };
+      }
+    });
+
+    setElements(newElements);
+    showToast('✨ 已将草稿纸一键规整：左侧画图，右侧写公式，彻底消除重叠！', 'success');
+  }, [elements, showToast]);
 
   // 更新图元坐标
   const handleUpdateElementPosition = useCallback((id, x, y) => {
@@ -1258,14 +1303,17 @@ export default function ScratchpadCanvas({
     }
   };
 
-  // 一键快捷抄入草稿纸（无需输入，直接落墨为画板图元与板书）
+  // 一键快捷抄入草稿纸（自动入驻 2. 写公式区，绝不与左侧图形重叠）
   const handleQuickWriteToBoard = useCallback((latexContent, labelText) => {
     const cleanText = latexContent.startsWith('$') ? latexContent : `$${latexContent}$`;
     const acts = [{ type: 'write', content: cleanText, color: brushColor || '#0f172a' }];
-    const elemWidth = Math.min(340, Math.max(260, (containerRef.current?.clientWidth || 700) - 40));
+
+    const containerW = containerRef.current?.clientWidth || 700;
+    const midX = Math.floor(containerW / 2);
+    const elemWidth = Math.min(340, Math.max(220, containerW - midX - 36));
     const lines = cleanText.split('\n');
     const elemHeight = Math.max(90, Math.min(260, lines.length * 32 + 55));
-    const pos = findNextAvailablePosition(elemWidth, elemHeight);
+    const pos = findNextAvailablePosition(elemWidth, elemHeight, 'formula');
 
     const newElem = {
       id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1275,6 +1323,7 @@ export default function ScratchpadCanvas({
       width: elemWidth,
       height: elemHeight,
       actions: acts,
+      zone: 'formula',
       createdAt: Date.now()
     };
 
@@ -1282,7 +1331,7 @@ export default function ScratchpadCanvas({
 
     // 同步追加到右侧板书笔记
     setBoardText((prev) => (prev ? `${prev}\n\n${cleanText}` : cleanText));
-    showToast(`已将「${labelText || cleanText}」一键抄入草稿纸！`, 'success');
+    showToast(`已将「${labelText || cleanText}」抄入【2. 写公式区】！`, 'success');
   }, [brushColor, findNextAvailablePosition, showToast]);
 
   // 点击胶囊快速追加到口述指令框
@@ -1340,14 +1389,11 @@ export default function ScratchpadCanvas({
         if (agentData.canvasActions && agentData.canvasActions.length > 0) {
           const acts = agentData.canvasActions;
           let elemTitle = '草稿演算图元';
-          let elemWidth = 320;
-          let elemHeight = 270;
 
           const hasPlot = acts.some(a => a.type === 'plot');
           const hasAxes = acts.some(a => a.type === 'axes');
           const hasShape = acts.some(a => a.type === 'shape');
           const hasWrite = acts.some(a => a.type === 'write');
-
           const isCircleAct = acts.some(
             (a) =>
               a.type === 'circle' ||
@@ -1357,20 +1403,31 @@ export default function ScratchpadCanvas({
                   String(a.shapeType || '').includes('圆')))
           );
 
+          // 核心判定：这是画图还是写公式？
+          const isDraw = hasPlot || hasAxes || hasShape || isCircleAct;
+          const targetZone = isDraw ? 'draw' : 'formula';
+
+          const containerW = containerRef.current?.clientWidth || 700;
+          const midX = Math.floor(containerW / 2);
+          const maxZoneW = Math.max(200, (isDraw ? midX : containerW - midX) - 36);
+
+          let elemWidth = Math.min(320, maxZoneW);
+          let elemHeight = 270;
+
           if (isCircleAct) {
             elemTitle = '⭕ 几何图形: 圆 O 与半径 r';
-            elemWidth = 280;
-            elemHeight = 260;
+            elemWidth = Math.min(270, maxZoneW);
+            elemHeight = 250;
           } else if (hasPlot) {
             const plotAct = acts.find((a) => a.type === 'plot');
             const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
             elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
-            elemWidth = 320;
-            elemHeight = 280;
+            elemWidth = Math.min(310, maxZoneW);
+            elemHeight = 270;
           } else if (hasAxes) {
             elemTitle = '📈 直角坐标系';
-            elemWidth = 320;
-            elemHeight = 280;
+            elemWidth = Math.min(300, maxZoneW);
+            elemHeight = 270;
           } else if (hasShape) {
             const shapeAct = acts.find((a) => a.type === 'shape');
             const shapeNameMap = {
@@ -1379,18 +1436,18 @@ export default function ScratchpadCanvas({
               triangle: '三角形'
             };
             elemTitle = `📐 几何图形: ${shapeNameMap[shapeAct?.shapeType] || '几何图形'}`;
-            elemWidth = 280;
-            elemHeight = 250;
+            elemWidth = Math.min(270, maxZoneW);
+            elemHeight = 240;
           } else if (hasWrite) {
             const writeAct = acts.find((a) => a.type === 'write');
             const lineCount = (writeAct?.content || '').split('\n').length;
             elemTitle = '📝 规范板书演算';
-            elemWidth = Math.min(360, (containerRef.current?.clientWidth || 700) - 60);
-            elemHeight = Math.max(130, Math.min(360, lineCount * 32 + 55));
+            elemWidth = Math.min(340, maxZoneW);
+            elemHeight = Math.max(120, Math.min(340, lineCount * 32 + 55));
           }
 
-          // 智能防重叠排版寻址
-          const pos = findNextAvailablePosition(elemWidth, elemHeight);
+          // 精准分区寻址（画图归 1 区，写公式归 2 区，0 重叠）
+          const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
 
           const newElem = {
             id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1400,6 +1457,7 @@ export default function ScratchpadCanvas({
             width: elemWidth,
             height: elemHeight,
             actions: acts,
+            zone: targetZone,
             createdAt: Date.now()
           };
 
@@ -1641,6 +1699,16 @@ export default function ScratchpadCanvas({
             </button>
             <button
               type="button"
+              onClick={handleTidyAllElements}
+              disabled={elements.length === 0}
+              className="px-2 py-0.5 rounded text-[11px] font-medium bg-surface-container-lowest hover:bg-surface-container border border-outline-variant/30 text-on-surface-variant hover:text-primary transition flex items-center gap-1 cursor-pointer disabled:opacity-30"
+              title="一键将草稿图元智能规整为：左侧画图，右侧写公式，彻底消除重叠"
+            >
+              <span className="material-symbols-outlined text-[14px] text-primary">auto_fix_normal</span>
+              <span className="hidden sm:inline">一键规整防重叠</span>
+            </button>
+            <button
+              type="button"
               onClick={handleDownload}
               className="p-1 rounded text-on-surface-variant hover:text-primary hover:bg-surface-container transition cursor-pointer"
               title="导出手绘草稿为图片"
@@ -1723,6 +1791,31 @@ export default function ScratchpadCanvas({
             backgroundSize: paperPattern === 'grid' ? '24px 24px' : paperPattern === 'lined' ? '100% 28px' : 'auto'
           }}
         >
+          {/* 草稿纸两大部分视觉分区标识：1是画图区，2是写公式区（彻底解决重叠） */}
+          <div className="absolute inset-0 pointer-events-none flex select-none z-10">
+            {/* 左半部分：1. 画图区 */}
+            <div className="w-1/2 h-full border-r-2 border-dashed border-primary/25 dark:border-primary/20 flex flex-col justify-between p-2.5">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-container-highest/85 backdrop-blur-xs text-[11px] font-bold text-primary w-fit border border-primary/20 shadow-2xs">
+                <span className="material-symbols-outlined text-[15px]">draw</span>
+                <span>1. 画图区 (手绘涂鸦 · 几何图形 · 函数曲线)</span>
+              </div>
+              <div className="text-[10px] text-outline/60 pl-1 font-mono">
+                📐 坐标系与几何图形自动归位于此
+              </div>
+            </div>
+
+            {/* 右半部分：2. 写公式区 */}
+            <div className="w-1/2 h-full flex flex-col justify-between p-2.5">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-container-highest/85 backdrop-blur-xs text-[11px] font-bold text-secondary w-fit border border-secondary/20 shadow-2xs">
+                <span className="material-symbols-outlined text-[15px]">functions</span>
+                <span>2. 写公式区 (核心公式 · 展开通式 · 步骤板书)</span>
+              </div>
+              <div className="text-[10px] text-outline/60 pl-1 font-mono">
+                📝 公式板书自动排布在此，绝不与图形重叠
+              </div>
+            </div>
+          </div>
+
           {/* 底层手绘涂鸦 Canvas */}
           <canvas
             ref={canvasRef}
