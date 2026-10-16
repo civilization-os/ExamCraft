@@ -874,8 +874,63 @@ export default function ScratchpadCanvas({
           ctx.fillText(formattedLabel, cx + 45, cy - 60);
         }
 
+      } else if (
+        act.type === 'circle' ||
+        (act.type === 'shape' && (
+          act.shapeType === 'circle' ||
+          act.shapeType === 'round' ||
+          act.shape === 'circle' ||
+          String(act.shapeType || '').includes('圆')
+        ))
+      ) {
+        // 4.1 绘制标准考场几何圆（包含实心圆心点 O 与带端点的半径射线 r）
+        ctx.strokeStyle = act.color || '#047857';
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        const r = Math.min(width, height) * 0.32; // 饱满居中的半径（约 65px）
+
+        // 1. 绘制圆周
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 2. 绘制圆心实心小黑点
+        ctx.fillStyle = act.color || '#047857';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 3. 绘制半径线段（斜向上 30° 角，优雅引向圆周）
+        const angle = -Math.PI / 6;
+        const edgeX = cx + r * Math.cos(angle);
+        const edgeY = cy + r * Math.sin(angle);
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(edgeX, edgeY);
+        ctx.stroke();
+
+        // 4. 半径与圆周交点端点
+        ctx.beginPath();
+        ctx.arc(edgeX, edgeY, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 5. 标注圆心 O（圆心点左下侧）
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'italic bold 15px "KaTeX_Math", "Times New Roman", serif';
+        ctx.fillText(act.labels?.[0] || 'O', cx - 18, cy + 18);
+
+        // 6. 标注半径 r（线段斜上方居中）
+        const midX = (cx + edgeX) / 2;
+        const midY = (cy + edgeY) / 2;
+        ctx.fillStyle = act.color || '#047857';
+        ctx.font = 'italic 700 16px "KaTeX_Math", "Cambria Math", serif';
+        ctx.fillText(act.labels?.[1] || 'r', midX - 6, midY - 8);
+
       } else if (act.type === 'shape') {
-        // 4. 绘制几何图形
+        // 4.2 绘制其他几何图形（三角形、直角三角形）
         ctx.strokeStyle = act.color || '#047857';
         ctx.lineWidth = 2.2;
         ctx.lineCap = 'round';
@@ -904,24 +959,6 @@ export default function ScratchpadCanvas({
           ctx.fillText(act.labels?.[0] || 'A', originX - 16, originY);
           ctx.fillText(act.labels?.[1] || 'C', originX - 16, originY + 105);
           ctx.fillText(act.labels?.[2] || 'B', originX + 125, originY + 105);
-
-        } else if (act.shapeType === 'circle') {
-          const r = 45;
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.stroke();
-
-          ctx.setLineDash([4, 4]);
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.lineTo(cx + r, cy);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          ctx.fillStyle = act.color || '#047857';
-          ctx.font = 'bold 13px serif';
-          ctx.fillText('O', cx - 12, cy - 4);
-          ctx.fillText('r', cx + 18, cy - 6);
         } else {
           // 一般三角形
           ctx.beginPath();
@@ -1080,8 +1117,21 @@ export default function ScratchpadCanvas({
           const hasShape = acts.some(a => a.type === 'shape');
           const hasWrite = acts.some(a => a.type === 'write');
 
-          if (hasPlot) {
-            const plotAct = acts.find(a => a.type === 'plot');
+          const isCircleAct = acts.some(
+            (a) =>
+              a.type === 'circle' ||
+              (a.type === 'shape' &&
+                (a.shapeType === 'circle' ||
+                  a.shapeType === 'round' ||
+                  String(a.shapeType || '').includes('圆')))
+          );
+
+          if (isCircleAct) {
+            elemTitle = '⭕ 几何图形: 圆 O 与半径 r';
+            elemWidth = 280;
+            elemHeight = 260;
+          } else if (hasPlot) {
+            const plotAct = acts.find((a) => a.type === 'plot');
             const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
             elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
             elemWidth = 320;
@@ -1091,7 +1141,7 @@ export default function ScratchpadCanvas({
             elemWidth = 320;
             elemHeight = 280;
           } else if (hasShape) {
-            const shapeAct = acts.find(a => a.type === 'shape');
+            const shapeAct = acts.find((a) => a.type === 'shape');
             const shapeNameMap = {
               right_triangle: '直角三角形',
               circle: '圆形与半径',
@@ -1101,7 +1151,7 @@ export default function ScratchpadCanvas({
             elemWidth = 280;
             elemHeight = 250;
           } else if (hasWrite) {
-            const writeAct = acts.find(a => a.type === 'write');
+            const writeAct = acts.find((a) => a.type === 'write');
             const lineCount = (writeAct?.content || '').split('\n').length;
             elemTitle = '📝 规范板书演算';
             elemWidth = Math.min(360, (containerRef.current?.clientWidth || 700) - 60);
