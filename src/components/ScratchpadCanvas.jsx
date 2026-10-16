@@ -245,50 +245,66 @@ export const extractFormulasFromProblem = (questionData, contextProblem = '') =>
     });
   }
 
-  const combinedText = textPool.join('\n');
+  // 1. 提取题干中的已知公式（严格白纸黑字已知式，归类为 'core'：题干公式）
+  const stemPool = [];
+  if (contextProblem) stemPool.push(contextProblem);
+  if (questionData?.prompt) stemPool.push(questionData.prompt);
+  if (questionData?.mathExpression) stemPool.push(questionData.mathExpression);
+  const stemText = stemPool.join('\n');
 
-  // 2. 提取 $...$ 与 $$...$$
+  // 提取 $...$ 与 $$...$$
   const dollarRegex = /\$\$([\s\S]+?)\$\$|\$([^\$]+?)\$/g;
   let match;
-  while ((match = dollarRegex.exec(combinedText)) !== null) {
+  while ((match = dollarRegex.exec(stemText)) !== null) {
     const raw = match[1] || match[2];
     if (raw) addChip(raw, 'core');
   }
 
-  // 3. 提取 \( ... \) 与 \[ ... \]
+  // 提取 \( ... \) 与 \[ ... \]
   const slashRegex = /\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g;
-  while ((match = slashRegex.exec(combinedText)) !== null) {
+  while ((match = slashRegex.exec(stemText)) !== null) {
     const raw = match[1] || match[2];
     if (raw) addChip(raw, 'core');
   }
 
-  // 4. 针对典型高等数学/微积分考点的展开通式与等价无穷小自动联想
-  if (combinedText.includes('arcsin') || combinedText.includes('\\arcsin')) {
-    addChip('\\arcsin x = x + \\frac{1}{6}x^3 + o(x^3)', 'expansion', 'arcsin 展开: x + ⅙x³');
-  }
-  if (combinedText.includes('sqrt[3]') || combinedText.includes('\\sqrt[3]') || combinedText.includes('1+x^2')) {
-    addChip('\\sqrt[3]{1+x^2} - 1 \\sim \\frac{1}{3}x^2', 'expansion', '立方根等价: ⅓x²');
-  }
-  if (combinedText.includes('sin') || combinedText.includes('\\sin')) {
-    addChip('\\sin x = x - \\frac{1}{6}x^3 + o(x^3)', 'expansion', 'sin 展开: x - ⅙x³');
-  }
-  if (combinedText.includes('cos') || combinedText.includes('\\cos')) {
-    addChip('1 - \\cos x \\sim \\frac{1}{2}x^2', 'expansion', '1 - cos x 等价: ½x²');
-  }
-  if (combinedText.includes('tan') || combinedText.includes('\\tan')) {
-    addChip('\\tan x \\sim x', 'expansion', 'tan x 等价: x');
-  }
-  if (combinedText.includes('ln') || combinedText.includes('\\ln')) {
-    addChip('\\ln(1+x) \\sim x', 'expansion', 'ln(1+x) 等价: x');
-  }
-  if (combinedText.includes('e^') || combinedText.includes('e^{')) {
-    addChip('e^x - 1 \\sim x', 'expansion', 'eˣ - 1 等价: x');
-  }
-  if (combinedText.includes('等价无穷小') || combinedText.includes('\\to 0') || combinedText.includes('->0')) {
+  // 提取题干中原样出现的极限自变量趋向（如 x -> 0，原样提取，绝不补充任何题外定理与展开式）
+  if (stemText.includes('x \\to 0') || stemText.includes('x\\to 0') || stemText.includes('x -> 0') || stemText.includes('x->0')) {
     addChip('x \\to 0', 'core', '极限趋向 x → 0');
-    addChip('\\lim_{x \\to 0} \\frac{f(x)}{g(x)} = 1', 'setup', '等价无穷小定义式');
   }
 
+  // 2. 提取选项中的参数与表达式（归类为 'option'：选项参数）
+  if (Array.isArray(questionData?.options)) {
+    questionData.options.forEach((opt) => {
+      if (!opt || !opt.text) return;
+      const optStr = String(opt.text).trim();
+      let optMatched = false;
+      const optDollarRegex = /\$\$([\s\S]+?)\$\$|\$([^\$]+?)\$/g;
+      while ((match = optDollarRegex.exec(optStr)) !== null) {
+        const raw = match[1] || match[2];
+        if (raw) {
+          addChip(raw, 'option');
+          optMatched = true;
+        }
+      }
+      const optSlashRegex = /\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g;
+      while ((match = optSlashRegex.exec(optStr)) !== null) {
+        const raw = match[1] || match[2];
+        if (raw) {
+          addChip(raw, 'option');
+          optMatched = true;
+        }
+      }
+      // 若选项为纯文本赋值形式（如 A. a = 1/6, b = -1）
+      if (!optMatched) {
+        const cleanOpt = optStr.replace(/^[A-D][\.\、\:\s]*/, '').trim();
+        if (cleanOpt && /[a-zA-Z]\s*=/.test(cleanOpt)) {
+          addChip(cleanOpt, 'option');
+        }
+      }
+    });
+  }
+
+  // 坚决杜绝任何泰勒展开式、等价无穷小自动联想，100% 局限于试题原文，严守考场学术诚信防作弊！
   return chips;
 };
 
@@ -458,7 +474,7 @@ export default function ScratchpadCanvas({
     return extractFormulasFromProblem(questionData, contextProblem);
   });
   const [isExtractingChips, setIsExtractingChips] = useState(false);
-  const [chipFilter, setChipFilter] = useState('all'); // 'all' | 'core' | 'expansion' | 'setup'
+  const [chipFilter, setChipFilter] = useState('all'); // 'all' | 'core' | 'option'
 
   // 当切换题目或上下文变更时，实时重新本地提取本题的公式胶囊
   useEffect(() => {
@@ -1887,8 +1903,8 @@ export default function ScratchpadCanvas({
                       <div className="hidden sm:flex items-center gap-0.5 text-[10px] bg-surface-container p-0.5 rounded-md">
                         {[
                           { id: 'all', label: '全部' },
-                          { id: 'core', label: '核心式' },
-                          { id: 'expansion', label: '展开' }
+                          { id: 'core', label: '题干公式' },
+                          { id: 'option', label: '选项参数' }
                         ].map((tab) => (
                           <button
                             key={tab.id}
@@ -1906,18 +1922,18 @@ export default function ScratchpadCanvas({
                       </div>
                     )}
 
-                    {/* AI 智能提取核心式按钮 */}
+                    {/* AI 智能提取已知式按钮 */}
                     <button
                       type="button"
                       onClick={handleAiExtractChips}
                       disabled={isExtractingChips || isAgentRunning}
                       className="px-2 py-0.5 rounded-md bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-medium border border-primary/20 transition flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                      title="由 AI 深度解析本题题干，智能提取核心子式、展开通式与中间设项"
+                      title="由 AI 解析本题题干，原样提取题干中出现的已知式与选项参数（严守防作弊，严禁提供题外定理）"
                     >
                       <span className={`material-symbols-outlined text-[13px] ${isExtractingChips ? 'animate-spin' : ''}`}>
                         {isExtractingChips ? 'sync' : 'auto_awesome'}
                       </span>
-                      <span>{isExtractingChips ? 'AI 提取中...' : '✨ AI 提取核心式'}</span>
+                      <span>{isExtractingChips ? 'AI 提取中...' : '✨ AI 提取已知式'}</span>
                     </button>
                   </div>
                 </div>
@@ -1927,20 +1943,21 @@ export default function ScratchpadCanvas({
                   {filteredChips.length === 0 ? (
                     <div className="text-[11px] text-outline py-1 px-1 flex items-center gap-1">
                       <span className="material-symbols-outlined text-[13px]">info</span>
-                      <span>题干未检测到公式，可点击右上角「✨ AI 提取核心式」</span>
+                      <span>题干未检测到公式，可点击右上角「✨ AI 提取已知式」</span>
                     </div>
                   ) : (
                     filteredChips.map((chip) => {
                       const isAi = chip.id?.startsWith('chip_ai');
-                      const isExpansion = chip.category === 'expansion';
+                      const isOption = chip.category === 'option';
+                      const isCore = chip.category === 'core';
                       return (
                         <div
                           key={chip.id}
                           className={`group/chip inline-flex items-center rounded-md border text-[11px] transition shadow-2xs ${
                             isAi
                               ? 'border-purple-300 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20'
-                              : isExpansion
-                              ? 'border-amber-300/60 dark:border-amber-800/60 bg-amber-50/40 dark:bg-amber-950/20'
+                              : isOption
+                              ? 'border-blue-300/60 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-950/20'
                               : 'border-outline-variant/40 bg-surface-container-lowest hover:border-primary/50'
                           }`}
                         >
@@ -1957,9 +1974,14 @@ export default function ScratchpadCanvas({
                                 AI
                               </span>
                             )}
-                            {isExpansion && !isAi && (
-                              <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 font-sans font-bold">
-                                展开
+                            {isOption && !isAi && (
+                              <span className="text-[9px] px-1 rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 font-sans font-bold">
+                                选项
+                              </span>
+                            )}
+                            {isCore && !isAi && (
+                              <span className="text-[9px] px-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-sans font-bold">
+                                题干
                               </span>
                             )}
                             <span className="truncate">{formatMathExpression(chip.label || chip.latex)}</span>

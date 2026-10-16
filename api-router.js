@@ -1348,38 +1348,22 @@ export function extractDeterministicChips(text = '') {
     if (expr) addChip(expr, 'core');
   }
 
-  // 3. 高等数学/微积分典型展开与等价代换智能联想
-  if (text.includes('arcsin') || text.includes('\\arcsin')) {
-    addChip('\\arcsin x = x + \\frac{1}{6}x^3 + o(x^3)', 'expansion', 'arcsin 展开: x + ⅙x³');
-  }
-  if (text.includes('sqrt[3]') || text.includes('\\sqrt[3]') || text.includes('1+x^2')) {
-    addChip('\\sqrt[3]{1+x^2} - 1 \\sim \\frac{1}{3}x^2', 'expansion', '立方根等价: ⅓x²');
-  }
-  if (text.includes('sin') || text.includes('\\sin')) {
-    addChip('\\sin x = x - \\frac{1}{6}x^3 + o(x^3)', 'expansion', 'sin 展开: x - ⅙x³');
-  }
-  if (text.includes('cos') || text.includes('\\cos')) {
-    addChip('1 - \\cos x \\sim \\frac{1}{2}x^2', 'expansion', '1 - cos x 等价: ½x²');
-  }
-  if (text.includes('tan') || text.includes('\\tan')) {
-    addChip('\\tan x \\sim x', 'expansion', 'tan x 等价: x');
-  }
-  if (text.includes('ln') || text.includes('\\ln')) {
-    addChip('\\ln(1+x) \\sim x', 'expansion', 'ln(1+x) 等价: x');
-  }
-  if (text.includes('e^') || text.includes('e^{')) {
-    addChip('e^x - 1 \\sim x', 'expansion', 'eˣ - 1 等价: x');
-  }
-  if (text.includes('等价无穷小') || text.includes('\\to 0') || text.includes('->0')) {
-    addChip('x \\to 0', 'core', '极限趋向 x → 0');
-    addChip('\\lim_{x \\to 0} \\frac{f(x)}{g(x)} = 1', 'setup', '等价无穷小定义式');
+  // 3. 提取选项中白纸黑字的参数（如 a = 1/6, b = -1，归类为 option）
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const cleanLine = line.trim();
+    if (/[A-D][\.\、\:\s]+[a-zA-Z]\s*=/.test(cleanLine) || /^[a-zA-Z]\s*=\s*[-0-9\/]+/.test(cleanLine)) {
+      const stripped = cleanLine.replace(/^[A-D][\.\、\:\s]*/, '').trim();
+      if (stripped) addChip(stripped, 'option');
+    }
   }
 
+  // 严禁包含任何题外定理、泰勒展开式或等价无穷小自动联想，100% 杜绝作弊！
   return chips;
 }
 
 // POST /api/model/extract-math-chips
-// 考场草稿纸专属：从当前试题深度提取核心公式、已知条件式、展开通式与换元设项
+// 考场草稿纸专属：从当前试题严格原样提取已知公式与选项参数（严禁透题作弊）
 apiRouter.post('/model/extract-math-chips', async (req, res) => {
   const { prompt: questionPrompt, mathExpression, options, num } = req.body;
   const fullText = [
@@ -1405,17 +1389,21 @@ apiRouter.post('/model/extract-math-chips', async (req, res) => {
 
   try {
     const model = createChatModel(currentConfig);
-    const systemPrompt = `你是一位精通微积分、线性代数与高等数学命题规律的【考场草稿演算快捷输入提取专家】。
-考生正在草稿纸上演算本题，需要将题目中的关键数学式快速输入或抄录到画板上。
+    const systemPrompt = `你是一位恪守考场学术诚信与防作弊规范的【考场草稿公式快捷录入助手】。
+考生正在草稿纸上演算本题，需要将题目中【已经白纸黑字写出的已知公式、极限表达式、未知数与选项参数】快速输入或抄录到画板上，免去打字与排版负担。
 
-【绝对铁律与学术诚信红线】：
-1. 严禁代算代答！严禁在返回结果中给出本题的最终答案（如 a=1/6, b=-1 等结论）！
-2. 只能提取题目中已有的已知式、设项、展开通式或等价代换定义式，以便考生随手选用作为板书草稿！
+【严正警告：防作弊与学术诚信绝对铁律（违者严惩）】：
+1. 坚决杜绝任何作弊与透题行为！严禁提示解题步骤！
+2. 严禁提供任何题外公式、定理、结论、外部公式展开！
+3. 严禁提供任何泰勒展开式（如 arcsin x 展开、sin x 展开、cos x 展开、e^x 展开等，除非题目原文题干中明确给出了该公式）！
+4. 严禁提供任何等价无穷小代换公式（如 (1+x)^a - 1 ~ ax 等）！
+5. 严禁提供任何导数、微分、积分公式表！
+6. 严禁代算代答，严禁给出解题过程或最终答案！
+7. 你的任务 100% 严格局限于【从当前试题的题干和选项中，原样提取已经白纸黑字出现的数学表达式与参数】！
 
 【提取类别规范】：
-1. core: 题干核心已知式与子式（如 $ax^2 + bx + \\arcsin x$, $\\sqrt[3]{1+x^2}-1$, $x \\to 0$）
-2. expansion: 常用的泰勒展开通式、麦克劳林级数、等价无穷小代换公式（如 $\\arcsin x = x + \\frac{1}{6}x^3 + o(x^3)$, $(1+u)^\\alpha - 1 \\sim \\alpha u$）
-3. setup: 常规设项与等价关系式（如 $\\lim_{x \\to 0} \\frac{ax^2 + bx + \\arcsin x}{\\sqrt[3]{1+x^2}-1} = 1$, 设 $u = x^2$）
+1. core: 题干中白纸黑字明确写出的已知公式、表达式、极限式（例如题干里写出的 $ax^2 + bx + \\arcsin x$, $\\sqrt[3]{1+x^2}-1$, $x \\to 0$）
+2. option: 题目各选项中出现的参数或候选项（例如 $a = \\frac{1}{6}, b = -1$）
 
 直接返回纯合法 JSON 对象，格式如下：
 {
@@ -1433,7 +1421,7 @@ apiRouter.post('/model/extract-math-chips', async (req, res) => {
     const userPrompt = `当前考题信息（第 ${num || '当前'} 题）：
 ${fullText}
 
-请为考生的草稿纸快速提取 4 ~ 8 个最核心、最实用的快捷输入公式胶囊：`;
+请从上方题目原文中，原样提取 3 ~ 6 个题干中出现的已知式和选项参数胶囊（绝对禁止提供任何外部展开式或定理提示）：`;
 
     const response = await model.invoke([
       { role: 'system', content: systemPrompt },
