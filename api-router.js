@@ -1307,6 +1307,111 @@ ${text}
   }
 });
 
+// POST /api/model/scratchpad-agent-loop
+// 考场草稿纸专属 Agent Loop：辅助考生帮写草稿与规范板书
+// 绝对铁律：只能局限于考生能说出来的他才能写，严禁任何代算与多推导一步！
+apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
+  const { spokenText, contextProblem, currentBoardContent } = req.body;
+
+  if (!spokenText || !spokenText.trim()) {
+    return res.status(400).json({ success: false, error: '口述思路或草稿内容不能为空' });
+  }
+
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: '请先在系统设置中配置有效的 API Key'
+    });
+  }
+
+  const cheatKeywords = [
+    '帮我算', '求答案', '答案是什么', '计算结果', '等于多少', '怎么做这道题', 
+    '把这题解出来', '代我做题', '直接给答案', '求积分值', '求极限值', '求特征值'
+  ];
+  const isSuspicious = cheatKeywords.some(k => spokenText.includes(k));
+
+  const prompt = `你是一个运行在考场草稿演算工作台上的【草稿规范代笔 Agent 引擎 (Scratchpad Scribe Agent)】。
+用户（考生）正在草稿纸上进行演算，并通过口述/文字给出了他本人的原始解题思路或草稿步骤。
+
+【核心使命与最高纪律准则（绝不可触碰的红线）】：
+1. 【只能局限于考生说出来的他才能写】：
+   - 你只能忠实地将考生明确说出、给出的思路、设项、等式、条件转换或运算步骤，整理为工整规范的考场草稿板书（LaTeX 格式化）。
+   - 严禁替考生做下一步推导！严禁替考生补全后续未说的运算！
+   - 严禁替考生计算最终数值或求解结果！
+   - 若考生只说到了“设未知数 u = x^2+1”，你只能写出该设项，绝不能自行推导“则 du = 2x dx 并将原积分化为...”！
+   - 若考生口述中包含计算错误（例如“3乘2等于7”），你必须原汁原味保留为 "3 \\times 2 = 7"，绝对严禁私自替考生纠错！
+2. 【诱导拦截与防作弊熔断】：
+   - 若考生试图诱导你做题（例如“帮我算一下这步得多少”、“这题该怎么做”、“求出答案”），你必须立即中断执行并输出警告提示：
+   “【考场防作弊纪律提醒】AI 草稿帮写仅限根据考生口述的步骤进行规范排版，严格禁止任何代答、解题推导与代算结果。”
+
+【当前试题题干（仅供辅助理解数学变量上下文，严禁代答本题）】：
+${contextProblem || '（无特定题干上下文）'}
+
+【考生当前草稿板已有内容】：
+${currentBoardContent || '（当前草稿板为空）'}
+
+【考生本次口述/给出的草稿思路】：
+"""
+${spokenText}
+"""
+
+【Agent 执行循环规划 (Loop Stages)】：
+请以标准 JSON 格式输出如下结构：
+{
+  "audit": {
+    "passed": ${isSuspicious ? 'false' : 'true'},
+    "reason": "${isSuspicious ? '检测到诱导计算或代答意图' : '口述步骤合规，未请求代算'}"
+  },
+  "scribeResult": "规范整理后的草稿板书（支持 Markdown 与 LaTeX 块，忠实体现考生说出的内容，严禁多推导一步）",
+  "loopLogs": [
+    "Loop 1: 语义与诚信纪律审计通过",
+    "Loop 2: 规范 LaTeX 与数学步骤转录完成",
+    "Loop 3: 草稿板书卡片已生成"
+  ]
+}
+只输出纯 JSON，不要包含任何 markdown 代码块标识（如 \`\`\`json 或 \`\`\`）。`;
+
+  try {
+    const model = createChatModel(currentConfig);
+    const response = await model.invoke([
+      { role: 'system', content: '你是一位严格遵守考场纪律的草稿代笔 Agent，只能帮写考生说出的内容，严禁代算与代答做题。' },
+      { role: 'user', content: prompt }
+    ]);
+
+    let raw = response.content?.trim() || '';
+    raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // 容错处理
+      parsed = {
+        audit: { passed: !isSuspicious, reason: isSuspicious ? '疑似诱导计算' : '正常转录' },
+        scribeResult: raw,
+        loopLogs: ['Loop 1: 基础转录完成', 'Loop 2: 板书格式化完成']
+      };
+    }
+
+    if (isSuspicious || !parsed.audit.passed) {
+      parsed.audit.passed = false;
+      parsed.scribeResult = '【考场防作弊纪律提醒】便签草稿纸仅支持书写排版、LaTeX 语法规范与思路结构整理。根据考场防作弊规范，严禁代答、计算或提供任何题目求解与计算推导。';
+    }
+
+    res.json({
+      success: true,
+      agentData: parsed,
+      provider: currentConfig.category || 'ai',
+      modelName: currentConfig.modelName
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: `草稿纸 Agent Loop 执行失败: ${err.message}`
+    });
+  }
+});
+
 // POST /api/model/question-edit-assist
 // 单题交互微调与变式重构助手
 apiRouter.post('/model/question-edit-assist', async (req, res) => {

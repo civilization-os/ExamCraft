@@ -41,70 +41,20 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
     }
   }, [currentQIndex, currentQ]);
 
-  // Scratchpad toggle & persistent local storage
+  // Unified Exam Toast State
+  const [examToast, setExamToast] = useState({ show: false, message: '', type: 'info' });
+  const showExamToast = (message, type = 'info') => {
+    setExamToast({ show: true, message, type });
+    setTimeout(() => {
+      setExamToast((prev) => ({ ...prev, show: false }));
+    }, 3200);
+  };
+
+  // Scratchpad toggle & persistent storage keys
   const scratchpadStorageKey = activePaper?.id ? `examcraft_scratchpad_${activePaper.id}` : 'examcraft_scratchpad_default';
   const scratchpadCanvasStorageKey = activePaper?.id ? `examcraft_scratchpad_canvas_${activePaper.id}` : 'examcraft_scratchpad_canvas_default';
   const [showScratchpad, setShowScratchpad] = useState(false);
-  const [scratchpadTab, setScratchpadTab] = useState('canvas'); // 'canvas' (手写涂鸦板) | 'text' (文本公式笔记)
-  const [scratchpadNote, setScratchpadNote] = useState(() => {
-    try {
-      const key = activePaper?.id ? `examcraft_scratchpad_${activePaper.id}` : 'examcraft_scratchpad_default';
-      return localStorage.getItem(key) || '';
-    } catch {
-      return '';
-    }
-  });
-  const [lastSavedTime, setLastSavedTime] = useState('');
-  const [isScratchpadAiLoading, setIsScratchpadAiLoading] = useState(false);
-  const [scratchpadPreviewMode, setScratchpadPreviewMode] = useState(false);
-  const [scratchpadAiMessage, setScratchpadAiMessage] = useState('');
   const [isScratchpadMaximized, setIsScratchpadMaximized] = useState(false);
-  const [scratchpadFontSize, setScratchpadFontSize] = useState('md'); // 'sm' | 'md' | 'lg'
-
-  // Auto-save scratchpad to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(scratchpadStorageKey, scratchpadNote);
-      const now = new Date();
-      setLastSavedTime(
-        `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-      );
-    } catch (e) {
-      console.warn('Scratchpad autosave error:', e);
-    }
-  }, [scratchpadNote, scratchpadStorageKey]);
-
-  // AI Assistant for Scratchpad (Strictly non-calculating / writing assistant only)
-  const handleScratchpadAssist = async (action, customInstruction = '') => {
-    if (!scratchpadNote.trim()) {
-      setScratchpadAiMessage('请先在草稿纸中输入草稿文字或算式速记。');
-      return;
-    }
-    setIsScratchpadAiLoading(true);
-    setScratchpadAiMessage('');
-    try {
-      const res = await fetch('/api/model/scratchpad-assist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: scratchpadNote,
-          action,
-          customInstruction
-        })
-      });
-      const data = await res.json();
-      if (data.success && data.assistedText) {
-        setScratchpadNote(data.assistedText);
-        setScratchpadAiMessage('✨ AI 已规整草稿书写排版（已严格遵循考场纪律，屏蔽一切计算代答）');
-      } else {
-        setScratchpadAiMessage(data.error || 'AI 辅助失败，请检查 API Key 配置。');
-      }
-    } catch (err) {
-      setScratchpadAiMessage(`AI 辅助异常: ${err.message}`);
-    } finally {
-      setIsScratchpadAiLoading(false);
-    }
-  };
 
 
   // Submit Modal
@@ -149,7 +99,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
   // Call real model_core AI scribe
   const handleTriggerAIScribe = async () => {
     if (!candidateDraft.trim()) {
-      alert('请先在左侧输入考生的速记或草稿内容。');
+      showExamToast('请先在左侧输入考生的速记或草稿内容。', 'warn');
       return;
     }
     setIsScribing(true);
@@ -168,11 +118,12 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
         if (data.data.stepScores && data.data.stepScores.length > 0) {
           setStepScores(data.data.stepScores);
         }
+        showExamToast('✨ AI 规范转录完成 (已忠实保留您的推导演算)', 'success');
       } else {
-        alert(data.error || '未检测到配置的 API Key，已保留当前预设规范排版。请前往「系统设置」输入 API Key。');
+        showExamToast(data.error || '未检测到配置的 API Key，已保留当前预设规范排版。请前往「系统设置」输入 API Key。', 'warn');
       }
     } catch (err) {
-      alert(`AI 代笔调用失败: ${err.message}`);
+      showExamToast(`AI 代笔调用失败: ${err.message}`, 'warn');
     } finally {
       setIsScribing(false);
     }
@@ -538,7 +489,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
             <div className="flex items-center space-x-2">
               <button
                 type="button"
-                onClick={() => alert(`已为题号 ${currentQ.num} 添加考场备忘笔记。`)}
+                onClick={() => showExamToast(`已为题号 ${currentQ.num} 开启备忘笔记标记`, 'info')}
                 className="inline-flex items-center space-x-1 px-2 py-1 text-on-surface-variant hover:text-primary text-label-sm font-label-sm rounded hover:bg-surface-container-low transition cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[16px]">bookmark_add</span>
@@ -855,7 +806,7 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={() => alert('手写草稿照片已上传并完成梯形倾斜校正与公式提取！')}
+                      onChange={() => showExamToast('手写草稿照片已上传并完成梯形倾斜校正与公式提取！', 'success')}
                       className="hidden"
                     />
                     <div className="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center text-primary group-hover:scale-110 transition">
@@ -883,7 +834,27 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
         )}
       </div>
 
-      {/* Floating Scratchpad Drawer / Fullscreen Workbench */}
+      {/* Global Unified Exam Toast Notification */}
+      {examToast.show && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-60 animate-in fade-in slide-in-from-top-3 duration-200">
+          <div
+            className={`px-4 py-2 rounded-full text-[13px] font-medium shadow-xl flex items-center gap-2 backdrop-blur-md border ${
+              examToast.type === 'success'
+                ? 'bg-primary text-on-primary border-primary/20'
+                : examToast.type === 'warn'
+                ? 'bg-amber-600 text-white border-amber-500'
+                : 'bg-on-surface text-surface border-outline-variant/30'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[17px]">
+              {examToast.type === 'success' ? 'check_circle' : examToast.type === 'warn' ? 'warning' : 'info'}
+            </span>
+            <span>{examToast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Unified Integrated Scratchpad Workbench (Hand-drawing Canvas + Notes + Agent Loop) */}
       {showScratchpad && (
         <>
           {/* Backdrop when maximized */}
@@ -895,294 +866,25 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
           )}
 
           <div
-            className={`bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant/40 p-space-md z-50 flex flex-col gap-2.5 transition-all duration-200 ${
+            className={`z-50 shadow-2xl transition-all duration-200 ${
               isScratchpadMaximized
-                ? 'fixed inset-2 sm:inset-4 lg:inset-8 animate-in zoom-in-95'
-                : 'fixed bottom-5 right-5 w-[460px] sm:w-[580px] h-[560px] max-w-[96vw] max-h-[88vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
+                ? 'fixed inset-2 sm:inset-4 lg:inset-6 animate-in zoom-in-95'
+                : 'fixed bottom-5 right-5 w-[760px] max-w-[96vw] h-[580px] max-h-[88vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
             }`}
           >
-            {/* Header: Dual Mode Switcher & Window Controls */}
-            <div className="flex items-center justify-between pb-2 border-b border-surface-container shrink-0">
-              <div className="flex items-center gap-2">
-                {/* Mode Selector Tabs: Canvas vs Text */}
-                <div className="flex items-center bg-surface-container-low p-0.5 rounded-lg border border-outline-variant/30">
-                  <button
-                    type="button"
-                    onClick={() => setScratchpadTab('canvas')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] font-semibold transition cursor-pointer ${
-                      scratchpadTab === 'canvas'
-                        ? 'bg-primary text-on-primary shadow-xs'
-                        : 'text-on-surface-variant hover:text-on-surface'
-                    }`}
-                    title="自由手写涂鸦板（支持鼠标/触笔手绘、橡皮擦、坐标方格纸）"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">draw</span>
-                    <span>手绘涂鸦板</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScratchpadTab('text')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] font-semibold transition cursor-pointer ${
-                      scratchpadTab === 'text'
-                        ? 'bg-primary text-on-primary shadow-xs'
-                        : 'text-on-surface-variant hover:text-on-surface'
-                    }`}
-                    title="文本公式笔记（支持 Markdown / LaTeX 实时渲染与 AI 帮写排版）"
-                  >
-                    <span className="material-symbols-outlined text-[15px]">edit_note</span>
-                    <span>文本公式笔记</span>
-                  </button>
-                </div>
-
-                {scratchpadTab === 'text' && lastSavedTime && (
-                  <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-secondary-container/30 text-secondary text-[11px] font-mono font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"></span>
-                    <span>{lastSavedTime} 已暂存</span>
-                  </span>
-                )}
-                {!isScratchpadMaximized && (
-                  <span className="text-[10px] text-outline hidden md:inline font-label-mono">
-                    (支持右下角拉伸放大)
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                {scratchpadTab === 'text' && (
-                  <>
-                    {/* Font Size Toggle */}
-                    <button
-                      type="button"
-                      onClick={() => setScratchpadFontSize((f) => (f === 'sm' ? 'md' : f === 'md' ? 'lg' : 'sm'))}
-                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-surface-container hover:bg-surface-container-high text-on-surface transition cursor-pointer flex items-center gap-1"
-                      title={`当前字号: ${scratchpadFontSize === 'lg' ? '大字号 (17px)' : scratchpadFontSize === 'md' ? '标准 (15px)' : '紧凑 (13px)'}，点击切换`}
-                    >
-                      <span className="material-symbols-outlined text-[13px]">format_size</span>
-                      <span>{scratchpadFontSize === 'lg' ? '大字号' : scratchpadFontSize === 'md' ? '标准字' : '紧凑字'}</span>
-                    </button>
-
-                    {/* Preview / Edit Toggle (only in compact mode) */}
-                    {!isScratchpadMaximized && (
-                      <button
-                        type="button"
-                        onClick={() => setScratchpadPreviewMode(!scratchpadPreviewMode)}
-                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
-                          scratchpadPreviewMode
-                            ? 'bg-primary text-on-primary font-semibold'
-                            : 'bg-surface-container hover:bg-surface-container-high text-on-surface'
-                        }`}
-                        title="切换编辑/KaTeX高保真渲染"
-                      >
-                        {scratchpadPreviewMode ? '源码编辑' : 'KaTeX 预览'}
-                      </button>
-                    )}
-                  </>
-                )}
-
-                {/* Maximize / Restore Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setIsScratchpadMaximized(!isScratchpadMaximized)}
-                  className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition cursor-pointer"
-                  title={isScratchpadMaximized ? '还原为便签小窗' : '放大为全屏大画板'}
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {isScratchpadMaximized ? 'close_fullscreen' : 'open_in_full'}
-                  </span>
-                </button>
-
-                {/* Close Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsScratchpadMaximized(false);
-                    setShowScratchpad(false);
-                  }}
-                  className="text-outline hover:text-on-surface p-1 rounded hover:bg-surface-container cursor-pointer ml-0.5"
-                  title="收起草稿纸"
-                >
-                  <span className="material-symbols-outlined text-[18px]">close</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Anti-Cheating & Discipline Badge */}
-            <div className="px-2.5 py-1 rounded-lg bg-surface-container-low border border-outline-variant/25 text-[11px] text-on-surface-variant flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-1.5 text-secondary font-medium">
-                <span className="material-symbols-outlined text-[14px]">shield</span>
-                <span>考场纪律原则：可以让 AI 帮写（规范排版与 LaTeX），但绝不能帮算（严禁代解与计算代答）</span>
-              </div>
-              {scratchpadTab === 'text' && scratchpadNote && (
-                <span className="font-mono text-[10px] text-outline">
-                  {scratchpadNote.length} 字
-                </span>
-              )}
-            </div>
-
-            {/* AI Message / Guardrail Alert */}
-            {scratchpadAiMessage && (
-              <div className="p-2 rounded-lg bg-secondary-container/30 border border-secondary/20 text-[12px] text-secondary flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[15px]">info</span>
-                  <span>{scratchpadAiMessage}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setScratchpadAiMessage('')}
-                  className="text-on-surface-variant hover:text-on-surface cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[14px]">close</span>
-                </button>
-              </div>
-            )}
-
-            {/* Content Body: Flex-1 adaptive height */}
-            <div className="flex-1 min-h-0 flex flex-col">
-              {scratchpadTab === 'canvas' ? (
-                /* Mode 1: Hand-drawing Canvas Work Area */
-                <ScratchpadCanvas storageKey={scratchpadCanvasStorageKey} />
-              ) : isScratchpadMaximized ? (
-                /* Mode 2: Text & LaTeX - Maximized Dual-Pane View */
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-full">
-                  <div className="flex flex-col h-full bg-surface-container-low rounded-xl p-2.5 border border-outline-variant/30">
-                    <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-surface-container text-[12px] text-on-surface-variant font-medium shrink-0">
-                      <span>推导演算源码输入区 (支持 Markdown / LaTeX 公式)</span>
-                      <span className="font-mono text-[11px] text-outline">{scratchpadNote.length} 字符</span>
-                    </div>
-                    <textarea
-                      value={scratchpadNote}
-                      onChange={(e) => setScratchpadNote(e.target.value)}
-                      placeholder="在此尽情输入长篇演算草稿、换元设项、化简分部积分推导...
-输入公式如 $$\int x \ln(x+1) dx$$ 右侧实时渲染高保真数学卷面"
-                      className={`w-full flex-1 p-2 bg-transparent focus:outline-none resize-none leading-relaxed text-on-surface font-mono ${
-                        scratchpadFontSize === 'lg'
-                          ? 'text-[17px] leading-relaxed'
-                          : scratchpadFontSize === 'sm'
-                          ? 'text-[13px] leading-relaxed'
-                          : 'text-[15px] leading-relaxed'
-                      }`}
-                    />
-                  </div>
-
-                  <div className="flex flex-col h-full bg-surface-container-low rounded-xl p-2.5 border border-outline-variant/30 overflow-hidden">
-                    <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-surface-container text-[12px] text-secondary font-medium shrink-0">
-                      <span>KaTeX 实时高清渲染呈现</span>
-                      <span className="text-[11px] text-outline font-label-mono">公式向量级排版</span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-2 leading-relaxed text-on-surface">
-                      {scratchpadNote.trim() ? (
-                        <MathMarkdown content={scratchpadNote} />
-                      ) : (
-                        <p className="text-outline text-center py-20 text-body-sm">
-                          左侧输入草稿算式后，此处实时呈现高保真公式排版
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                /* Mode 2: Text & LaTeX - Compact Floating View */
-                <div className="h-full flex flex-col">
-                  {scratchpadPreviewMode ? (
-                    <div className="w-full flex-1 p-3 bg-surface-container-low rounded-xl overflow-y-auto border border-outline-variant/30 text-body-sm leading-relaxed">
-                      {scratchpadNote.trim() ? (
-                        <MathMarkdown content={scratchpadNote} />
-                      ) : (
-                        <p className="text-outline text-center py-16">草稿纸暂无内容，切换回「源码编辑」输入草稿算式</p>
-                      )}
-                    </div>
-                  ) : (
-                    <textarea
-                      value={scratchpadNote}
-                      onChange={(e) => setScratchpadNote(e.target.value)}
-                      placeholder="随时记录草稿算式、换元设项、演算步骤思路...
-（可按住右下角自由拖拽拉大，或点击右上角全屏最大化）"
-                      className={`w-full flex-1 p-3 bg-surface-container-low rounded-xl font-mono focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary border border-outline-variant/30 resize-none leading-relaxed ${
-                        scratchpadFontSize === 'lg'
-                          ? 'text-[17px]'
-                          : scratchpadFontSize === 'sm'
-                          ? 'text-[13px]'
-                          : 'text-[15px]'
-                      }`}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Toolbar: Available in Text Notes Mode */}
-            {scratchpadTab === 'text' && (
-              <div className="flex items-center justify-between gap-1 pt-1 border-t border-surface-container flex-wrap shrink-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => handleScratchpadAssist('format')}
-                    disabled={isScratchpadAiLoading}
-                    className="px-2.5 py-1 rounded-lg bg-primary-fixed hover:bg-primary-fixed-dim text-on-primary-fixed text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                    title="将草稿整理为规范的 Markdown 与 LaTeX 公式，严格保持原式与逻辑，绝对不代算"
-                  >
-                    <span className={`material-symbols-outlined text-[13px] ${isScratchpadAiLoading ? 'animate-spin' : ''}`}>
-                      {isScratchpadAiLoading ? 'progress_activity' : 'auto_fix_high'}
-                    </span>
-                    <span>AI 帮写排版 (严禁代算)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleScratchpadAssist('latex_complete')}
-                    disabled={isScratchpadAiLoading}
-                    className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer disabled:opacity-50 border border-outline-variant/30"
-                    title="辅助补齐矩阵、分段函数与积分上下限等常用 LaTeX 结构"
-                  >
-                    <span className="material-symbols-outlined text-[13px] text-primary">functions</span>
-                    <span>补齐 LaTeX</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleScratchpadAssist('outline')}
-                    disabled={isScratchpadAiLoading}
-                    className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer disabled:opacity-50 border border-outline-variant/30"
-                    title="将散乱的思路提炼为条理分明的步骤设项大纲"
-                  >
-                    <span className="material-symbols-outlined text-[13px] text-secondary">format_list_bulleted</span>
-                    <span>思路提纲化</span>
-                  </button>
-
-                  {/* Quick Scribe to current question answer */}
-                  {scratchpadNote.trim() && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newAnswer = candidateDraft
-                          ? `${candidateDraft}\n\n${scratchpadNote}`
-                          : scratchpadNote;
-                        handleUpdateAnswer(newAnswer);
-                        setScratchpadAiMessage('✨ 已将草稿文本誊抄插入至当前题目的作答框中！');
-                      }}
-                      className="px-2 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-medium transition flex items-center gap-1 cursor-pointer border border-outline-variant/30"
-                      title="将草稿纸文本追加誊抄到本题的作答框中"
-                    >
-                      <span className="material-symbols-outlined text-[13px] text-tertiary">content_paste_go</span>
-                      <span>誊入本题作答</span>
-                    </button>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm('确定清空当前文本草稿内容吗？')) {
-                      setScratchpadNote('');
-                    }
-                  }}
-                  className="text-outline hover:text-error text-[11px] px-2 py-1 rounded hover:bg-surface-container transition cursor-pointer"
-                  title="清空当前文本草稿"
-                >
-                  清空草稿
-                </button>
-              </div>
-            )}
+            <ScratchpadCanvas
+              storageKey={scratchpadCanvasStorageKey}
+              textStorageKey={scratchpadStorageKey}
+              contextProblem={currentQ ? `${currentQ.prompt} ${currentQ.mathExpression || ''}` : ''}
+              currentAnswerDraft={candidateDraft}
+              onScribeToAnswer={(mergedText) => handleUpdateAnswer(mergedText)}
+              isMaximized={isScratchpadMaximized}
+              onToggleMaximize={() => setIsScratchpadMaximized(!isScratchpadMaximized)}
+              onClose={() => {
+                setIsScratchpadMaximized(false);
+                setShowScratchpad(false);
+              }}
+            />
           </div>
         </>
       )}
