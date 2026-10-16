@@ -6,5 +6,5 @@
   "category": "protocol",
   "protocol": "openai-compatible",
   "baseURL": "https://api.deepseek.com/v1",
-  "apiKey": "sk-ec0c9302b0a64e59b6f94232b3f3ffa3"
+  "apiKey": "sk-dd22bf5198b2459f991cb1f2146a6cb7"
 }

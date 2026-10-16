@@ -203,47 +203,63 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
                 </h3>
               </div>
 
-              <div className="space-y-3 font-label-sm">
-                <div>
-                  <div className="flex justify-between text-on-surface mb-1">
-                    <span>多元函数微分学与极值</span>
-                    <span className="font-mono text-secondary font-semibold">92% 掌握</span>
-                  </div>
-                  <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden">
-                    <div className="bg-secondary h-full rounded-full" style={{ width: '92%' }}></div>
-                  </div>
+              {submissions.length === 0 ? (
+                <div className="py-6 text-center text-on-surface-variant flex flex-col items-center justify-center">
+                  <span className="material-symbols-outlined text-[32px] text-outline mb-2">analytics</span>
+                  <p className="text-body-sm font-medium text-on-surface">暂无模考态势数据</p>
+                  <p className="text-[12px] text-on-surface-variant mt-1 leading-relaxed">
+                    完成首次全真考场答题并交卷后，AI 智能判卷系统将自动基于真实卷面表现与失分归因生成知识点掌握图谱。
+                  </p>
                 </div>
+              ) : (
+                <div className="space-y-3 font-label-sm">
+                  <div>
+                    <div className="flex justify-between text-on-surface mb-1">
+                      <span>客观选择题准确率</span>
+                      <span className="font-mono text-secondary font-semibold">
+                        {Math.round(
+                          (submissions.flatMap((s) => s.questions || []).filter((q) => q.type?.includes('选择') && q.isCorrect).length /
+                            Math.max(1, submissions.flatMap((s) => s.questions || []).filter((q) => q.type?.includes('选择')).length)) * 100
+                        )}% 掌握
+                      </span>
+                    </div>
+                    <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden">
+                      <div
+                        className="bg-secondary h-full rounded-full"
+                        style={{
+                          width: `${Math.round(
+                            (submissions.flatMap((s) => s.questions || []).filter((q) => q.type?.includes('选择') && q.isCorrect).length /
+                              Math.max(1, submissions.flatMap((s) => s.questions || []).filter((q) => q.type?.includes('选择')).length)) * 100
+                          )}%`
+                        }}
+                      ></div>
+                    </div>
+                  </div>
 
-                <div>
-                  <div className="flex justify-between text-on-surface mb-1">
-                    <span>定积分应用与有理分式积分</span>
-                    <span className="font-mono text-primary font-semibold">78% 掌握</span>
-                  </div>
-                  <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden">
-                    <div className="bg-primary h-full rounded-full" style={{ width: '78%' }}></div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex justify-between text-on-surface mb-1">
-                    <span>线性代数特征值与二次型</span>
-                    <span className="font-mono text-tertiary font-semibold">64% 待巩固</span>
-                  </div>
-                  <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden">
-                    <div className="bg-tertiary h-full rounded-full" style={{ width: '64%' }}></div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex justify-between text-on-surface mb-1">
-                    <span>常微分方程初值解题通法</span>
-                    <span className="font-mono text-secondary font-semibold">88% 掌握</span>
-                  </div>
-                  <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden">
-                    <div className="bg-secondary h-full rounded-full" style={{ width: '88%' }}></div>
+                  <div>
+                    <div className="flex justify-between text-on-surface mb-1">
+                      <span>填空与解答综合得分率</span>
+                      <span className="font-mono text-primary font-semibold">
+                        {Math.round(
+                          (submissions.reduce((acc, s) => acc + (s.score || 0), 0) /
+                            Math.max(1, submissions.reduce((acc, s) => acc + (s.totalScore || 100), 0))) * 100
+                        )}% 掌握
+                      </span>
+                    </div>
+                    <div className="w-full bg-surface-container h-2 rounded-full overflow-hidden">
+                      <div
+                        className="bg-primary h-full rounded-full"
+                        style={{
+                          width: `${Math.round(
+                            (submissions.reduce((acc, s) => acc + (s.score || 0), 0) /
+                              Math.max(1, submissions.reduce((acc, s) => acc + (s.totalScore || 100), 0))) * 100
+                          )}%`
+                        }}
+                      ></div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <button

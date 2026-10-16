@@ -223,7 +223,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   全部题目
                 </span>
                 <span className="font-label-mono text-label-mono px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant">
-                  142
+                  {mistakes.length}
                 </span>
               </button>
 
@@ -241,7 +241,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   错题本 (重点复盘)
                 </span>
                 <span className="font-label-mono text-label-mono px-1.5 py-0.5 rounded bg-tertiary/10 text-tertiary font-bold">
-                  38
+                  {mistakes.filter((m) => !m.isCorrect).length}
                 </span>
               </button>
 
@@ -259,7 +259,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   高频收藏
                 </span>
                 <span className="font-label-mono text-label-mono px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant">
-                  24
+                  {mistakes.filter((m) => m.starred).length}
                 </span>
               </button>
 
@@ -277,7 +277,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   AI 举一反三推荐
                 </span>
                 <span className="font-label-mono text-label-mono px-1.5 py-0.5 rounded bg-primary-fixed text-primary font-semibold">
-                  18
+                  {mistakes.filter((m) => m.isVariant).length}
                 </span>
               </button>
 
@@ -295,7 +295,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   草稿与手写收录
                 </span>
                 <span className="font-label-mono text-label-mono px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant">
-                  15
+                  {mistakes.filter((m) => m.hasHandwriting || (m.userWrongAnswer && m.userWrongAnswer.length > 0)).length}
                 </span>
               </button>
             </nav>
@@ -379,20 +379,26 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
               <div className="flex flex-col gap-space-xs">
                 <div className="flex items-center gap-space-sm flex-wrap">
                   <span className="px-space-sm py-0.5 rounded bg-primary-fixed text-primary font-label-mono text-label-mono font-semibold">
-                    {activeCol?.code || 'MATH-COLLECTION'}
+                    {activeCategory !== 'all' ? `FILTER: ${activeCategory.toUpperCase()}` : (activeCol?.code || 'COL-DEFAULT')}
                   </span>
                   <span className="text-on-surface-variant font-label-mono text-label-mono">
-                    更新于 {activeCol?.updated || '刚刚'}
+                    共收录 {mistakes.length} 道试题
                   </span>
                   <span className="px-space-sm py-0.5 rounded bg-secondary-container text-on-secondary-container font-label-mono text-label-mono font-medium">
-                    {activeCol?.priority || '重点关注'}
+                    {mistakes.length > 0 ? '重点攻坚中' : '等待收录'}
                   </span>
                 </div>
                 <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-semibold">
-                  {activeCol?.title || '我的题集'}
+                  {activeCategory === 'mistakes' ? '错题本 (重点复盘)' :
+                   activeCategory === 'fav' ? '高频收藏好题集' :
+                   activeCategory === 'ai' ? 'AI 举一反三变式题' :
+                   activeCategory === 'draft' ? '草稿与手写收录集' :
+                   (activeCol?.title || '我的题集')}
                 </h1>
                 <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
-                  {activeCol?.desc || '针对典型易错点与阶段薄弱计算项进行深度归因与自适应变式练习。'}
+                  {mistakes.length === 0
+                    ? '当前暂无收录题目。您可在全真考场完成测试交卷后，在「AI 判卷复盘」报告页一键将错题或好题归集至此。'
+                    : (activeCol?.desc || '针对典型易错点与阶段薄弱计算项进行深度归因与自适应变式练习。')}
                 </p>
               </div>
 
@@ -430,15 +436,19 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
           <div className="flex flex-col gap-space-md">
             {(() => {
               const displayItems = mistakes.filter((m) => {
+                if (activeCategory === 'mistakes') return !m.isCorrect;
+                if (activeCategory === 'fav') return !!m.starred;
+                if (activeCategory === 'ai') return !!m.isVariant;
+                if (activeCategory === 'draft') return !!(m.hasHandwriting || (m.userWrongAnswer && m.userWrongAnswer.length > 0));
                 if (m.collectionId) return m.collectionId === activeColId;
-                return activeColId === 'col-default' || activeCategory === 'all';
+                return true;
               });
 
               if (displayItems.length === 0) {
                 return (
                   <div className="bg-surface-container-lowest rounded-xl p-12 text-center text-on-surface-variant border border-outline-variant/30">
                     <span className="material-symbols-outlined text-[40px] text-outline mb-2">folder_open</span>
-                    <p className="text-body-md font-medium">当前题集暂无试题收录。</p>
+                    <p className="text-body-md font-medium">当前分类下暂无试题收录。</p>
                     <p className="text-body-sm text-outline mt-1">您可以在交卷复盘报告页点击「📥 结果转题集」，勾选对题或错题一键沉淀至本集。</p>
                   </div>
                 );
