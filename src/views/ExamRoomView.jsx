@@ -404,12 +404,33 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
 
         {/* Right: Telemetry & Actions */}
         <div className="flex items-center space-x-space-sm sm:space-x-space-md">
-          {/* Countdown Timer */}
-          <div className="flex items-center space-x-1.5 px-2.5 sm:px-space-md py-1 bg-surface-container-low rounded-lg border border-outline-variant/40">
-            <span className="material-symbols-outlined text-tertiary text-[18px]">timer</span>
-            <span className="font-code-md text-code-md font-semibold text-tertiary tracking-wider font-mono">
+          {/* Countdown Timer with Pause/Resume Toggle */}
+          <div className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1 rounded-lg border transition-all ${
+            isTimerRunning
+              ? 'bg-surface-container-low border-outline-variant/40 text-tertiary'
+              : 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+          }`}>
+            <span className="material-symbols-outlined text-[18px]">
+              {isTimerRunning ? 'timer' : 'pause_circle'}
+            </span>
+            <span className="font-code-md text-code-md font-semibold tracking-wider font-mono">
               {formatTimer(secondsLeft)}
             </span>
+            <button
+              type="button"
+              onClick={() => setIsTimerRunning(!isTimerRunning)}
+              className={`ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium flex items-center gap-0.5 transition-colors cursor-pointer ${
+                isTimerRunning
+                  ? 'bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface'
+                  : 'bg-amber-500 text-white font-bold shadow-xs hover:bg-amber-600'
+              }`}
+              title={isTimerRunning ? '暂停考试倒计时' : '继续考试倒计时'}
+            >
+              <span className="material-symbols-outlined text-[14px]">
+                {isTimerRunning ? 'pause' : 'play_arrow'}
+              </span>
+              <span>{isTimerRunning ? '暂停' : '继续'}</span>
+            </button>
           </div>
 
           {/* Quick Scratchpad Toggle */}
@@ -1045,6 +1066,59 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
               <p className="text-body-sm text-on-surface-variant font-label-mono">
                 {submitProgressText || '正在比对标准答案与采分点...'}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exam Paused Overlay Modal */}
+      {!isTimerRunning && !isSubmitting && !isSubmitModalOpen && (
+        <div className="fixed inset-0 z-50 bg-on-background/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 text-center space-y-space-md animate-in zoom-in-95 duration-150">
+            <div className="w-16 h-16 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
+              <span className="material-symbols-outlined text-[36px]">pause_circle</span>
+            </div>
+            
+            <div className="space-y-1">
+              <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
+                考试计时已暂停
+              </h3>
+              <p className="text-body-sm text-on-surface-variant">
+                倒计时已冻结，考卷作答进度已自动暂存。您可以稍作离席休息，调整状态。
+              </p>
+            </div>
+
+            <div className="p-space-md bg-surface-container-low rounded-xl border border-outline-variant/20 grid grid-cols-2 gap-2 text-center font-label-mono">
+              <div className="flex flex-col">
+                <span className="text-[11px] text-outline uppercase">答题进度</span>
+                <span className="text-headline-sm font-bold text-primary mt-0.5">
+                  {answeredCount} / {questionList.length}
+                </span>
+              </div>
+              <div className="flex flex-col border-l border-surface-container">
+                <span className="text-[11px] text-outline uppercase">剩余时长</span>
+                <span className="text-headline-sm font-bold text-tertiary mt-0.5">
+                  {formatTimer(secondsLeft)}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsTimerRunning(true)}
+                className="w-full py-2.5 rounded-xl bg-primary text-on-primary font-label-md font-semibold shadow-sm hover:bg-primary-container transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[20px]">play_arrow</span>
+                <span>恢复考试并继续计时</span>
+              </button>
+              <button
+                type="button"
+                onClick={onExit}
+                className="w-full py-2 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition font-label-sm text-label-sm cursor-pointer"
+              >
+                中途退出考场（保留已存试卷）
+              </button>
             </div>
           </div>
         </div>
