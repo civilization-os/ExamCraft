@@ -1359,15 +1359,15 @@ ${spokenText}
     "passed": ${isSuspicious ? 'false' : 'true'},
     "reason": "${isSuspicious ? '检测到诱导计算或代答意图' : '口述需求合规，未请求代算'}"
   },
-  "scribeResult": "规范整理后的草稿文本（Markdown与LaTeX，忠实记录考生所言）",
+  "scribeResult": "【重要】规范整理后的正式草稿板书（使用优雅标准的 Markdown 与 LaTeX 数学公式如 $...$ 或 $$...$$）。绝对严禁包含“口述需求：”、“指令：”、“好的已为您...”等任何交际口语或元话语！只保留纯正的考场板书记录本身。若考生只要求画图未要求写字，可简要注明图示标题如“直角坐标系与函数曲线 $y = x^2$”。",
   "canvasActions": [
     // 根据考生口述生成相应的 Canvas 绘图与写字指令（可包含 1 到多个动作，未要求画图/写字则可为空数组）
     // 可用类型包括：
-    // 1. 写字：{"type": "write", "content": "解：设 u = ln(x+1)", "color": "#0f172a"}
+    // 1. 写字：{"type": "write", "content": "设 $t = x^2$", "color": "#0f172a"}
     // 2. 坐标系：{"type": "axes", "xLabel": "x", "yLabel": "y"}
-    // 3. 函数图像：{"type": "plot", "expr": "x^2", "label": "y = x^2", "color": "#1d4ed8"} (支持: "x^2", "sin(x)", "cos(x)", "ln(x)", "e^x", "1/x", "sqrt(x)", "2*x+1" 等标准数学表达式)
+    // 3. 函数图像：{"type": "plot", "expr": "x^2", "label": "y = x^2", "color": "#1d4ed8"} (支持: "x^2", "-x^2", "x^3", "sin(x)", "cos(x)", "tan(x)", "ln(x)", "e^x", "1/x", "sqrt(x)", "2*x+1", "x" 等标准数学表达式)
     // 4. 几何图形：{"type": "shape", "shapeType": "triangle" | "right_triangle" | "circle" | "rect", "labels": ["A", "B", "C"], "color": "#047857"}
-    // 5. 辅助线/切线：{"type": "line", "lineType": "tangent" | "arrow" | "dashed", "label": "辅助线", "color": "#b91c1c"}
+    // 5. 辅助线/切线：{"type": "line", "lineType": "tangent" | "arrow" | "dashed", "label": "切线", "color": "#b91c1c"}
   ],
   "loopLogs": [
     "Loop 1: 语义与诚信纪律审计通过",

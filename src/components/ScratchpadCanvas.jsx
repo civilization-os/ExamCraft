@@ -2,13 +2,213 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import MathMarkdown from './MathMarkdown';
 
 /**
+ * 数学公式 Unicode 转换与上下标符号美化映射器
+ * 将 LaTeX 粗糙表达（如 $t = x^{2}$, y = x^2, \int, \frac 等）转换为高保真数学矢量字符
+ */
+const supMap = {
+  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+  '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+  '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+  'a': 'ᵃ', 'b': 'ᵇ', 'c': 'ᶜ', 'd': 'ᵈ', 'e': 'ᵉ',
+  'f': 'ᶠ', 'g': 'ᵍ', 'h': 'ʰ', 'i': 'ⁱ', 'j': 'ʲ',
+  'k': 'ᵏ', 'l': 'ˡ', 'm': 'ᵐ', 'n': 'ⁿ', 'o': 'ᵒ',
+  'p': 'ᵖ', 'r': 'ʳ', 's': 'ˢ', 't': 'ᵗ', 'u': 'ᵘ',
+  'v': 'ᵛ', 'w': 'ʷ', 'x': 'ˣ', 'y': 'ʸ', 'z': 'ᶻ',
+  'A': 'ᴬ', 'B': 'ᴮ', 'D': 'ᴰ', 'E': 'ᴱ', 'G': 'ᴳ',
+  'H': 'ᴴ', 'I': 'ᴵ', 'J': 'ᴶ', 'K': 'ᴷ', 'L': 'ᴸ',
+  'M': 'ᴹ', 'N': 'ᴺ', 'O': 'ᴼ', 'P': 'ᴾ', 'R': 'ᴿ',
+  'T': 'ᵀ', 'U': 'ᵁ', 'W': 'ᵂ',
+  '*': '﹡'
+};
+
+const subMap = {
+  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+  '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+  '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
+  'a': 'ₐ', 'e': 'ₑ', 'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ',
+  'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ', 'o': 'ₒ',
+  'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ',
+  'v': 'ᵥ', 'x': 'ₓ'
+};
+
+/**
+ * 数学公式 Unicode 转换与上下标符号美化映射器
+ * 将 LaTeX 粗糙表达（如 $t = x^{2}$, y = x^2, \int, \frac 等）转换为高保真数学矢量字符
+ */
+const formatMathExpression = (str) => {
+  if (!str) return '';
+  let s = String(str).replace(/\$/g, '').trim();
+
+  // 1. 函数名与分式/开方
+  s = s.replace(/\\(sin|cos|tan|cot|sec|csc|ln|lg|log|exp|lim|max|min|det|deg)\b/g, '$1');
+  s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)');
+  s = s.replace(/\\sqrt\[([^\]]+)\]\{([^}]+)\}/g, (_, root, val) => {
+    const rootSup = root.split('').map((c) => supMap[c] || c).join('');
+    return `${rootSup}√(${val})`;
+  });
+  s = s.replace(/\\sqrt\{([^}]+)\}/g, '√($1)');
+  s = s.replace(/\\sqrt/g, '√');
+
+  // 2. 积分与级数求和
+  s = s.replace(/\\int_\{([^}]+)\}\^\{([^}]+)\}/g, (_, sub, sup) => {
+    const subStr = sub.split('').map((c) => subMap[c] || c).join('');
+    const supStr = sup.split('').map((c) => supMap[c] || c).join('');
+    return `∫${subStr}${supStr} `;
+  });
+  s = s.replace(/\\int/g, '∫');
+  s = s.replace(/\\iint/g, '∬');
+  s = s.replace(/\\sum/g, '∑');
+  s = s.replace(/\\prod/g, '∏');
+
+  // 3. 运算符与几何/逻辑符号
+  s = s.replace(/\\pm/g, '±');
+  s = s.replace(/\\mp/g, '∓');
+  s = s.replace(/\\times/g, '×');
+  s = s.replace(/\\div/g, '÷');
+  s = s.replace(/\\cdot/g, '·');
+  s = s.replace(/\\le|\\leq/g, '≤');
+  s = s.replace(/\\ge|\\geq/g, '≥');
+  s = s.replace(/\\neq|\\ne/g, '≠');
+  s = s.replace(/\\approx/g, '≈');
+  s = s.replace(/\\equiv/g, '≡');
+  s = s.replace(/\\to|\\rightarrow/g, '→');
+  s = s.replace(/\\leftarrow/g, '←');
+  s = s.replace(/\\Rightarrow/g, '⇒');
+  s = s.replace(/\\Leftrightarrow|\\iff/g, '⇔');
+  s = s.replace(/\\infty/g, '∞');
+  s = s.replace(/\\in\b/g, '∈');
+  s = s.replace(/\\notin\b/g, '∉');
+  s = s.replace(/\\subset\b/g, '⊂');
+  s = s.replace(/\\subseteq\b/g, '⊆');
+  s = s.replace(/\\cup\b/g, '∪');
+  s = s.replace(/\\cap\b/g, '∩');
+  s = s.replace(/\\forall\b/g, '∀');
+  s = s.replace(/\\exists\b/g, '∃');
+  s = s.replace(/\\partial\b/g, '∂');
+  s = s.replace(/\\nabla\b/g, '∇');
+  s = s.replace(/\\perp\b/g, '⊥');
+  s = s.replace(/\\parallel\b/g, '∥');
+  s = s.replace(/\\angle\b/g, '∠');
+  s = s.replace(/\\triangle\b/g, '△');
+  s = s.replace(/\\degree|\^\\circ/g, '°');
+
+  // 4. 希腊字母 (小写)
+  s = s.replace(/\\alpha\b/g, 'α');
+  s = s.replace(/\\beta\b/g, 'β');
+  s = s.replace(/\\gamma\b/g, 'γ');
+  s = s.replace(/\\delta\b/g, 'δ');
+  s = s.replace(/\\epsilon\b|\\varepsilon\b/g, 'ε');
+  s = s.replace(/\\zeta\b/g, 'ζ');
+  s = s.replace(/\\eta\b/g, 'η');
+  s = s.replace(/\\theta\b/g, 'θ');
+  s = s.replace(/\\iota\b/g, 'ι');
+  s = s.replace(/\\kappa\b/g, 'κ');
+  s = s.replace(/\\lambda\b/g, 'λ');
+  s = s.replace(/\\mu\b/g, 'μ');
+  s = s.replace(/\\nu\b/g, 'ν');
+  s = s.replace(/\\xi\b/g, 'ξ');
+  s = s.replace(/\\pi\b/g, 'π');
+  s = s.replace(/\\rho\b/g, 'ρ');
+  s = s.replace(/\\sigma\b/g, 'σ');
+  s = s.replace(/\\tau\b/g, 'τ');
+  s = s.replace(/\\upsilon\b/g, 'υ');
+  s = s.replace(/\\phi\b|\\varphi\b/g, 'φ');
+  s = s.replace(/\\chi\b/g, 'χ');
+  s = s.replace(/\\psi\b/g, 'ψ');
+  s = s.replace(/\\omega\b/g, 'ω');
+
+  // 希腊字母 (大写)
+  s = s.replace(/\\Delta\b/g, 'Δ');
+  s = s.replace(/\\Gamma\b/g, 'Γ');
+  s = s.replace(/\\Theta\b/g, 'Θ');
+  s = s.replace(/\\Lambda\b/g, 'Λ');
+  s = s.replace(/\\Xi\b/g, 'Ξ');
+  s = s.replace(/\\Pi\b/g, 'Π');
+  s = s.replace(/\\Sigma\b/g, 'Σ');
+  s = s.replace(/\\Phi\b/g, 'Φ');
+  s = s.replace(/\\Psi\b/g, 'Ψ');
+  s = s.replace(/\\Omega\b/g, 'Ω');
+
+  // 5. 上标转换: ^{...} 和 ^char
+  s = s.replace(/\^\{([^}]+)\}/g, (_, exp) => {
+    return exp.split('').map((c) => supMap[c] || c).join('');
+  });
+  s = s.replace(/\^([0-9a-zA-Z+-])/g, (_, exp) => supMap[exp] || `^${exp}`);
+
+  // 6. 下标转换: _{...} 和 _char
+  s = s.replace(/_\{([^}]+)\}/g, (_, sub) => {
+    return sub.split('').map((c) => subMap[c] || c).join('');
+  });
+  s = s.replace(/_([0-9a-zA-Z+-])/g, (_, sub) => subMap[sub] || `_${sub}`);
+
+  // 7. 清理残留 LaTeX 控制词与分组括号
+  s = s.replace(/\\left|\\right/g, '');
+  s = s.replace(/\\([a-zA-Z]+)/g, '$1');
+  s = s.replace(/[{}]/g, '');
+
+  return s;
+};
+
+// 分割混合普通文本与 $数学公式$ 的段落
+const parseMixedTextSegments = (rawLine) => {
+  let line = String(rawLine || '').trim();
+  if (!line) return [];
+
+  // 清理 Markdown 粗体/斜体/标题/项目符号
+  line = line.replace(/^#+\s*/, '');
+  line = line.replace(/\*\*(.*?)\*\*/g, '$1');
+  line = line.replace(/\*(.*?)\*/g, '$1');
+  line = line.replace(/^[-*+]\s+/, '• ');
+
+  // 统一 LaTeX 括号形式: \[...\] -> $$...$$, \(...\) -> $...$
+  line = line.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
+  line = line.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+
+  // 统一将连续的 $$ 转为单个 $ 处理
+  line = line.replace(/\$\$([^\$]+)\$\$/g, '$$$1$$');
+
+  const segments = [];
+  const regex = /\$([^\$]+)\$/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(line)) !== null) {
+    if (match.index > lastIndex) {
+      const normalPart = line.substring(lastIndex, match.index);
+      if (normalPart) {
+        segments.push({ isMath: false, text: normalPart });
+      }
+    }
+    const mathContent = formatMathExpression(match[1]);
+    if (mathContent) {
+      segments.push({ isMath: true, text: mathContent });
+    }
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < line.length) {
+    const remaining = line.substring(lastIndex);
+    if (/[a-zA-Z]\^[0-9a-zA-Z]|[a-zA-Z]_[0-9a-zA-Z]|\\|√|∫|∑|±|≤|≥/.test(remaining)) {
+      segments.push({ isMath: true, text: formatMathExpression(remaining) });
+    } else {
+      segments.push({ isMath: false, text: remaining });
+    }
+  }
+
+  if (segments.length === 0) {
+    if (/[a-zA-Z]\^[0-9a-zA-Z]|[a-zA-Z]_[0-9a-zA-Z]|\\|√|∫|∑|±|≤|≥|=|\+|-|\*|\//.test(line)) {
+      segments.push({ isMath: true, text: formatMathExpression(line) });
+    } else {
+      segments.push({ isMath: false, text: line });
+    }
+  }
+
+  return segments;
+};
+
+/**
  * ScratchpadCanvas / Workbench
- * 一体化考场草稿演算工作台：
- * 1. 自由手绘涂鸦画板（Canvas、方格坐标纸、信纸横线、白纸、多色笔刷、橡皮、撤销重做、导出）
- * 2. 智能 AI 画图与手写引擎：AI 可直接在 Canvas 上代画直角坐标系、函数曲线、几何三角形/圆、辅助线，手写推导文字
- * 3. 文本公式笔记与 KaTeX 实时高保真渲染（同屏呈现，无需模式切换）
- * 4. 考场专属 Agent Loop（严格限制：只能画/写考生说出的内容，严禁代算）
- * 5. 统一 UI 确认对话框与 Toast 提示，彻底根除浏览器丑陋的原生 alert/confirm
+ * 一体化考场草稿演算工作台
  */
 export default function ScratchpadCanvas({
   storageKey = 'examcraft_scratchpad_canvas',
@@ -346,37 +546,49 @@ export default function ScratchpadCanvas({
 
     actions.forEach((act) => {
       if (act.type === 'write' && act.content) {
-        // 1. 在 Canvas 上手写工整板书
-        ctx.fillStyle = act.color || '#0f172a';
-        ctx.font = '600 16px "KaTeX_Main", "STKaiti", "KaiTi", "Microsoft YaHei", sans-serif';
-        ctx.textBaseline = 'middle';
-
+        // 1. 在 Canvas 上手写工整板书与高保真数学公式
         const lines = act.content.split('\n');
         lines.forEach((line) => {
           if (!line.trim()) {
             textCursorY += 16;
             return;
           }
-          const maxWidth = width - 80;
-          let currentLine = '';
-          for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            const testLine = currentLine + char;
-            const metrics = ctx.measureText(testLine);
-            if (metrics.width > maxWidth && i > 0) {
-              ctx.fillText(currentLine, 36, textCursorY);
-              currentLine = char;
-              textCursorY += 26;
+
+          const segments = parseMixedTextSegments(line);
+          let startX = 36;
+          const maxWidth = width - 60;
+
+          segments.forEach((seg) => {
+            if (seg.isMath) {
+              // 数学公式：斜体矢量数学排版与考场蓝
+              ctx.font = 'italic 700 17px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
+              ctx.fillStyle = '#1d4ed8';
             } else {
-              currentLine = testLine;
+              // 普通文字：端庄手写板书体与墨黑色
+              ctx.font = '600 16px "KaTeX_Main", "STKaiti", "KaiTi", "Microsoft YaHei", sans-serif';
+              ctx.fillStyle = act.color || '#0f172a';
             }
-          }
-          if (currentLine) {
-            ctx.fillText(currentLine, 36, textCursorY);
-            textCursorY += 28;
-          }
+
+            const chars = seg.isMath
+              ? (seg.text.split(/(\s+|[=+\-×÷≤≥≠≈<>]+|[()])/).filter(Boolean))
+              : seg.text.split('');
+
+            for (let i = 0; i < chars.length; i++) {
+              const piece = chars[i];
+              const pieceWidth = ctx.measureText(piece).width;
+              if (startX + pieceWidth > maxWidth) {
+                startX = 36;
+                textCursorY += 28;
+              }
+              ctx.fillText(piece, startX, textCursorY);
+              startX += pieceWidth;
+            }
+            startX += seg.isMath ? 4 : 2;
+          });
+
+          textCursorY += 30;
         });
-        textCursorY += 15;
+        textCursorY += 10;
 
       } else if (act.type === 'axes') {
         // 2. 在 Canvas 上绘制直角坐标系
@@ -429,15 +641,29 @@ export default function ScratchpadCanvas({
         let isFirst = true;
 
         const evalFn = (x) => {
-          const expr = (act.expr || 'x^2').toLowerCase();
+          const expr = (act.expr || 'x^2').toLowerCase().replace(/\s+/g, '');
           if (expr.includes('sin')) return Math.sin(x);
           if (expr.includes('cos')) return Math.cos(x);
+          if (expr.includes('tan')) return Math.abs(Math.cos(x)) > 0.08 ? Math.tan(x) : NaN;
           if (expr.includes('ln') || expr.includes('log')) return x > 0.05 ? Math.log(x) : NaN;
           if (expr.includes('exp') || expr.includes('e^x')) return Math.exp(x);
           if (expr.includes('sqrt')) return x >= 0 ? Math.sqrt(x) : NaN;
           if (expr.includes('1/x')) return Math.abs(x) > 0.05 ? 1 / x : NaN;
-          if (expr.includes('x^3')) return Math.pow(x, 3);
-          return Math.pow(x, 2);
+          if (expr.includes('-x^2') || expr.includes('-x²')) return -Math.pow(x, 2);
+          if (expr.includes('x^3') || expr.includes('x³')) return Math.pow(x, 3);
+          if (expr.includes('x^2') || expr.includes('x²')) return Math.pow(x, 2);
+          if (expr.includes('2x+1') || expr.includes('2*x+1')) return 2 * x + 1;
+          if (expr.includes('2x-1') || expr.includes('2*x-1')) return 2 * x - 1;
+          if (expr.includes('2x') || expr.includes('2*x')) return 2 * x;
+          if (expr.includes('-x')) return -x;
+          if (expr === 'x' || expr === 'y=x') return x;
+          try {
+            const safeExpr = expr.replace(/y=/, '').replace(/\^/g, '**').replace(/(\d)x/g, '$1*x');
+            const val = Function('x', `"use strict"; return (${safeExpr})`)(x);
+            return typeof val === 'number' && !isNaN(val) ? val : Math.pow(x, 2);
+          } catch {
+            return Math.pow(x, 2);
+          }
         };
 
         for (let x = -3.5; x <= 3.5; x += 0.08) {
@@ -462,9 +688,10 @@ export default function ScratchpadCanvas({
         ctx.stroke();
 
         if (act.label) {
+          const formattedLabel = formatMathExpression(act.label);
           ctx.fillStyle = act.color || '#1d4ed8';
-          ctx.font = 'bold 14px "KaTeX_Math", serif';
-          ctx.fillText(act.label, cx + 50, cy - 70);
+          ctx.font = 'italic 700 15px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
+          ctx.fillText(formattedLabel, cx + 50, cy - 70);
         }
 
       } else if (act.type === 'shape') {
@@ -604,11 +831,18 @@ export default function ScratchpadCanvas({
           executeCanvasActions(agentData.canvasActions);
         }
 
-        // 2. 同步追加到右侧规范板书笔记
-        const newBoardText = boardText
-          ? `${boardText}\n\n${agentData.scribeResult}`
-          : agentData.scribeResult;
-        setBoardText(newBoardText);
+        // 2. 同步追加到右侧规范板书笔记（过滤闲聊元话语，只留纯正板书）
+        const cleanScribe = (agentData.scribeResult || '')
+          .replace(/^(?:口述|考生)?(?:需求|指令|输入)[：:]\s*.*?\n+/gi, '')
+          .replace(/^(?:规范|正式)?(?:草稿|板书)(?:记录)?[：:]\s*/gi, '')
+          .trim();
+
+        if (cleanScribe) {
+          const newBoardText = boardText
+            ? `${boardText}\n\n${cleanScribe}`
+            : cleanScribe;
+          setBoardText(newBoardText);
+        }
 
         setSpokenInput('');
         setAgentMessage('✨ AI 已在画板上完成画图与手写板书（未作多余代算）');
