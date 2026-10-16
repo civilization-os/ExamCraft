@@ -9,6 +9,48 @@ import MistakeNotebookView from './views/MistakeNotebookView';
 import SettingsView from './views/SettingsView';
 import { INITIAL_PAPERS, MOCK_EXAM_QUESTIONS } from './data/mockData';
 
+// Helper to automatically purge legacy hardcoded mock items from user's localStorage
+function purgeLegacyMockData() {
+  const legacyPaperIds = new Set(['paper-math-2024a', 'paper-ode-04', 'paper-math-kaoyan-2023', 'paper-linalg-matrix']);
+  const legacySubIds = new Set(['sub-2024a-v1', 'sub-2024a-v2']);
+  const legacyMistakeIds = new Set(['m-1', 'm-2', 'm-3']);
+
+  try {
+    const rawPapers = localStorage.getItem('examcraft_papers');
+    if (rawPapers) {
+      const parsed = JSON.parse(rawPapers);
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.filter((p) => !legacyPaperIds.has(p.id));
+        localStorage.setItem('examcraft_papers', JSON.stringify(cleaned));
+      }
+    }
+  } catch {}
+
+  try {
+    const rawSubs = localStorage.getItem('examcraft_submissions');
+    if (rawSubs) {
+      const parsed = JSON.parse(rawSubs);
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.filter((s) => !legacySubIds.has(s.id) && !legacyPaperIds.has(s.paperId));
+        localStorage.setItem('examcraft_submissions', JSON.stringify(cleaned));
+      }
+    }
+  } catch {}
+
+  try {
+    const rawNotebook = localStorage.getItem('examcraft_notebook_data');
+    if (rawNotebook) {
+      const parsed = JSON.parse(rawNotebook);
+      if (parsed && Array.isArray(parsed.items)) {
+        parsed.items = parsed.items.filter((i) => !legacyMistakeIds.has(i.id));
+        localStorage.setItem('examcraft_notebook_data', JSON.stringify(parsed));
+      }
+    }
+  } catch {}
+}
+
+purgeLegacyMockData();
+
 export default function App() {
   const [currentPath, setCurrentPath] = useState('exam-generator');
   const [papers, setPapers] = useState(() => {
@@ -16,34 +58,32 @@ export default function App() {
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {}
     return INITIAL_PAPERS;
   });
-  const [activePaper, setActivePaper] = useState(() => papers[0] || INITIAL_PAPERS[0]);
-  const [questions, setQuestions] = useState(MOCK_EXAM_QUESTIONS);
+  const [activePaper, setActivePaper] = useState(() => papers[0] || null);
+  const [questions, setQuestions] = useState(() => (activePaper?.questions || MOCK_EXAM_QUESTIONS));
   const [activeSubmission, setActiveSubmission] = useState(null);
 
   const handleStartExam = (paper) => {
+    if (!paper) {
+      setCurrentPath('exam-generator');
+      return;
+    }
     setActivePaper(paper);
-    if (paper) {
-      setPapers((prev) => {
-        if (!prev.some((p) => p.id === paper.id)) {
-          const next = [paper, ...prev];
-          try {
-            localStorage.setItem('examcraft_papers', JSON.stringify(next));
-          } catch {}
-          return next;
-        }
-        return prev;
-      });
-    }
-    if (paper.questions && paper.questions.length > 0) {
-      setQuestions(paper.questions);
-    } else {
-      setQuestions(MOCK_EXAM_QUESTIONS);
-    }
+    setPapers((prev) => {
+      if (!prev.some((p) => p.id === paper.id)) {
+        const next = [paper, ...prev];
+        try {
+          localStorage.setItem('examcraft_papers', JSON.stringify(next));
+        } catch {}
+        return next;
+      }
+      return prev;
+    });
+    setQuestions(paper.questions && paper.questions.length > 0 ? paper.questions : []);
     setCurrentPath('exam-room');
   };
 

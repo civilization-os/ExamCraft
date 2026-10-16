@@ -9,8 +9,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.collections && parsed.collections.length > 0) {
-          const existingIds = new Set(parsed.collections.map((c) => c.id));
-          return [...parsed.collections, ...MISTAKE_COLLECTIONS.filter((c) => !existingIds.has(c.id))];
+          return parsed.collections;
         }
       }
     } catch {}
@@ -27,7 +26,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
         }
       }
     } catch {}
-    return 'col-2';
+    return MISTAKE_COLLECTIONS[0]?.id || 'col-default';
   });
 
   const [activeCategory, setActiveCategory] = useState('all');
@@ -37,13 +36,13 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
       const raw = localStorage.getItem('examcraft_notebook_data');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.items && parsed.items.length > 0) {
-          const existingIds = new Set(parsed.items.map((i) => i.id));
-          return [...parsed.items, ...MISTAKE_ITEMS.filter((i) => !existingIds.has(i.id))];
+        if (Array.isArray(parsed.items)) {
+          // Strictly purge legacy mock mistake items
+          return parsed.items.filter((i) => i && i.id !== 'm-1' && i.id !== 'm-2' && i.id !== 'm-3');
         }
       }
     } catch {}
-    return MISTAKE_ITEMS;
+    return [];
   });
 
   // Dynamically count mistakes per collection
@@ -432,7 +431,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
             {(() => {
               const displayItems = mistakes.filter((m) => {
                 if (m.collectionId) return m.collectionId === activeColId;
-                return activeColId === 'col-2' || activeCategory === 'all';
+                return activeColId === 'col-default' || activeCategory === 'all';
               });
 
               if (displayItems.length === 0) {

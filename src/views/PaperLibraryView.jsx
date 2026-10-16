@@ -6,19 +6,25 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
   const [activeCategory, setActiveCategory] = useState('全部');
   const [sortBy, setSortBy] = useState('date-desc');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
-  const [paperList, setPaperList] = useState(papers);
+  const [paperList, setPaperList] = useState(() => (papers || []));
 
-  // Submissions history state from localStorage with fallback to INITIAL_SUBMISSIONS
+  React.useEffect(() => {
+    setPaperList(papers || []);
+  }, [papers]);
+
+  // Submissions history state from localStorage with zero mock data
   const [submissions, setSubmissions] = useState(() => {
     try {
       const raw = localStorage.getItem('examcraft_submissions');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) {
+          // Strictly purge legacy mock submission records
+          return parsed.filter((s) => s && s.id !== 'sub-2024a-v1' && s.id !== 'sub-2024a-v2');
+        }
       }
-      localStorage.setItem('examcraft_submissions', JSON.stringify(INITIAL_SUBMISSIONS));
     } catch {}
-    return INITIAL_SUBMISSIONS;
+    return [];
   });
   const [selectedHistoryPaper, setSelectedHistoryPaper] = useState(null);
   const [activeMenuPaperId, setActiveMenuPaperId] = useState(null);
@@ -246,13 +252,42 @@ A. 1  B. 3  C. 0  D. 不存在
 
         {/* 3. Exam Card Matrix Grid */}
         <div className={viewMode === 'grid' ? 'grid grid-cols-1 xl:grid-cols-2 gap-space-lg' : 'flex flex-col gap-space-md'}>
-          {filteredPapers.map((paper) => {
-            const isEditingNote = editingNoteId === paper.id;
-            return (
-              <article
-                key={paper.id}
-                className="group bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between overflow-hidden relative border border-outline-variant/30"
-              >
+          {filteredPapers.length === 0 ? (
+            <div className="col-span-full py-16 flex flex-col items-center justify-center text-center p-8 bg-surface-container-lowest rounded-2xl border border-dashed border-outline-variant/40">
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4">
+                <span className="material-symbols-outlined text-[36px]">menu_book</span>
+              </div>
+              <h3 className="font-headline-sm font-semibold text-on-surface mb-2">试卷库当前暂无试卷</h3>
+              <p className="text-body-sm text-on-surface-variant max-w-md mb-6">
+                所有伪造 Mock 数据已彻底清空。您可通过「智能组卷」大厅快速导入真题 PDF、套用标准 Markdown 题稿或自由规格生成专属考卷。
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => onNavigate('exam-generator')}
+                  className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-label-md font-semibold flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[18px]">add_circle</span>
+                  <span>前往智能组卷</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(true)}
+                  className="px-5 py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md font-semibold flex items-center gap-2 border border-outline-variant/30 transition-all cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[18px]">upload_file</span>
+                  <span>AI 智能快速导入</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            filteredPapers.map((paper) => {
+              const isEditingNote = editingNoteId === paper.id;
+              return (
+                <article
+                  key={paper.id}
+                  className="group bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between overflow-hidden relative border border-outline-variant/30"
+                >
                 <div className={`absolute top-0 left-0 bottom-0 w-1 ${paper.sourceType === 'clone' ? 'bg-primary' : 'bg-secondary-fixed-dim'}`}></div>
 
                 <div className="p-space-lg pl-[calc(1rem+6px)] flex flex-col gap-space-md">
@@ -564,7 +599,7 @@ A. 1  B. 3  C. 0  D. 不存在
                 })()}
               </article>
             );
-          })}
+          }))}
         </div>
       </div>
 

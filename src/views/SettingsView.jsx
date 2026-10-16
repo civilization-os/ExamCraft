@@ -27,6 +27,42 @@ export default function SettingsView() {
   const [testResult, setTestResult] = useState(null); // { success: boolean, message: string, latencyMs?: number, provider?: string }
   const [saveMessage, setSaveMessage] = useState('');
 
+  // Local storage stats & clear
+  const [localStats, setLocalStats] = useState(() => {
+    let papersCount = 0;
+    let subsCount = 0;
+    let mistakesCount = 0;
+    try {
+      const p = localStorage.getItem('examcraft_papers');
+      if (p) papersCount = (JSON.parse(p) || []).length;
+    } catch {}
+    try {
+      const s = localStorage.getItem('examcraft_submissions');
+      if (s) subsCount = (JSON.parse(s) || []).length;
+    } catch {}
+    try {
+      const n = localStorage.getItem('examcraft_notebook_data');
+      if (n) mistakesCount = (JSON.parse(n)?.items || []).length;
+    } catch {}
+    return { papersCount, subsCount, mistakesCount };
+  });
+
+  const handleClearAllData = () => {
+    if (window.confirm('确定要清空所有本地数据与历史记录吗？此操作将彻底删除本地已保存的试卷、作答报告及题集，并重载页面恢复纯净状态。')) {
+      try {
+        localStorage.removeItem('examcraft_papers');
+        localStorage.removeItem('examcraft_submissions');
+        localStorage.removeItem('examcraft_notebook_data');
+        localStorage.removeItem('examcraft_scratchpad_default');
+        Object.keys(localStorage).forEach((k) => {
+          if (k.startsWith('examcraft_scratchpad_')) localStorage.removeItem(k);
+        });
+      } catch {}
+      alert('✅ 所有本地数据与缓存已彻底清空！页面即将自动刷新。');
+      window.location.reload();
+    }
+  };
+
   // Fetch current config on mount
   useEffect(() => {
     fetch('/api/model/config')
@@ -470,6 +506,49 @@ export default function SettingsView() {
             >
               <span className="material-symbols-outlined text-[18px]">save</span>
               <span>{isSaving ? '正在保存...' : '保存配置生效'}</span>
+            </button>
+          </div>
+        </section>
+
+        {/* Local Storage & Cache Data Management */}
+        <section className="bg-surface-container-lowest p-space-xl rounded-2xl shadow-sm border border-outline-variant/30 space-y-space-md">
+          <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
+            <div className="flex items-center gap-space-sm">
+              <span className="material-symbols-outlined text-outline text-[22px]">delete_sweep</span>
+              <h2 className="font-headline-sm text-headline-sm font-semibold text-on-surface">本地数据管理与缓存重置</h2>
+            </div>
+            <span className="px-2 py-0.5 rounded bg-surface-container font-label-mono text-label-mono text-on-surface-variant">
+              浏览器 localStorage
+            </span>
+          </div>
+
+          <p className="text-body-sm text-on-surface-variant">
+            系统所有生成的真实试卷、考场提交记录与错题集均保存在当前浏览器的本地存储中。所有 Mock 假数据已全部移除。如需重置所有本地已作答数据，可点击下方清空按钮。
+          </p>
+
+          <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-outline-variant/20 flex-wrap gap-4">
+            <div className="flex items-center gap-6 text-label-sm font-label-mono flex-wrap">
+              <div>
+                <span className="text-on-surface-variant">当前本地试卷：</span>
+                <span className="font-bold text-on-surface ml-1">{localStats.papersCount} 份</span>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">模考历史：</span>
+                <span className="font-bold text-on-surface ml-1">{localStats.subsCount} 次</span>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">收录题数：</span>
+                <span className="font-bold text-on-surface ml-1">{localStats.mistakesCount} 题</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleClearAllData}
+              className="px-4 py-2 rounded-lg bg-error-container hover:bg-error text-on-error-container hover:text-on-error font-label-md font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <span className="material-symbols-outlined text-[18px]">delete_forever</span>
+              <span>彻底清空所有本地数据并重置</span>
             </button>
           </div>
         </section>

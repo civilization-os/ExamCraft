@@ -141,33 +141,50 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
               </div>
 
               <div className="mt-space-md space-y-space-md">
-                {papers.slice(0, 2).map((paper) => (
-                  <div
-                    key={paper.id}
-                    onClick={() => onStartExam(paper)}
-                    className="p-space-md rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer flex items-center justify-between group border border-outline-variant/20"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded bg-surface-container-lowest font-label-mono text-label-mono text-primary font-medium">
-                          {paper.source}
-                        </span>
-                        <h4 className="font-headline-sm text-headline-sm text-on-surface group-hover:text-primary transition-colors font-semibold">
-                          {paper.title}
-                        </h4>
-                      </div>
-                      <p className="text-body-sm text-on-surface-variant font-label-mono">
-                        共 {paper.questionCount} 题 · 满分 {paper.totalScore} 分 · 建议 {paper.duration} 分钟 · 难度 ★★★★☆
-                      </p>
-                    </div>
+                {papers.length === 0 ? (
+                  <div className="py-8 text-center flex flex-col items-center justify-center p-6 bg-surface-container-low rounded-xl border border-dashed border-outline-variant/30">
+                    <span className="material-symbols-outlined text-[32px] text-primary mb-2 opacity-80">note_add</span>
+                    <p className="text-body-md font-medium text-on-surface">暂无试卷推荐</p>
+                    <p className="text-body-sm text-on-surface-variant mt-1 mb-4">
+                      进入「智能组卷」大厅快速导入真题或通过 Markdown 智能转卷生成第一份试卷。
+                    </p>
                     <button
                       type="button"
-                      className="px-3.5 py-1.5 rounded-lg bg-primary text-on-primary font-label-sm font-semibold shadow-xs group-hover:scale-105 transition-transform"
+                      onClick={() => onNavigate('exam-generator')}
+                      className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md font-semibold text-center transition-all cursor-pointer shadow-xs"
                     >
-                      开考
+                      立即智能组卷
                     </button>
                   </div>
-                ))}
+                ) : (
+                  papers.slice(0, 2).map((paper) => (
+                    <div
+                      key={paper.id}
+                      onClick={() => onStartExam(paper)}
+                      className="p-space-md rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer flex items-center justify-between group border border-outline-variant/20"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-surface-container-lowest font-label-mono text-label-mono text-primary font-medium">
+                            {paper.source}
+                          </span>
+                          <h4 className="font-headline-sm text-headline-sm text-on-surface group-hover:text-primary transition-colors font-semibold">
+                            {paper.title}
+                          </h4>
+                        </div>
+                        <p className="text-body-sm text-on-surface-variant font-label-mono">
+                          共 {paper.questionCount} 题 · 满分 {paper.totalScore} 分 · 建议 {paper.duration} 分钟 · 难度 ★★★★☆
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="px-3.5 py-1.5 rounded-lg bg-primary text-on-primary font-label-sm font-semibold shadow-xs group-hover:scale-105 transition-transform"
+                      >
+                        开考
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 

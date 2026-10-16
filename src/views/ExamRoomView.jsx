@@ -2,8 +2,13 @@ import React, { useState, useEffect } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 
 export default function ExamRoomView({ activePaper, questions, onExit, onOpenMistakes, onSubmitExam }) {
-  const [currentQIndex, setCurrentQIndex] = useState(15);
-  const [questionList, setQuestionList] = useState(questions);
+  const [currentQIndex, setCurrentQIndex] = useState(0);
+  const [questionList, setQuestionList] = useState(questions || []);
+
+  useEffect(() => {
+    setQuestionList(questions || []);
+    setCurrentQIndex(0);
+  }, [questions]);
   
   // Timer state based on activePaper.duration
   const initialDurationSeconds = (activePaper?.duration ? activePaper.duration * 60 : 5400);
@@ -18,17 +23,21 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
   const [answerMode, setAnswerMode] = useState('ai-scribe');
 
   // Candidate draft input for current question
-  const currentQ = questionList[currentQIndex] || questionList[0];
-  const [candidateDraft, setCandidateDraft] = useState(currentQ.userAnswer || '');
+  const currentQ = questionList[currentQIndex] || questionList[0] || null;
+  const [candidateDraft, setCandidateDraft] = useState(currentQ?.userAnswer || '');
   
   // Real AI Scribe result state
   const [isScribing, setIsScribing] = useState(false);
-  const [scribedLatex, setScribedLatex] = useState(currentQ.aiTranscription || '');
-  const [stepScores, setStepScores] = useState(currentQ.stepScores || [
-    { step: "步骤 1: 准确应用分部积分设元与通式展开", score: "+3分 (已达成)" },
-    { step: "步骤 2: 假分式化简长除法分解拆项", score: "+3分 (已达成)" },
-    { step: "步骤 3: 逐项定常数积分与常数 C 补齐", score: "+4分 (已达成)" }
-  ]);
+  const [scribedLatex, setScribedLatex] = useState(currentQ?.aiTranscription || '');
+  const [stepScores, setStepScores] = useState(currentQ?.stepScores || []);
+
+  useEffect(() => {
+    if (currentQ) {
+      setCandidateDraft(currentQ.userAnswer || '');
+      setScribedLatex(currentQ.aiTranscription || '');
+      setStepScores(currentQ.stepScores || []);
+    }
+  }, [currentQIndex, currentQ]);
 
   // Scratchpad toggle & persistent local storage
   const scratchpadStorageKey = activePaper?.id ? `examcraft_scratchpad_${activePaper.id}` : 'examcraft_scratchpad_default';
@@ -313,6 +322,40 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
       setIsResultModalOpen(true);
     }
   };
+
+  if (!activePaper || !questionList || questionList.length === 0 || !currentQ) {
+    return (
+      <div className="w-full flex-1 flex flex-col items-center justify-center bg-background min-h-screen p-6 text-center">
+        <div className="max-w-md w-full bg-surface-container-lowest p-8 rounded-2xl shadow-sm border border-outline-variant/30 flex flex-col items-center">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4">
+            <span className="material-symbols-outlined text-[36px]">terminal</span>
+          </div>
+          <h2 className="font-headline-sm font-semibold text-on-surface mb-2">考场当前未载入试卷</h2>
+          <p className="text-body-sm text-on-surface-variant mb-6">
+            请先前往「智能组卷」大厅生成或导入试卷，或从「试卷库」中选择任意一份试卷进入全真模拟考场。
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 w-full">
+            <button
+              type="button"
+              onClick={onExit}
+              className="flex-1 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-label-md font-semibold transition-all cursor-pointer shadow-xs flex items-center justify-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[18px]">auto_fix_high</span>
+              <span>前往智能组卷</span>
+            </button>
+            <button
+              type="button"
+              onClick={onExit}
+              className="flex-1 py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md font-semibold transition-all cursor-pointer border border-outline-variant/30 flex items-center justify-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[18px]">library_books</span>
+              <span>返回试卷库</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full flex-1 flex flex-col bg-background min-h-screen">
