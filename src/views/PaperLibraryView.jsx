@@ -69,6 +69,39 @@ function getPaperStructure(paper) {
   ];
 }
 
+// Safely extract readable question stem or options preview
+function getQuestionPreviewContent(q, idx) {
+  if (!q) return '试题内容加载中...';
+
+  // 1. Check prompt, stem, question, content, title
+  const rawText = (q.prompt || q.stem || q.question || q.content || q.title || '').trim();
+
+  // 2. Options string if available
+  const optionsText = Array.isArray(q.options) && q.options.length > 0
+    ? q.options.map(opt => `[${opt.key || ''}] ${opt.text || ''}`.trim()).filter(Boolean).join('  ')
+    : '';
+
+  // Check if rawText is empty or merely a question index (e.g. "1.", "[1]")
+  const isPureNumber = !rawText || /^(\[?\d+\]?|\d+[\.、\s]*)$/.test(rawText);
+
+  if (isPureNumber) {
+    if (optionsText) {
+      return `【选项】${optionsText}`;
+    }
+    if (q.passage) {
+      const cleanPassage = q.passage.replace(/[#*`_]/g, '').trim();
+      return `【篇章阅读】${cleanPassage.slice(0, 80)}...`;
+    }
+    return `试题 #${idx + 1}（${q.type || '考题'}，进入考场作答）`;
+  }
+
+  if (optionsText && rawText.length < 25) {
+    return `${rawText} · ${optionsText}`;
+  }
+
+  return rawText;
+}
+
 export default function PaperLibraryView({ papers, onStartExam, onNavigate, onViewSubmission }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('全部');
@@ -731,15 +764,28 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
 
               {selectedPreviewPaper.questions && selectedPreviewPaper.questions.length > 0 && (
                 <div className="p-space-md bg-surface-container-low/70 rounded-lg space-y-2">
-                  <p className="text-label-mono text-[11px] text-outline uppercase font-semibold">
-                    试卷内容前瞻（前 {Math.min(5, selectedPreviewPaper.questions.length)} 题示例）
-                  </p>
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-label-mono text-[11px] text-outline uppercase font-semibold">
+                      试卷内容前瞻（前 {Math.min(5, selectedPreviewPaper.questions.length)} 题示例）
+                    </p>
+                    <span className="text-[11px] text-outline font-label-mono">
+                      共 {selectedPreviewPaper.questions.length} 题真实考点
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                     {selectedPreviewPaper.questions.slice(0, 5).map((q, idx) => (
-                      <div key={q.id || idx} className="text-[12px] p-2 rounded bg-surface-container-lowest text-on-surface-variant flex items-start gap-2 border border-outline-variant/20">
-                        <span className="font-mono text-primary font-bold">#{idx + 1}</span>
-                        <p className="line-clamp-1 flex-1 text-on-surface">{q.stem || q.question || '题目文本'}</p>
-                        <span className="text-[11px] text-outline whitespace-nowrap">{q.type || '试题'} · {q.score || 0}分</span>
+                      <div key={q.id || idx} className="text-[12px] p-2.5 rounded-lg bg-surface-container-lowest text-on-surface-variant flex items-start gap-2.5 border border-outline-variant/20 hover:border-primary/40 transition-colors">
+                        <span className="font-mono text-primary font-bold px-1.5 py-0.5 rounded bg-primary-fixed/40 text-[11px] shrink-0">
+                          #{q.num || idx + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="line-clamp-2 text-on-surface text-[12px] leading-relaxed">
+                            {getQuestionPreviewContent(q, idx)}
+                          </p>
+                        </div>
+                        <span className="text-[11px] text-outline whitespace-nowrap shrink-0 font-label-mono">
+                          {q.type || '试题'} · {q.score ?? 0}分
+                        </span>
                       </div>
                     ))}
                   </div>
