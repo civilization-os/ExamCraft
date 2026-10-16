@@ -427,9 +427,9 @@ export default function ScratchpadCanvas({
         </div>
       )}
 
-      {/* 统一自定义 Confirm 确认弹窗 */}
+      {/* 统一自定义 Confirm 确认弹窗（约束在草稿工作台内部，居中显示且绝不被遮挡） */}
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-70 bg-on-background/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+        <div className="absolute inset-0 z-50 bg-black/45 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-surface-container-lowest rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-outline-variant/40 space-y-3 animate-in zoom-in-95 duration-150">
             <div className="flex items-center gap-2.5 text-error">
               <span className="material-symbols-outlined text-[24px]">warning_amber</span>
@@ -442,7 +442,7 @@ export default function ScratchpadCanvas({
               <button
                 type="button"
                 onClick={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
-                className="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[12px] font-medium transition cursor-pointer"
+                className="px-3.5 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[12px] font-medium transition cursor-pointer"
               >
                 取消
               </button>
@@ -452,7 +452,7 @@ export default function ScratchpadCanvas({
                   confirmDialog.onConfirm();
                   setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
                 }}
-                className={`px-3 py-1.5 rounded-lg text-white text-[12px] font-semibold transition cursor-pointer shadow-xs ${
+                className={`px-3.5 py-1.5 rounded-lg text-white text-[12px] font-semibold transition cursor-pointer shadow-xs ${
                   confirmDialog.confirmType === 'danger'
                     ? 'bg-error hover:bg-error/90'
                     : 'bg-primary hover:bg-primary/90'
