@@ -5,16 +5,15 @@ import MathMarkdown from './MathMarkdown';
  * ScratchpadCanvas / Workbench
  * 一体化考场草稿演算工作台：
  * 1. 自由手绘涂鸦画板（Canvas、方格坐标纸、信纸横线、白纸、多色笔刷、橡皮、撤销重做、导出）
- * 2. 文本公式笔记与 KaTeX 实时高保真渲染（无缝同屏呈现，无需模式切换）
- * 3. 考场专属 Agent Loop 帮写草稿引擎（严格限制：只能局限于考生说出来的才能写，绝不帮算）
- * 4. 统一 UI 确认对话框与 Toast 提示，彻底根除浏览器丑陋的原生 alert/confirm
+ * 2. 智能 AI 画图与手写引擎：AI 可直接在 Canvas 上代画直角坐标系、函数曲线、几何三角形/圆、辅助线，手写推导文字
+ * 3. 文本公式笔记与 KaTeX 实时高保真渲染（同屏呈现，无需模式切换）
+ * 4. 考场专属 Agent Loop（严格限制：只能画/写考生说出的内容，严禁代算）
+ * 5. 统一 UI 确认对话框与 Toast 提示，彻底根除浏览器丑陋的原生 alert/confirm
  */
 export default function ScratchpadCanvas({
   storageKey = 'examcraft_scratchpad_canvas',
   textStorageKey = 'examcraft_scratchpad_text',
   contextProblem = '',
-  currentAnswerDraft = '',
-  onScribeToAnswer = null,
   isMaximized = false,
   onToggleMaximize = null,
   onClose = null
@@ -46,7 +45,7 @@ export default function ScratchpadCanvas({
   // ==================== Agent Loop 状态 ====================
   const [spokenInput, setSpokenInput] = useState('');
   const [isAgentRunning, setIsAgentRunning] = useState(false);
-  const [agentLoopStage, setAgentLoopStage] = useState(''); // 'audit' | 'scribe' | 'board'
+  const [agentLoopStage, setAgentLoopStage] = useState('');
   const [agentMessage, setAgentMessage] = useState('');
 
   // ==================== 统一 UI 弹窗与 Toast 状态 ====================
@@ -55,14 +54,14 @@ export default function ScratchpadCanvas({
     title: '',
     message: '',
     confirmText: '确认',
-    confirmType: 'danger', // 'danger' | 'primary'
+    confirmType: 'danger',
     onConfirm: () => {}
   });
 
   const [toast, setToast] = useState({
     show: false,
     message: '',
-    type: 'info' // 'success' | 'warn' | 'info'
+    type: 'info'
   });
 
   const showToast = useCallback((message, type = 'info') => {
@@ -141,7 +140,7 @@ export default function ScratchpadCanvas({
     };
   }, [resizeCanvas]);
 
-  // 保存手绘画布快照
+  // 保存手绘画布快照到撤销栈
   const saveToHistory = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -158,7 +157,7 @@ export default function ScratchpadCanvas({
     try {
       localStorage.setItem(storageKey, dataUrl);
     } catch (e) {
-      console.warn('Canvas save to localStorage error:', e);
+      console.warn('Canvas save error:', e);
     }
   }, [historyStep, storageKey]);
 
@@ -205,7 +204,7 @@ export default function ScratchpadCanvas({
     }
   };
 
-  // 一键清屏（使用统一系统 UI 弹窗）
+  // 清空手绘（统一内嵌 UI）
   const handleClearCanvasClick = () => {
     setConfirmDialog({
       isOpen: true,
@@ -227,7 +226,7 @@ export default function ScratchpadCanvas({
     });
   };
 
-  // 一键清空文本草稿（使用统一系统 UI 弹窗）
+  // 清空板书（统一内嵌 UI）
   const handleClearNotesClick = () => {
     setConfirmDialog({
       isOpen: true,
@@ -242,7 +241,7 @@ export default function ScratchpadCanvas({
     });
   };
 
-  // 导出图片下载
+  // 导出图片
   const handleDownload = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -262,7 +261,7 @@ export default function ScratchpadCanvas({
     showToast('草稿手绘图已导出保存', 'success');
   };
 
-  // 坐标计算
+  // 手绘坐标计算
   const getPointerPos = (e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -273,7 +272,7 @@ export default function ScratchpadCanvas({
     };
   };
 
-  // 手绘开始
+  // 手绘事件
   const handlePointerDown = (e) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     isDrawingRef.current = true;
@@ -294,7 +293,6 @@ export default function ScratchpadCanvas({
     }
   };
 
-  // 手绘移动
   const handlePointerMove = (e) => {
     if (!isDrawingRef.current) return;
     const currentPoint = getPointerPos(e);
@@ -320,7 +318,6 @@ export default function ScratchpadCanvas({
     lastPointRef.current = currentPoint;
   };
 
-  // 手绘结束
   const handlePointerUp = (e) => {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
@@ -332,11 +329,242 @@ export default function ScratchpadCanvas({
     saveToHistory();
   };
 
+  // ==================== 智能 Canvas 绘图与写字执行引擎 ====================
+  // AI 真正可以在 Canvas 画板上帮画直角坐标系、函数曲线、几何三角形/圆，以及手写板书文字！
+  const executeCanvasActions = useCallback((actions) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !actions || actions.length === 0) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.width / dpr;
+    const height = canvas.height / dpr;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+
+    let textCursorY = 55;
+
+    actions.forEach((act) => {
+      if (act.type === 'write' && act.content) {
+        // 1. 在 Canvas 上手写工整板书
+        ctx.fillStyle = act.color || '#0f172a';
+        ctx.font = '600 16px "KaTeX_Main", "STKaiti", "KaiTi", "Microsoft YaHei", sans-serif';
+        ctx.textBaseline = 'middle';
+
+        const lines = act.content.split('\n');
+        lines.forEach((line) => {
+          if (!line.trim()) {
+            textCursorY += 16;
+            return;
+          }
+          const maxWidth = width - 80;
+          let currentLine = '';
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const testLine = currentLine + char;
+            const metrics = ctx.measureText(testLine);
+            if (metrics.width > maxWidth && i > 0) {
+              ctx.fillText(currentLine, 36, textCursorY);
+              currentLine = char;
+              textCursorY += 26;
+            } else {
+              currentLine = testLine;
+            }
+          }
+          if (currentLine) {
+            ctx.fillText(currentLine, 36, textCursorY);
+            textCursorY += 28;
+          }
+        });
+        textCursorY += 15;
+
+      } else if (act.type === 'axes') {
+        // 2. 在 Canvas 上绘制直角坐标系
+        const cx = Math.min(width * 0.45, 240);
+        const cy = Math.min(height * 0.55, 270);
+        const axisLen = 120;
+
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 1.8;
+        ctx.lineCap = 'round';
+
+        // X 轴
+        ctx.beginPath();
+        ctx.moveTo(cx - axisLen, cy);
+        ctx.lineTo(cx + axisLen, cy);
+        ctx.lineTo(cx + axisLen - 8, cy - 5);
+        ctx.moveTo(cx + axisLen, cy);
+        ctx.lineTo(cx + axisLen - 8, cy + 5);
+        ctx.stroke();
+
+        // Y 轴
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + axisLen);
+        ctx.lineTo(cx, cy - axisLen);
+        ctx.lineTo(cx - 5, cy - axisLen + 8);
+        ctx.moveTo(cx, cy - axisLen);
+        ctx.lineTo(cx + 5, cy - axisLen + 8);
+        ctx.stroke();
+
+        // 标签 O, x, y
+        ctx.fillStyle = '#334155';
+        ctx.font = 'italic bold 15px "KaTeX_Math", serif';
+        ctx.fillText(act.xLabel || 'x', cx + axisLen + 6, cy + 4);
+        ctx.fillText(act.yLabel || 'y', cx - 6, cy - axisLen - 8);
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText('O', cx - 14, cy + 14);
+
+      } else if (act.type === 'plot') {
+        // 3. 在 Canvas 上绘制函数图像曲线
+        const cx = Math.min(width * 0.45, 240);
+        const cy = Math.min(height * 0.55, 270);
+        const scaleX = 26;
+        const scaleY = 26;
+
+        ctx.strokeStyle = act.color || '#1d4ed8';
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = 'round';
+
+        ctx.beginPath();
+        let isFirst = true;
+
+        const evalFn = (x) => {
+          const expr = (act.expr || 'x^2').toLowerCase();
+          if (expr.includes('sin')) return Math.sin(x);
+          if (expr.includes('cos')) return Math.cos(x);
+          if (expr.includes('ln') || expr.includes('log')) return x > 0.05 ? Math.log(x) : NaN;
+          if (expr.includes('exp') || expr.includes('e^x')) return Math.exp(x);
+          if (expr.includes('sqrt')) return x >= 0 ? Math.sqrt(x) : NaN;
+          if (expr.includes('1/x')) return Math.abs(x) > 0.05 ? 1 / x : NaN;
+          if (expr.includes('x^3')) return Math.pow(x, 3);
+          return Math.pow(x, 2);
+        };
+
+        for (let x = -3.5; x <= 3.5; x += 0.08) {
+          const y = evalFn(x);
+          if (!isNaN(y) && isFinite(y)) {
+            const canvasX = cx + x * scaleX;
+            const canvasY = cy - y * scaleY;
+            if (canvasY >= cy - 130 && canvasY <= cy + 130 && canvasX >= cx - 130 && canvasX <= cx + 130) {
+              if (isFirst) {
+                ctx.moveTo(canvasX, canvasY);
+                isFirst = false;
+              } else {
+                ctx.lineTo(canvasX, canvasY);
+              }
+            } else {
+              isFirst = true;
+            }
+          } else {
+            isFirst = true;
+          }
+        }
+        ctx.stroke();
+
+        if (act.label) {
+          ctx.fillStyle = act.color || '#1d4ed8';
+          ctx.font = 'bold 14px "KaTeX_Math", serif';
+          ctx.fillText(act.label, cx + 50, cy - 70);
+        }
+
+      } else if (act.type === 'shape') {
+        // 4. 绘制几何图形
+        ctx.strokeStyle = act.color || '#047857';
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        const originX = Math.min(width * 0.45, 240) - 60;
+        const originY = Math.min(height * 0.55, 270) - 40;
+
+        if (act.shapeType === 'right_triangle') {
+          ctx.beginPath();
+          ctx.moveTo(originX, originY + 100);
+          ctx.lineTo(originX + 130, originY + 100);
+          ctx.lineTo(originX, originY);
+          ctx.closePath();
+          ctx.stroke();
+
+          // 直角标
+          ctx.beginPath();
+          ctx.moveTo(originX, originY + 86);
+          ctx.lineTo(originX + 14, originY + 86);
+          ctx.lineTo(originX + 14, originY + 100);
+          ctx.stroke();
+
+          ctx.fillStyle = act.color || '#047857';
+          ctx.font = 'bold 14px serif';
+          ctx.fillText(act.labels?.[0] || 'A', originX - 16, originY);
+          ctx.fillText(act.labels?.[1] || 'C', originX - 16, originY + 115);
+          ctx.fillText(act.labels?.[2] || 'B', originX + 135, originY + 115);
+
+        } else if (act.shapeType === 'circle') {
+          const cx = originX + 60;
+          const cy = originY + 50;
+          const r = 50;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + r, cy);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = act.color || '#047857';
+          ctx.font = 'bold 13px serif';
+          ctx.fillText('O', cx - 12, cy - 4);
+          ctx.fillText('r', cx + 22, cy - 6);
+        } else {
+          // 一般三角形
+          ctx.beginPath();
+          ctx.moveTo(originX + 60, originY);
+          ctx.lineTo(originX + 130, originY + 90);
+          ctx.lineTo(originX, originY + 90);
+          ctx.closePath();
+          ctx.stroke();
+
+          ctx.fillStyle = act.color || '#047857';
+          ctx.font = 'bold 14px serif';
+          ctx.fillText(act.labels?.[0] || 'A', originX + 55, originY - 8);
+          ctx.fillText(act.labels?.[1] || 'B', originX - 14, originY + 105);
+          ctx.fillText(act.labels?.[2] || 'C', originX + 135, originY + 105);
+        }
+
+      } else if (act.type === 'line') {
+        // 5. 辅助线 / 切线
+        ctx.strokeStyle = act.color || '#b91c1c';
+        ctx.lineWidth = 1.8;
+        if (act.lineType === 'dashed') ctx.setLineDash([5, 5]);
+        const lx1 = 120;
+        const ly1 = 180;
+        const lx2 = 280;
+        const ly2 = 120;
+        ctx.beginPath();
+        ctx.moveTo(lx1, ly1);
+        ctx.lineTo(lx2, ly2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (act.label) {
+          ctx.fillStyle = act.color || '#b91c1c';
+          ctx.font = '12px sans-serif';
+          ctx.fillText(act.label, (lx1 + lx2) / 2 + 5, (ly1 + ly2) / 2 - 8);
+        }
+      }
+    });
+
+    ctx.restore();
+    saveToHistory();
+  }, [saveToHistory]);
+
   // ==================== 核心 Agent Loop 执行逻辑 ====================
-  // 严格限制：只能局限于考生说出来的才能写，严禁帮算！
-  const handleTriggerAgentLoop = async () => {
-    if (!spokenInput.trim()) {
-      showToast('请先输入或口述您的解题步骤或思路', 'warn');
+  const handleTriggerAgentLoop = async (customPrompt = '') => {
+    const textToRun = (customPrompt || spokenInput).trim();
+    if (!textToRun) {
+      showToast('请先输入或点击快捷指令选择要画的图或写的字', 'warn');
       return;
     }
 
@@ -345,15 +573,14 @@ export default function ScratchpadCanvas({
     setAgentMessage('');
 
     try {
-      // 阶段 1：模拟审计进度
       await new Promise((r) => setTimeout(r, 200));
-      setAgentLoopStage('Loop 2 · 规范 LaTeX 与数学步骤转写中...');
+      setAgentLoopStage('Loop 2 · 编译 Canvas 绘图与手写指令...');
 
       const res = await fetch('/api/model/scratchpad-agent-loop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          spokenText: spokenInput,
+          spokenText: textToRun,
           contextProblem: contextProblem,
           currentBoardContent: boardText
         })
@@ -365,22 +592,27 @@ export default function ScratchpadCanvas({
         return;
       }
 
-      setAgentLoopStage('Loop 3 · 注入草稿板书...');
+      setAgentLoopStage('Loop 3 · 正在画板上执行画图与书写...');
       const agentData = data.agentData;
 
       if (!agentData.audit.passed) {
-        setAgentMessage(`⚠️ ${agentData.audit.reason}：只能帮写您明确说出的内容，严禁诱导计算！`);
-        showToast('检测到计算诱导，已触碰考场防纪律红线', 'warn');
+        setAgentMessage(`⚠️ ${agentData.audit.reason}：只能帮画/帮写您说出的内容，严禁代算代答！`);
+        showToast('检测到计算诱导，已触碰考场防作弊纪律红线', 'warn');
       } else {
-        // 成功将考生说出的内容规范誊写并追加到草稿板
+        // 1. 在 Canvas 画板上真正绘制图形和书写文字！
+        if (agentData.canvasActions && agentData.canvasActions.length > 0) {
+          executeCanvasActions(agentData.canvasActions);
+        }
+
+        // 2. 同步追加到右侧规范板书笔记
         const newBoardText = boardText
           ? `${boardText}\n\n${agentData.scribeResult}`
           : agentData.scribeResult;
-
         setBoardText(newBoardText);
+
         setSpokenInput('');
-        setAgentMessage('✨ Agent Loop 帮写完成：已忠实规范誊写您的解题思路（未作多余代算）');
-        showToast('AI 已规范整理您的思路至草稿板书！', 'success');
+        setAgentMessage('✨ AI 已在画板上完成画图与手写板书（未作多余代算）');
+        showToast('AI 已在草稿板上为您完成画图与写字！', 'success');
       }
     } catch (err) {
       showToast(`Agent Loop 异常: ${err.message}`, 'warn');
@@ -390,26 +622,11 @@ export default function ScratchpadCanvas({
     }
   };
 
-  // 一键将草稿文本誊抄到试题答题区
-  const handleScribeToAnswerCard = () => {
-    if (!boardText.trim()) {
-      showToast('草稿板书为空，无内容可誊抄', 'warn');
-      return;
-    }
-    if (onScribeToAnswer) {
-      const mergedAnswer = currentAnswerDraft
-        ? `${currentAnswerDraft}\n\n${boardText}`
-        : boardText;
-      onScribeToAnswer(mergedAnswer);
-      showToast('✨ 已将草稿板书成功誊录入当前试题作答区！', 'success');
-    }
-  };
-
   return (
     <div className="relative flex flex-col h-full w-full select-none overflow-hidden bg-surface-container-lowest rounded-2xl">
       {/* 统一 Toast 顶部提示条 */}
       {toast.show && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-60 animate-in fade-in slide-in-from-top-3 duration-200">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-60 animate-in fade-in slide-in-from-top-3 duration-200 pointer-events-none">
           <div
             className={`px-3.5 py-1.5 rounded-full text-[12px] font-medium shadow-lg flex items-center gap-1.5 backdrop-blur-md border ${
               toast.type === 'success'
@@ -476,7 +693,7 @@ export default function ScratchpadCanvas({
 
           <div className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/30 border border-secondary/20 text-secondary text-[11px] font-medium">
             <span className="material-symbols-outlined text-[13px]">shield</span>
-            <span>铁律：AI 帮写不帮算，只能局限于您说出的内容</span>
+            <span>铁律：AI 帮画帮写不帮算，只能局限于您说出的内容</span>
           </div>
         </div>
 
@@ -616,7 +833,6 @@ export default function ScratchpadCanvas({
 
         {/* 右区：侧栏收放、全屏与关闭控制 */}
         <div className="flex items-center gap-1">
-          {/* 折叠/展开板书栏按钮 */}
           <button
             type="button"
             onClick={() => setIsNotesCollapsed(!isNotesCollapsed)}
@@ -630,10 +846,9 @@ export default function ScratchpadCanvas({
             <span className="material-symbols-outlined text-[14px]">
               {isNotesCollapsed ? 'splitscreen_left' : 'splitscreen'}
             </span>
-            <span>{isNotesCollapsed ? '展开公式板书' : '收起板书'}</span>
+            <span>{isNotesCollapsed ? '展开板书栏' : '收起板书'}</span>
           </button>
 
-          {/* 全屏放大 */}
           {onToggleMaximize && (
             <button
               type="button"
@@ -647,7 +862,6 @@ export default function ScratchpadCanvas({
             </button>
           )}
 
-          {/* 关闭 */}
           {onClose && (
             <button
               type="button"
@@ -661,7 +875,7 @@ export default function ScratchpadCanvas({
         </div>
       </div>
 
-      {/* 主体工作区：手绘画布 与 公式笔记板书 一体同屏并存 */}
+      {/* 主体工作区：手绘画布 与 公式板书 一体同屏并存 */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row w-full h-full p-2 gap-2">
         {/* 左侧：手绘涂鸦主画板 */}
         <div
@@ -689,38 +903,63 @@ export default function ScratchpadCanvas({
             className="absolute inset-0 block w-full h-full touch-none"
           />
 
-          {/* 水印引导 */}
           {history.length <= 1 && (
             <div className="absolute bottom-3 left-3 pointer-events-none text-[11px] text-outline/60 flex items-center gap-1 font-mono">
               <span className="material-symbols-outlined text-[14px]">gesture</span>
-              <span>手绘草稿区：支持鼠标或触控笔任意演算、画几何图与对齐竖式</span>
+              <span>手绘画板：支持鼠标/触控笔自由涂鸦，右侧可让 AI 帮画坐标系、函数图与手写板书</span>
             </div>
           )}
         </div>
 
-        {/* 右侧：一体化公式板书与 Agent Loop 帮写面板 */}
+        {/* 右侧：一体化公式板书与 Agent Loop 帮画/帮写协作区 */}
         {!isNotesCollapsed && (
-          <div className="w-full lg:w-[420px] xl:w-[480px] h-full flex flex-col gap-2 shrink-0 animate-in fade-in duration-150">
-            {/* 模块 1：Agent Loop 口述帮写工作区 */}
+          <div className="w-full lg:w-[420px] xl:w-[460px] h-full flex flex-col gap-2 shrink-0 animate-in fade-in duration-150">
+            {/* 模块 1：Agent Loop 口述帮画 & 帮写工作区 */}
             <div className="bg-surface-container-low rounded-xl p-2.5 border border-outline-variant/30 flex flex-col gap-2 shrink-0">
               <div className="flex items-center justify-between text-[12px] font-medium text-on-surface">
                 <div className="flex items-center gap-1 text-primary">
-                  <span className="material-symbols-outlined text-[15px]">record_voice_over</span>
-                  <span>Agent Loop 帮写草稿</span>
+                  <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+                  <span>AI 帮画图 & 帮写板书 (Agent Loop)</span>
                 </div>
                 <span className="text-[10px] text-outline">
-                  只能帮写您说出的步骤 · 严禁帮算
+                  只能帮画/写您说的 · 严禁帮算
                 </span>
               </div>
 
-              {/* 口述输入框 */}
+              {/* 快捷画图 & 常用板书指令胶囊 */}
+              <div className="flex items-center gap-1 flex-wrap">
+                {[
+                  { label: '📈 直角坐标系', prompt: '帮我画一个标准的直角坐标系' },
+                  { label: '抛物线 y=x²', prompt: '画一个直角坐标系并绘制二次函数 y=x^2 抛物线' },
+                  { label: '正弦 y=sin(x)', prompt: '画一个直角坐标系并绘制正弦波 y=sin(x)' },
+                  { label: '📐 直角三角形', prompt: '画一个直角三角形 ABC，角 C 为直角' },
+                  { label: '⭕ 画圆与半径', prompt: '画一个圆并标出圆心 O 和半径 r' }
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => {
+                      setSpokenInput(item.prompt);
+                      handleTriggerAgentLoop(item.prompt);
+                    }}
+                    disabled={isAgentRunning}
+                    className="px-2 py-0.5 rounded-md bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface text-[10px] font-medium border border-outline-variant/30 transition cursor-pointer disabled:opacity-40"
+                    title={`点击快捷执行：${item.prompt}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* 口述/需求输入框 */}
               <div className="relative">
                 <textarea
                   value={spokenInput}
                   onChange={(e) => setSpokenInput(e.target.value)}
-                  placeholder="在此输入或口述您的解题步骤（例如：
-“由分部积分法，设 u=ln(x), dv=x dx，则 du=1/x dx...”
-AI 将启动 Agent Loop 将其誊写为规范板书，严禁替您算后续）"
+                  placeholder="说出或输入您要画的图或写的字，例如：
+“画一个坐标系并在上面画 y = x^2”
+“帮我把设项：设 u = ln(x+1) 写入画板”
+（AI 将严格按您所说在画板上作画/写字，绝不替您算答案）"
                   disabled={isAgentRunning}
                   rows={2}
                   className="w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/40 text-[12px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary resize-none leading-relaxed"
@@ -736,34 +975,34 @@ AI 将启动 Agent Loop 将其誊写为规范板书，严禁替您算后续）"
                       <span>{agentLoopStage}</span>
                     </span>
                   ) : agentMessage ? (
-                    <span className="text-secondary text-[11px] truncate max-w-[220px]" title={agentMessage}>
+                    <span className="text-secondary text-[11px] truncate max-w-[210px]" title={agentMessage}>
                       {agentMessage}
                     </span>
                   ) : (
-                    <span className="text-outline text-[11px]">准备就绪，支持分步循环帮写</span>
+                    <span className="text-outline text-[11px]">随时下达画图或写字指令</span>
                   )}
                 </div>
 
                 <button
                   type="button"
-                  onClick={handleTriggerAgentLoop}
+                  onClick={() => handleTriggerAgentLoop()}
                   disabled={isAgentRunning || !spokenInput.trim()}
                   className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-40 shadow-xs"
                 >
                   <span className={`material-symbols-outlined text-[13px] ${isAgentRunning ? 'animate-spin' : ''}`}>
-                    {isAgentRunning ? 'progress_activity' : 'smart_toy'}
+                    {isAgentRunning ? 'progress_activity' : 'auto_fix_high'}
                   </span>
-                  <span>{isAgentRunning ? 'Agent 执行中...' : '⚡ 启动 Agent Loop 帮写'}</span>
+                  <span>{isAgentRunning ? '执行绘制中...' : '⚡ AI 帮画 / 帮写'}</span>
                 </button>
               </div>
             </div>
 
-            {/* 模块 2：整理后的规范板书 (支持实时 KaTeX 呈现与编辑) */}
+            {/* 模块 2：规范板书与 KaTeX 预览 */}
             <div className="flex-1 min-h-0 bg-surface-container-low rounded-xl p-2.5 border border-outline-variant/30 flex flex-col gap-1.5 overflow-hidden">
               <div className="flex items-center justify-between pb-1 border-b border-surface-container shrink-0 text-[12px]">
                 <div className="flex items-center gap-1.5 text-on-surface font-medium">
                   <span className="material-symbols-outlined text-[15px] text-secondary">menu_book</span>
-                  <span>规范板书与 KaTeX 预览</span>
+                  <span>板书备份与 KaTeX 公式</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button
@@ -779,42 +1018,27 @@ AI 将启动 Agent Loop 将其誊写为规范板书，严禁替您算后续）"
 
               {/* 板书内容展示与编辑 */}
               <div className="flex-1 min-h-0 grid grid-cols-1 gap-2 overflow-hidden">
-                {/* 源码小框 */}
                 <textarea
                   value={boardText}
                   onChange={(e) => setBoardText(e.target.value)}
-                  placeholder="AI 规范帮写整理出的板书将呈现于此，您也可以随时手动增删..."
-                  className="h-24 w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/30 text-[12px] font-mono text-on-surface focus:outline-none resize-none leading-relaxed shrink-0"
+                  placeholder="AI 整理的公式板书文本同步备份于此，亦可在此自由记录..."
+                  className="h-20 w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/30 text-[12px] font-mono text-on-surface focus:outline-none resize-none leading-relaxed shrink-0"
                 />
 
-                {/* KaTeX 渲染大预览区 */}
                 <div className="flex-1 overflow-y-auto p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/30 text-[13px] leading-relaxed text-on-surface">
                   {boardText.trim() ? (
                     <MathMarkdown content={boardText} />
                   ) : (
                     <div className="text-outline text-center py-6 text-[12px]">
-                      在上方输入思路并启动 Agent Loop，此处将实时呈现规范的 LaTeX 向量级板书
+                      在上方输入指令让 AI 在左侧画图/写字，右侧将同步呈现高保真 KaTeX 公式
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* 底部操作：一键誊抄进大题答题卡 */}
-              <div className="pt-1.5 border-t border-surface-container flex items-center justify-between shrink-0">
-                <span className="text-[11px] text-outline font-mono">
-                  {boardText.length} 字符
-                </span>
-
-                <button
-                  type="button"
-                  onClick={handleScribeToAnswerCard}
-                  disabled={!boardText.trim()}
-                  className="px-3 py-1 rounded-lg bg-primary-fixed hover:bg-primary-fixed-dim text-on-primary-fixed text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                  title="将右侧规范板书追加插入到当前试题的主观题答题区"
-                >
-                  <span className="material-symbols-outlined text-[13px] text-primary">content_paste_go</span>
-                  <span>📋 誊入本题答题卡</span>
-                </button>
+              <div className="pt-1 border-t border-surface-container flex items-center justify-between shrink-0 text-[11px] text-outline font-mono">
+                <span>{boardText.length} 字符</span>
+                <span>草稿演算专享 · 不计入卷面</span>
               </div>
             </div>
           </div>

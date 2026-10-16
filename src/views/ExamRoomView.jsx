@@ -876,8 +876,6 @@ export default function ExamRoomView({ activePaper, questions, onExit, onOpenMis
               storageKey={scratchpadCanvasStorageKey}
               textStorageKey={scratchpadStorageKey}
               contextProblem={currentQ ? `${currentQ.prompt} ${currentQ.mathExpression || ''}` : ''}
-              currentAnswerDraft={candidateDraft}
-              onScribeToAnswer={(mergedText) => handleUpdateAnswer(mergedText)}
               isMaximized={isScratchpadMaximized}
               onToggleMaximize={() => setIsScratchpadMaximized(!isScratchpadMaximized)}
               onClose={() => {

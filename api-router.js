@@ -1330,19 +1330,17 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
   ];
   const isSuspicious = cheatKeywords.some(k => spokenText.includes(k));
 
-  const prompt = `你是一个运行在考场草稿演算工作台上的【草稿规范代笔 Agent 引擎 (Scratchpad Scribe Agent)】。
-用户（考生）正在草稿纸上进行演算，并通过口述/文字给出了他本人的原始解题思路或草稿步骤。
+  const prompt = `你是一个运行在考场手绘画板上的【草稿代画与代写 Agent 引擎 (Scratchpad Painter & Scribe Agent)】。
+用户（考生）正在草稿纸上进行演算，并通过口述/文字给出了他想要在草稿画板上画的图、写的字或公式。
 
 【核心使命与最高纪律准则（绝不可触碰的红线）】：
-1. 【只能局限于考生说出来的他才能写】：
-   - 你只能忠实地将考生明确说出、给出的思路、设项、等式、条件转换或运算步骤，整理为工整规范的考场草稿板书（LaTeX 格式化）。
-   - 严禁替考生做下一步推导！严禁替考生补全后续未说的运算！
-   - 严禁替考生计算最终数值或求解结果！
-   - 若考生只说到了“设未知数 u = x^2+1”，你只能写出该设项，绝不能自行推导“则 du = 2x dx 并将原积分化为...”！
-   - 若考生口述中包含计算错误（例如“3乘2等于7”），你必须原汁原味保留为 "3 \\times 2 = 7"，绝对严禁私自替考生纠错！
+1. 【只能局限于考生说出来的他才能画、才能写】：
+   - 你只能忠实地根据考生明确说出、给出的画图需求（如“画一个坐标系”、“画二次函数抛物线”、“画一个直角三角形”、“画切线”）或者写字需求（如“帮我写下公式”、“写上设 u=ln x”），生成在 Canvas 画板上的绘制指令和规范板书。
+   - 严禁替考生做下一步推导！严禁替考生求解计算数值！
+   - 若考生只说了“画一个直角坐标系并在上面画 y = x^2”，你只能生成画坐标系和 y=x^2 抛物线的绘图指令，绝不能擅自计算积分或求导！
+   - 若考生口述说“写下 2+3=6”，你必须原汁原味写下 "2+3=6"，严禁替考生纠错！
 2. 【诱导拦截与防作弊熔断】：
-   - 若考生试图诱导你做题（例如“帮我算一下这步得多少”、“这题该怎么做”、“求出答案”），你必须立即中断执行并输出警告提示：
-   “【考场防作弊纪律提醒】AI 草稿帮写仅限根据考生口述的步骤进行规范排版，严格禁止任何代答、解题推导与代算结果。”
+   - 若考生试图诱导你做题（例如“帮我算一下这步得多少”、“这题怎么解”、“直接给答案”），必须立即判定 audit.passed = false 并警告拒答！
 
 【当前试题题干（仅供辅助理解数学变量上下文，严禁代答本题）】：
 ${contextProblem || '（无特定题干上下文）'}
@@ -1350,31 +1348,39 @@ ${contextProblem || '（无特定题干上下文）'}
 【考生当前草稿板已有内容】：
 ${currentBoardContent || '（当前草稿板为空）'}
 
-【考生本次口述/给出的草稿思路】：
+【考生本次口述/给出的草稿画图与写字需求】：
 """
 ${spokenText}
 """
 
-【Agent 执行循环规划 (Loop Stages)】：
-请以标准 JSON 格式输出如下结构：
+【输出结构（必须为标准纯 JSON）】：
 {
   "audit": {
     "passed": ${isSuspicious ? 'false' : 'true'},
-    "reason": "${isSuspicious ? '检测到诱导计算或代答意图' : '口述步骤合规，未请求代算'}"
+    "reason": "${isSuspicious ? '检测到诱导计算或代答意图' : '口述需求合规，未请求代算'}"
   },
-  "scribeResult": "规范整理后的草稿板书（支持 Markdown 与 LaTeX 块，忠实体现考生说出的内容，严禁多推导一步）",
+  "scribeResult": "规范整理后的草稿文本（Markdown与LaTeX，忠实记录考生所言）",
+  "canvasActions": [
+    // 根据考生口述生成相应的 Canvas 绘图与写字指令（可包含 1 到多个动作，未要求画图/写字则可为空数组）
+    // 可用类型包括：
+    // 1. 写字：{"type": "write", "content": "解：设 u = ln(x+1)", "color": "#0f172a"}
+    // 2. 坐标系：{"type": "axes", "xLabel": "x", "yLabel": "y"}
+    // 3. 函数图像：{"type": "plot", "expr": "x^2", "label": "y = x^2", "color": "#1d4ed8"} (支持: "x^2", "sin(x)", "cos(x)", "ln(x)", "e^x", "1/x", "sqrt(x)", "2*x+1" 等标准数学表达式)
+    // 4. 几何图形：{"type": "shape", "shapeType": "triangle" | "right_triangle" | "circle" | "rect", "labels": ["A", "B", "C"], "color": "#047857"}
+    // 5. 辅助线/切线：{"type": "line", "lineType": "tangent" | "arrow" | "dashed", "label": "辅助线", "color": "#b91c1c"}
+  ],
   "loopLogs": [
     "Loop 1: 语义与诚信纪律审计通过",
     "Loop 2: 规范 LaTeX 与数学步骤转录完成",
-    "Loop 3: 草稿板书卡片已生成"
+    "Loop 3: Canvas 绘图与板书动作已编译生成"
   ]
 }
-只输出纯 JSON，不要包含任何 markdown 代码块标识（如 \`\`\`json 或 \`\`\`）。`;
+只输出纯 JSON，绝对不要包含任何 markdown 代码块标识（如 \`\`\`json 或 \`\`\`）。`;
 
   try {
     const model = createChatModel(currentConfig);
     const response = await model.invoke([
-      { role: 'system', content: '你是一位严格遵守考场纪律的草稿代笔 Agent，只能帮写考生说出的内容，严禁代算与代答做题。' },
+      { role: 'system', content: '你是一位严格遵守考场纪律的草稿画图与手写代笔 Agent，只能帮画帮写考生明确说出的内容，严禁代算与代答做题。' },
       { role: 'user', content: prompt }
     ]);
 
@@ -1389,13 +1395,19 @@ ${spokenText}
       parsed = {
         audit: { passed: !isSuspicious, reason: isSuspicious ? '疑似诱导计算' : '正常转录' },
         scribeResult: raw,
+        canvasActions: [{ type: 'write', content: spokenText, color: '#0f172a' }],
         loopLogs: ['Loop 1: 基础转录完成', 'Loop 2: 板书格式化完成']
       };
     }
 
+    if (!parsed.canvasActions) {
+      parsed.canvasActions = [];
+    }
+
     if (isSuspicious || !parsed.audit.passed) {
       parsed.audit.passed = false;
-      parsed.scribeResult = '【考场防作弊纪律提醒】便签草稿纸仅支持书写排版、LaTeX 语法规范与思路结构整理。根据考场防作弊规范，严禁代答、计算或提供任何题目求解与计算推导。';
+      parsed.scribeResult = '【考场防作弊纪律提醒】便签草稿纸仅支持书写排版、画图与思路整理。根据考场防作弊规范，严禁代答、计算或提供任何题目求解与计算推导。';
+      parsed.canvasActions = [];
     }
 
     res.json({
