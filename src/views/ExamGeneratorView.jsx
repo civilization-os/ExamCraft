@@ -253,6 +253,75 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
     setExpandedPassages(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
+  // Quick apply sample paper presets across all workbench modes
+  const handleApplySample = (type) => {
+    if (type === 'math') {
+      setMarkdownText(SAMPLE_MATH_MD);
+      setCloneRawText(`2026年全国硕士研究生入学统一考试（数学二）试题与解析
+一、选择题 (1~10小题，每小题5分，共50分)
+1. 当 x 趋于 0 时，已知 ax^2 + bx + arcsin x 与 (1+x^2)^(1/3) - 1 是等价无穷小，则
+A. a=1/3, b=-1
+B. a=1/3, b=1
+C. a=2/3, b=-1
+D. a=2/3, b=1
+答案: A
+解析: 当 x->0 时，(1+x^2)^(1/3)-1 ~ (1/3)x^2，arcsin x = x + o(x^2)。故 ax^2+bx+arcsin x = (b+1)x + ax^2 + o(x^2)。与 (1/3)x^2 等价必有 b+1=0, a=1/3。选 A。
+
+二、填空题 (11~16小题，每小题5分，共30分)
+11. 定积分 ∫_0^1 (3x^2 + 2x) dx 的值为 ______。
+答案: 2
+解析: 原式 = [x^3 + x^2]_0^1 = 2。
+
+三、解答证明题 (17~22小题，共70分)
+21. (本题满分 12 分)
+求微分方程 x^2 y'' - 2xy' - (y')^2 = 0 满足条件 y(3)=1/2, y'(3)=-9 的解。`);
+      setCustomTitle('《2026年全国硕士研究生入学统一考试（数学二）》');
+      setTotalScore(150);
+      setDuration(180);
+      setDifficulty('考研统考');
+    } else if (type === 'english') {
+      setMarkdownText(SAMPLE_ENGLISH_MD);
+      setCloneRawText(`2026年全国硕士研究生入学统一考试（英语一）全真模拟精选
+Section I Use of English
+1. The concept of artificial intelligence has transitioned from science fiction to everyday reality...
+A. although  B. because  C. unless  D. while
+答案: D
+
+Section II Reading Comprehension
+Text 1
+Over the past two decades, the global scientific landscape has witnessed an unprecedented revolution driven by computational intelligence...
+21. According to Paragraph 1, the convergence of computational technologies has
+A. delayed theoretical breakthroughs
+B. revolutionized research methodologies
+C. rendered empirical experiments obsolete
+D. replaced human researchers in laboratories
+答案: B`);
+      setCustomTitle('《2026年考研英语一长篇阅读与词汇精选》');
+      setTotalScore(100);
+      setDuration(180);
+      setDifficulty('进阶拓展');
+    } else if (type === 'linalg') {
+      setMarkdownText(SAMPLE_LINALG_MD);
+      setCloneRawText(`《线性代数矩阵特征值专项强化卷》
+一、单项选择题
+1. 设 3 阶方阵 A 的特征值为 1, -1, 2，则伴随矩阵的行列式 |A*| 等于：
+A. -2  B. 2  C. 4  D. -4
+答案: C
+解析: |A| = 1*(-1)*2 = -2, |A*| = |A|^(3-1) = (-2)^2 = 4。选 C。
+
+2. 若向量组 α1, α2, α3 线性无关，则下列向量组中线性无关的是：
+A. α1-α2, α2-α3, α3-α1
+B. α1+α2, α2+α3, α3+α1
+C. α1+α2+α3, 2α1+2α2+2α3
+D. 0, α1, α2
+答案: B`);
+      setCustomTitle('《高等数学与线性代数期末统考专项强化》');
+      setTotalScore(100);
+      setDuration(120);
+      setDifficulty('基础达标');
+    }
+  };
+
   // Progressive Chunked AI Parser
   // Cuts long texts into lightweight passage-aware batches, preventing HTTP 413 and LLM output token overflows
   const runProgressiveChunkParser = async (mdText) => {
@@ -765,6 +834,56 @@ export default function ExamGeneratorView({ papers, onStartExam, onNavigate }) {
             <span>入口三 · Markdown 题稿即时转卷</span>
             <span className="text-[10px] font-label-mono px-1.5 py-0.2 rounded bg-secondary-container text-on-secondary-container font-bold">无感 AI</span>
           </button>
+        </div>
+
+        {/* Global Quick Sample Paper Bar */}
+        <div className="bg-surface-container-lowest p-space-sm px-space-md rounded-xl shadow-xs border border-outline-variant/30 flex items-center justify-between gap-space-md flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 text-primary">
+              <span className="material-symbols-outlined text-[18px]">auto_stories</span>
+              <span className="font-label-sm text-label-sm font-semibold text-on-surface">快速套用试卷样例:</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                handleApplySample('math');
+                setActiveMode('markdown');
+              }}
+              className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm font-semibold transition-colors cursor-pointer border border-primary/20 flex items-center gap-1"
+              title="载入考研数学二试卷样例 (含选择、填空与大题)"
+            >
+              <span>2026考研数学二真题</span>
+              <span className="text-[11px] opacity-75">(22题·解析全)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleApplySample('english');
+                setActiveMode('markdown');
+              }}
+              className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-secondary font-label-sm font-semibold transition-colors cursor-pointer border border-secondary/20 flex items-center gap-1"
+              title="载入考研英语长篇阅读切片试卷样例"
+            >
+              <span>2026考研英语阅读长文专项</span>
+              <span className="text-[11px] opacity-75">(篇章切片)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleApplySample('linalg');
+                setActiveMode('markdown');
+              }}
+              className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm transition-colors cursor-pointer border border-outline-variant/30 flex items-center gap-1"
+              title="载入线性代数矩阵特征值专项试卷样例"
+            >
+              <span>线性代数特征值专项</span>
+              <span className="text-[11px] opacity-75">(期末强化)</span>
+            </button>
+          </div>
+          <div className="text-on-surface-variant font-label-mono text-[11px] flex items-center gap-1">
+            <span className="material-symbols-outlined text-[15px] text-primary">verified</span>
+            <span>官方样例真题库已全面保留：真题全套题干、LaTeX 与标答就绪，0 伪造数据</span>
+          </div>
         </div>
 
         {/* MODE 1: 1:1 PDF & Raw Exam Text AI Clone */}

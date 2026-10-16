@@ -58,7 +58,7 @@ export default function App() {
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
     return INITIAL_PAPERS;
