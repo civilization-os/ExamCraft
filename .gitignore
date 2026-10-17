@@ -2,6 +2,9 @@ node_modules
 dist
 dist-ssr
 *.local
+examcraft-config.json
+examcraft-model-usage.json
+examcraft-model-usage-daily.json
 .vscode/*
 !.vscode/extensions.json
 .idea
