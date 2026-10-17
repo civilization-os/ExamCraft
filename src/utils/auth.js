@@ -89,11 +89,11 @@ export async function apiLogin(username, password) {
   return data.user;
 }
 
-export async function apiRegister(username, password, roleType = 'teacher') {
+export async function apiRegister(username, password, roleType = 'teacher', email = '') {
   const res = await fetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, roleType })
+    body: JSON.stringify({ username, password, roleType, email })
   });
   const data = await res.json();
   if (!res.ok || !data.success) {

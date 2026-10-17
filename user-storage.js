@@ -126,7 +126,7 @@ export function requireAuth(req, res, next) {
   next();
 }
 
-export function registerUser(username, password, roleType = 'teacher') {
+export function registerUser(username, password, roleType = 'teacher', email = '') {
   const cleanUsername = String(username || '').trim();
   if (!cleanUsername || cleanUsername.length < 2 || cleanUsername.length > 24) {
     throw new Error('用户名长度需在 2 到 24 个字符之间');
@@ -138,6 +138,14 @@ export function registerUser(username, password, roleType = 'teacher') {
     throw new Error('密码长度不能少于 6 位');
   }
 
+  let cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanEmail && cleanUsername.includes('@')) {
+    cleanEmail = cleanUsername.toLowerCase();
+  }
+  if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('请输入合法的邮箱格式（如 yourname@qq.com）');
+  }
+
   const cleanRoleType = roleType === 'student' ? 'student' : 'teacher';
 
   const users = loadUsers();
@@ -147,6 +155,13 @@ export function registerUser(username, password, roleType = 'teacher') {
     throw new Error('该用户名已被注册，请直接登录或换一个用户名');
   }
 
+  if (cleanEmail) {
+    const emailExists = users.find((u) => u.email && u.email.toLowerCase() === cleanEmail);
+    if (emailExists) {
+      throw new Error('该安全邮箱已被其他账号绑定，请使用其他邮箱');
+    }
+  }
+
   const salt = crypto.randomBytes(16).toString('hex');
   const passwordHash = crypto.scryptSync(password, salt, 64).toString('hex');
   const isFirstUser = users.length === 0;
@@ -154,6 +169,7 @@ export function registerUser(username, password, roleType = 'teacher') {
   const newUser = {
     id: `u_${crypto.randomBytes(6).toString('hex')}`,
     username: cleanUsername,
+    email: cleanEmail,
     passwordHash,
     salt,
     role: isFirstUser ? 'admin' : 'user',
@@ -167,12 +183,19 @@ export function registerUser(username, password, roleType = 'teacher') {
   // Initialize user directory
   getUserDir(newUser.id);
 
-  const token = signToken({ userId: newUser.id, username: newUser.username, role: newUser.role, roleType: newUser.roleType });
+  const token = signToken({
+    userId: newUser.id,
+    username: newUser.username,
+    email: newUser.email,
+    role: newUser.role,
+    roleType: newUser.roleType
+  });
   return {
     token,
     user: {
       id: newUser.id,
       username: newUser.username,
+      email: newUser.email,
       role: newUser.role,
       roleType: newUser.roleType,
       createdAt: newUser.createdAt
@@ -180,14 +203,18 @@ export function registerUser(username, password, roleType = 'teacher') {
   };
 }
 
-export function authenticateUser(username, password) {
-  const cleanUsername = String(username || '').trim().toLowerCase();
-  if (!cleanUsername || !password) {
-    throw new Error('请输入用户名和密码');
+export function authenticateUser(identity, password) {
+  const cleanIdentity = String(identity || '').trim().toLowerCase();
+  if (!cleanIdentity || !password) {
+    throw new Error('请输入用户名/邮箱和密码');
   }
 
   const users = loadUsers();
-  const user = users.find((u) => u.username.toLowerCase() === cleanUsername);
+  const user = users.find(
+    (u) =>
+      u.username.toLowerCase() === cleanIdentity ||
+      (u.email && u.email.toLowerCase() === cleanIdentity)
+  );
   if (!user) {
     throw new Error('用户名或密码错误');
   }
@@ -199,12 +226,19 @@ export function authenticateUser(username, password) {
     throw new Error('用户名或密码错误');
   }
 
-  const token = signToken({ userId: user.id, username: user.username, role: user.role, roleType: user.roleType || 'teacher' });
+  const token = signToken({
+    userId: user.id,
+    username: user.username,
+    email: user.email || '',
+    role: user.role,
+    roleType: user.roleType || 'teacher'
+  });
   return {
     token,
     user: {
       id: user.id,
       username: user.username,
+      email: user.email || '',
       role: user.role,
       roleType: user.roleType || 'teacher',
       createdAt: user.createdAt
@@ -219,10 +253,33 @@ export function findUserById(userId) {
   return {
     id: user.id,
     username: user.username,
+    email: user.email || '',
     role: user.role,
     roleType: user.roleType || 'teacher',
     createdAt: user.createdAt
   };
+}
+
+export function bindUserEmail(userId, email) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('请输入合法的邮箱格式（如 yourname@qq.com）');
+  }
+
+  const users = loadUsers();
+  const user = users.find((u) => u.id === userId);
+  if (!user) throw new Error('用户不存在');
+
+  const exists = users.find((u) => u.id !== userId && u.email && u.email.toLowerCase() === cleanEmail);
+  if (exists) {
+    throw new Error('该邮箱已被其他账号绑定');
+  }
+
+  user.email = cleanEmail;
+  user.updatedAt = Date.now();
+  saveUsers(users);
+
+  return { success: true, email: cleanEmail };
 }
 
 export function changePassword(userId, oldPassword, newPassword) {
@@ -272,10 +329,14 @@ export function createPasswordResetToken(identity) {
   user.resetTokenCreatedAt = Date.now();
   saveUsers(users);
 
+  const resolvedEmail = user.email || (user.username.includes('@') ? user.username : '');
+
   return {
     user: {
       id: user.id,
       username: user.username,
+      email: resolvedEmail,
+      hasEmail: Boolean(resolvedEmail),
       role: user.role,
       roleType: user.roleType || 'teacher'
     },

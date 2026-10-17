@@ -1160,8 +1160,8 @@ apiRouter.get('/auth/status', (req, res) => {
 // POST /api/auth/register — 注册新用户
 apiRouter.post('/auth/register', (req, res) => {
   try {
-    const { username, password, roleType } = req.body || {};
-    const result = registerUser(username, password, roleType);
+    const { username, password, roleType, email } = req.body || {};
+    const result = registerUser(username, password, roleType, email);
     res.json({
       success: true,
       message: '注册成功',
@@ -1208,17 +1208,33 @@ apiRouter.post('/auth/forgot-password', async (req, res) => {
     const host = req.get('host') || 'localhost:5173';
     const resetUrl = `${protocol}://${host}/#/login?mode=reset&token=${result.token}`;
 
-    const mailResult = await sendPasswordResetMail({
-      toEmail: identity.includes('@') ? identity : '',
-      username: result.user.username,
-      resetUrl,
-      token: result.token
-    });
+    const targetEmail = result.user.email || (identity.includes('@') ? identity : '');
+
+    let mailResult = { success: true, delivered: false };
+    if (targetEmail) {
+      mailResult = await sendPasswordResetMail({
+        toEmail: targetEmail,
+        username: result.user.username,
+        resetUrl,
+        token: result.token
+      });
+    }
+
+    function maskEmail(em) {
+      if (!em || !em.includes('@')) return '';
+      const [local, dom] = em.split('@');
+      if (local.length <= 2) return `${local[0]}***@${dom}`;
+      return `${local.slice(0, 2)}***${local.slice(-1)}@${dom}`;
+    }
 
     res.json({
       success: true,
-      message: '密码重置邮件已生成并派发！若未在收件箱收到，请务必前往【垃圾箱/垃圾邮件】查找。',
-      resetUrl, // 方便本地调试与直达
+      hasEmail: Boolean(targetEmail),
+      targetEmailMasked: maskEmail(targetEmail),
+      message: targetEmail
+        ? `重置邮件已成功派发至安全邮箱（${maskEmail(targetEmail)}）！若未在收件箱收到，请务必查看【垃圾箱】。`
+        : `重置凭证已生成！该账号未绑定安全邮箱，已为您生成直达重置链接（可在控制台或下方直达）。`,
+      resetUrl,
       delivered: mailResult.delivered,
       user: result.user
     });

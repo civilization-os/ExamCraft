@@ -87,6 +87,7 @@ export default function AuthView({
 }) {
   const [tab, setTab] = useState('login'); // 'login' | 'register' | 'forgot' | 'reset'
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [role, setRole] = useState('teacher'); // 'teacher' | 'student'
@@ -204,9 +205,11 @@ export default function AuthView({
         setForgotSuccessInfo({
           message: data.message,
           resetUrl: data.resetUrl,
+          hasEmail: data.hasEmail,
+          targetEmailMasked: data.targetEmailMasked,
           username: cleanIdentity
         });
-        setSuccessMsg(data.message || '重置邮件已分发，请查收！');
+        setSuccessMsg(data.message || '重置凭证已生成！');
       } catch (err) {
         setErrorMsg(err.message || '申请重置密码失败，请核对账号信息');
       } finally {
@@ -274,6 +277,10 @@ export default function AuthView({
         setErrorMsg('用户名长度需在 2 到 32 个字符之间');
         return;
       }
+      if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+        setErrorMsg('请输入正确的安全邮箱格式（如 yourname@qq.com）');
+        return;
+      }
       if (password.length < 6) {
         setErrorMsg('密码长度不能少于 6 位');
         return;
@@ -290,7 +297,7 @@ export default function AuthView({
       if (tab === 'login') {
         user = await apiLogin(cleanUsername, password);
       } else {
-        user = await apiRegister(cleanUsername, password, role);
+        user = await apiRegister(cleanUsername, password, role, email.trim());
       }
       if (rememberMe) {
         try {
@@ -634,23 +641,43 @@ export default function AuthView({
                         mark_email_read
                       </span>
                       <div className="space-y-1">
-                        <h3 className="text-sm font-bold text-on-surface">密码重置邮件已分发！</h3>
+                        <h3 className="text-sm font-bold text-on-surface">密码重置凭证已生成！</h3>
                         <p className="text-xs text-on-surface-variant leading-relaxed">
-                          系统已向目标账号 <strong className="text-on-surface">{forgotSuccessInfo.username}</strong> 生成包含专属重置凭证的动态邮件。
+                          {forgotSuccessInfo.hasEmail ? (
+                            <>
+                              已向您的安全邮箱 <strong className="text-primary font-mono">{forgotSuccessInfo.targetEmailMasked}</strong> 发送专属重置邮件。
+                            </>
+                          ) : (
+                            <>
+                              目标账号 <strong className="text-on-surface">{forgotSuccessInfo.username}</strong> 未绑定安全邮箱，已为您生成直达重置链接。
+                            </>
+                          )}
                         </p>
                       </div>
                     </div>
 
-                    {/* SPAM REMINDER CALLOUT */}
-                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs leading-relaxed space-y-1.5">
-                      <div className="flex items-center gap-1.5 font-bold">
-                        <span className="material-symbols-outlined text-[18px]">folder_special</span>
-                        <span>特别提示：请务必检查【垃圾箱】</span>
+                    {/* SPAM REMINDER CALLOUT (if email exists) */}
+                    {forgotSuccessInfo.hasEmail ? (
+                      <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs leading-relaxed space-y-1.5">
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <span className="material-symbols-outlined text-[18px]">folder_special</span>
+                          <span>特别提示：请务必检查【垃圾箱】</span>
+                        </div>
+                        <p className="text-[11px] opacity-90">
+                          本邮件由 ExamCraft AI 自动化系统直接派发（未经外部商业企业认证），公共邮箱极大概率会将其自动归入<strong>【垃圾邮件】或【垃圾箱】</strong>，请前往垃圾箱查阅并点击动态链接重置。
+                        </p>
                       </div>
-                      <p className="text-[11px] opacity-90">
-                        本邮件由 ExamCraft AI 自动化系统直接派发（未经外部商业企业认证），公共邮箱极大概率会将其自动归入<strong>【垃圾邮件】或【垃圾箱】</strong>，请前往垃圾箱查阅并点击动态链接重置。
-                      </p>
-                    </div>
+                    ) : (
+                      <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-surface-container-highest text-on-surface-variant text-xs leading-relaxed space-y-1">
+                        <div className="flex items-center gap-1.5 font-bold text-on-surface">
+                          <span className="material-symbols-outlined text-[18px] text-primary">info</span>
+                          <span>提示：账号尚未绑定安全邮箱</span>
+                        </div>
+                        <p className="text-[11px] opacity-90">
+                          为保障您不丢失操作进度，您可直接点击下方按钮前往设置新密码。
+                        </p>
+                      </div>
+                    )}
 
                     {/* Dev/Local Shortcut if available */}
                     {forgotSuccessInfo.resetUrl && (
@@ -836,7 +863,7 @@ export default function AuthView({
                 {/* Input 1: Identity / Email / Username */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-semibold text-on-surface" htmlFor="identity-input">
-                    用户名 / 邮箱
+                    {tab === 'register' ? '设置用户名' : '用户名 / 邮箱'}
                   </label>
                   <div className="relative flex items-center">
                     <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
@@ -847,13 +874,41 @@ export default function AuthView({
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="请输入用户名或注册邮箱"
+                      placeholder={tab === 'register' ? '设置个性用户名（2~24 字符）' : '请输入用户名或注册邮箱'}
                       required
                       disabled={isLoading}
                       className="w-full h-10 pl-9 pr-3 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
                     />
                   </div>
                 </div>
+
+                {/* Input 1.5: Security Email (Registration only) */}
+                {tab === 'register' && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-on-surface" htmlFor="security-email-input">
+                        安全邮箱
+                      </label>
+                      <span className="text-[11px] text-on-surface-variant font-normal">
+                        选填 · 用于接收找回密码邮件
+                      </span>
+                    </div>
+                    <div className="relative flex items-center">
+                      <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
+                        alternate_email
+                      </span>
+                      <input
+                        id="security-email-input"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="如 yourname@qq.com (选填)"
+                        disabled={isLoading}
+                        className="w-full h-10 pl-9 pr-3 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Input 2: Password */}
                 <div className="space-y-1.5">
