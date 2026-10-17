@@ -131,8 +131,8 @@ export function registerUser(username, password) {
   if (!cleanUsername || cleanUsername.length < 2 || cleanUsername.length > 24) {
     throw new Error('用户名长度需在 2 到 24 个字符之间');
   }
-  if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(cleanUsername)) {
-    throw new Error('用户名只允许包含中文、英文字母、数字和下划线');
+  if (!/^[a-zA-Z0-9_\u4e00-\u9fa5@\.\-]+$/.test(cleanUsername)) {
+    throw new Error('用户名只允许包含中文、英文字母、数字、下划线及邮箱符号');
   }
   if (!password || password.length < 6) {
     throw new Error('密码长度不能少于 6 位');

@@ -1,6 +1,22 @@
 {
   "screens": [
     {
+      "name": "projects/4688949870103698689/screens/6c76dcd81e644ecd9c418c0a6e3c971b",
+      "title": "ExamCraft AI - 登录与注册中心 (走马灯展示 & 快速入场)",
+      "screenshot": {
+        "name": "projects/4688949870103698689/screens/6c76dcd81e644ecd9c418c0a6e3c971b/fileEntries/screenshot",
+        "downloadUrl": "https://lh3.googleusercontent.com/aida/AEtjO1UCaV5xgObJbG9cKoLhTJ14S6ibgoVEwpE-fUfxiCCy-jQWE52AYCjlg9XXDjVzn28xR91znUe7_gdtNQ6W4uj22DUQazM0JqvF17-LHSnEJkKRHPeOLInDt4t1uyWjt2DlzMmhDn1cfhkKWsPs0A07Ljmr1rgQRgMytgap9CMKCqe03BXPYFHQVpAWU7KYUB58IJp3zyHRZGdgpm1WJxyzCqT_88UbK00qUmYelgHcWPm_XKZcRx0cPwc"
+      },
+      "htmlCode": {
+        "name": "projects/4688949870103698689/screens/6c76dcd81e644ecd9c418c0a6e3c971b/fileEntries/html",
+        "downloadUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1ZTBhN2IxYTM4ZmIwNTc2MDE3Mjk0MDdiMjcyEgsSBxDB78iFqg4YAZIBIwoKcHJvamVjdF9pZBIVQhM0Njg4OTQ5ODcwMTAzNjk4Njg5&filename=&opi=89354086",
+        "mimeType": "text/html"
+      },
+      "width": "2560",
+      "height": "2048",
+      "deviceType": "DESKTOP"
+    },
+    {
       "name": "projects/4688949870103698689/screens/f045c9a9d6894f1788675e32be1cf6db",
       "title": "ExamCraft AI - 我的题集与错题本复盘",
       "screenshot": {
