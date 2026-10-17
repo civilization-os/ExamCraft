@@ -208,10 +208,10 @@ export default function AuthView({
   const activeSlideData = SLIDES[currentSlide];
 
   return (
-    <div className="min-h-screen w-full bg-surface text-on-surface flex flex-col justify-center items-center py-4 sm:py-6 lg:py-8 px-3 sm:px-6 lg:px-8 selection:bg-primary-container selection:text-on-primary-container animate-fade-in">
-      <div className="w-full max-w-[1720px] mx-auto min-h-[calc(100vh-2.5rem)] flex flex-col lg:flex-row items-stretch justify-between gap-6 my-auto">
-        {/* LEFT COLUMN: Showcase & Feature Walkthrough Carousel */}
-        <div className="w-full lg:w-[54%] flex flex-col justify-between rounded-3xl bg-inverse-surface text-inverse-on-surface p-6 sm:p-8 lg:p-12 relative overflow-hidden shadow-2xl min-h-[580px] lg:min-h-[700px]">
+    <div className="min-h-screen w-full bg-surface text-on-surface flex flex-col justify-center items-center p-3 sm:p-5 lg:p-6 xl:p-8 2xl:p-10 selection:bg-primary-container selection:text-on-primary-container animate-fade-in">
+      <div className="w-full max-w-[1920px] 2xl:max-w-[2160px] mx-auto min-h-[calc(100vh-2.5rem)] flex flex-col lg:flex-row items-stretch justify-between gap-5 lg:gap-6 xl:gap-8 my-auto">
+        {/* LEFT COLUMN: Showcase & Feature Walkthrough Carousel (Large & Expansive) */}
+        <div className="w-full lg:flex-1 flex flex-col justify-between rounded-3xl bg-inverse-surface text-inverse-on-surface p-6 sm:p-8 lg:p-10 xl:p-12 relative overflow-hidden shadow-2xl min-h-[580px] lg:min-h-[720px]">
           {/* Subtle Ambient Lighting Blobs */}
           <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-primary-container/20 blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -right-24 w-80 h-80 rounded-full bg-surface-tint/15 blur-2xl pointer-events-none"></div>
@@ -243,16 +243,16 @@ export default function AuthView({
                   <span className="px-2 py-0.5 rounded bg-primary-container/40">{activeSlideData.num}</span>
                   <span className="text-surface-dim text-[12px]">{activeSlideData.category}</span>
                 </div>
-                <h2 className="text-2xl sm:text-3xl lg:text-[34px] font-semibold text-inverse-on-surface tracking-tight leading-tight">
+                <h2 className="text-2xl sm:text-3xl lg:text-[34px] xl:text-[38px] font-semibold text-inverse-on-surface tracking-tight leading-tight">
                   {activeSlideData.title}
                 </h2>
-                <p className="text-sm sm:text-base text-surface-dim max-w-xl leading-relaxed">
+                <p className="text-sm sm:text-base xl:text-lg text-surface-dim max-w-2xl leading-relaxed">
                   {activeSlideData.desc}
                 </p>
               </div>
 
               {/* Feature Mockup Glass Card */}
-              <div className="relative rounded-2xl bg-surface-container-lowest/10 backdrop-blur-lg p-5 sm:p-6 shadow-2xl space-y-4 border border-white/10">
+              <div className="relative rounded-2xl bg-surface-container-lowest/10 backdrop-blur-lg p-5 sm:p-6 xl:p-7 shadow-2xl space-y-4 border border-white/10">
                 {/* Mockup Header */}
                 <div className="flex items-center justify-between pb-3 border-b border-white/10">
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -384,21 +384,21 @@ export default function AuthView({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Authentication Workstation Card */}
-        <div className="w-full lg:w-[46%] flex flex-col justify-between bg-surface-container-lowest rounded-3xl p-6 sm:p-8 lg:p-12 shadow-2xl relative border border-surface-container/60">
+        {/* RIGHT COLUMN: Authentication Workstation Card (Slimmer & Focused) */}
+        <div className="w-full lg:w-[420px] xl:w-[450px] 2xl:w-[480px] shrink-0 flex flex-col justify-between bg-surface-container-lowest rounded-3xl p-5 sm:p-7 xl:p-8 shadow-2xl relative border border-surface-container/60">
           {/* Top Utilities Bar: Cluster & Help & Back Button */}
           <div className="flex items-center justify-between w-full pb-3 border-b border-surface-container/60">
-            <div className="inline-flex items-center gap-1.5 text-on-surface-variant text-[12px] font-medium">
+            <div className="inline-flex items-center gap-1.5 text-on-surface-variant text-[11px] sm:text-[12px] font-medium">
               <span className="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-              <span>生产集群: 华东教育节点 v2.4-stable</span>
+              <span>华东教育节点 v2.4-stable</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <button
                 type="button"
-                className="inline-flex items-center gap-1 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1 text-[11px] sm:text-[12px] text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[15px]">language</span>
-                <span>简体中文</span>
+                <span>中文</span>
               </button>
               <a
                 href="#help"
@@ -406,27 +406,27 @@ export default function AuthView({
                   e.preventDefault();
                   setInfoNotice('ExamCraft AI 支持标准题库接入、LaTeX双栏试卷渲染、多端数据同步。');
                 }}
-                className="inline-flex items-center gap-1 text-[12px] text-on-surface-variant hover:text-primary transition-colors"
+                className="inline-flex items-center gap-1 text-[11px] sm:text-[12px] text-on-surface-variant hover:text-primary transition-colors"
               >
                 <span className="material-symbols-outlined text-[15px]">help</span>
-                <span>考务帮助</span>
+                <span>帮助</span>
               </a>
               {allowBack && onBack && (
                 <button
                   type="button"
                   onClick={onBack}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors cursor-pointer border border-surface-container"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors cursor-pointer border border-surface-container"
                   title="返回工作台"
                 >
-                  <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                  <span>返回工作台</span>
+                  <span className="material-symbols-outlined text-[15px]">arrow_back</span>
+                  <span>返回</span>
                 </button>
               )}
             </div>
           </div>
 
           {/* Center Wrapper: Main Form */}
-          <div className="w-full max-w-md mx-auto my-auto py-4 sm:py-6">
+          <div className="w-full mx-auto my-auto py-3 sm:py-4">
             {/* Header Brand Identity */}
             <div className="mb-5 sm:mb-6">
               <div className="inline-flex items-center gap-2.5 mb-2">
