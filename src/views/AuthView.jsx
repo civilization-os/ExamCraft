@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { apiLogin, apiRegister } from '../utils/auth';
+import {
+  apiLogin,
+  apiRegister,
+  apiForgotPassword,
+  apiVerifyResetToken,
+  apiResetPassword
+} from '../utils/auth';
 
 const SLIDES = [
   {
@@ -79,7 +85,7 @@ export default function AuthView({
   onBack,
   allowBack = false
 }) {
-  const [tab, setTab] = useState('login'); // 'login' | 'register'
+  const [tab, setTab] = useState('login'); // 'login' | 'register' | 'forgot' | 'reset'
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -88,11 +94,56 @@ export default function AuthView({
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  // Password reset specific state
+  const [resetToken, setResetToken] = useState('');
+  const [resetTargetUser, setResetTargetUser] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [forgotSuccessInfo, setForgotSuccessInfo] = useState(null);
 
   // Carousel state
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isFading, setIsFading] = useState(false);
   const timerRef = useRef(null);
+
+  useEffect(() => {
+    // 监听 URL 携带的重置参数（支持 ?token=xxx 或 #/login?mode=reset&token=xxx）
+    try {
+      const fullUrl = window.location.href;
+      let searchParamsString = window.location.search;
+      const hashIndex = fullUrl.indexOf('#');
+      if (hashIndex !== -1) {
+        const hashPart = fullUrl.slice(hashIndex);
+        const qIndex = hashPart.indexOf('?');
+        if (qIndex !== -1) {
+          searchParamsString = hashPart.slice(qIndex);
+        }
+      }
+      const params = new URLSearchParams(searchParamsString);
+      const tokenParam = params.get('token');
+      const modeParam = params.get('mode');
+
+      if (tokenParam) {
+        setResetToken(tokenParam);
+        setTab('reset');
+        setIsLoading(true);
+        apiVerifyResetToken(tokenParam)
+          .then((res) => {
+            if (res.user) setResetTargetUser(res.user);
+          })
+          .catch((err) => {
+            setErrorMsg(err.message || '重置凭证无效或已过期，请重新申请');
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
+      } else if (modeParam === 'forgot') {
+        setTab('forgot');
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const startTimer = () => {
@@ -138,7 +189,75 @@ export default function AuthView({
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
+    setSuccessMsg('');
 
+    // 1. 找回密码申请模式
+    if (tab === 'forgot') {
+      const cleanIdentity = username.trim();
+      if (!cleanIdentity) {
+        setErrorMsg('请输入注册用户名或邮箱');
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const data = await apiForgotPassword(cleanIdentity);
+        setForgotSuccessInfo({
+          message: data.message,
+          resetUrl: data.resetUrl,
+          username: cleanIdentity
+        });
+        setSuccessMsg(data.message || '重置邮件已分发，请查收！');
+      } catch (err) {
+        setErrorMsg(err.message || '申请重置密码失败，请核对账号信息');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // 2. 动态重置新密码模式
+    if (tab === 'reset') {
+      if (!resetToken) {
+        setErrorMsg('缺少有效重置凭证，请从邮件链接重新进入');
+        return;
+      }
+      if (!newPassword || newPassword.length < 6) {
+        setErrorMsg('新密码长度不能少于 6 位');
+        return;
+      }
+      if (newPassword !== confirmNewPassword) {
+        setErrorMsg('两次输入的新密码不一致');
+        return;
+      }
+      setIsLoading(true);
+      try {
+        await apiResetPassword(resetToken, newPassword);
+        setSuccessMsg('🎉 密码重置成功！正在为您自动登录...');
+        const targetUsername = resetTargetUser?.username || username;
+        if (targetUsername) {
+          try {
+            const user = await apiLogin(targetUsername, newPassword);
+            setTimeout(() => {
+              if (onSuccess) onSuccess(user);
+            }, 1000);
+            return;
+          } catch {}
+        }
+        setTimeout(() => {
+          setTab('login');
+          setNewPassword('');
+          setConfirmNewPassword('');
+          setSuccessMsg('密码已修改成功，请使用新密码登录');
+        }, 1200);
+      } catch (err) {
+        setErrorMsg(err.message || '重置密码失败，链接可能已过期');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // 3. 正常登录与注册模式
     const cleanUsername = username.trim();
     if (!cleanUsername) {
       setErrorMsg('请输入用户名或邮箱');
@@ -171,7 +290,7 @@ export default function AuthView({
       if (tab === 'login') {
         user = await apiLogin(cleanUsername, password);
       } else {
-        user = await apiRegister(cleanUsername, password);
+        user = await apiRegister(cleanUsername, password, role);
       }
       if (rememberMe) {
         try {
@@ -405,52 +524,90 @@ export default function AuthView({
 
           {/* Center Wrapper: Main Form */}
           <div className="w-full mx-auto my-auto py-2">
-            {/* Header Brand Identity */}
-            <div className="mb-6">
-              <div className="inline-flex items-center gap-2.5 mb-2">
-                <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-on-primary shadow-sm">
-                  <span className="material-symbols-outlined text-[22px]">auto_awesome</span>
+            {/* Header Identity according to mode */}
+            {tab === 'forgot' ? (
+              <div className="flex items-center gap-2.5 mb-5 pb-2 border-b border-surface-container">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('login');
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                    setForgotSuccessInfo(null);
+                  }}
+                  className="w-8 h-8 rounded-lg hover:bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+                  title="返回登录"
+                >
+                  <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+                </button>
+                <div>
+                  <h1 className="text-xl font-bold text-on-surface">找回密码</h1>
+                  <p className="text-[11px] text-on-surface-variant font-medium">以 ExamCraft 专属服务分发重置链接</p>
                 </div>
-                <h1 className="text-2xl font-bold tracking-tight text-on-surface">
-                  ExamCraft AI
-                </h1>
               </div>
-              <p className="text-xs sm:text-sm text-on-surface-variant font-medium">
-                智能组卷与在线考练工作台
-              </p>
-            </div>
+            ) : tab === 'reset' ? (
+              <div className="flex items-center gap-2.5 mb-5 pb-2 border-b border-surface-container">
+                <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[20px]">key</span>
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-on-surface">重置登录密码</h1>
+                  <p className="text-[11px] text-on-surface-variant font-medium">
+                    {resetTargetUser?.username ? `为用户 ${resetTargetUser.username} 设置新密码` : '验证有效，请设置新登录密码'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-5">
+                <div className="inline-flex items-center gap-2.5 mb-2">
+                  <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-on-primary shadow-sm">
+                    <span className="material-symbols-outlined text-[22px]">auto_awesome</span>
+                  </div>
+                  <h1 className="text-2xl font-bold tracking-tight text-on-surface">
+                    ExamCraft AI
+                  </h1>
+                </div>
+                <p className="text-xs sm:text-sm text-on-surface-variant font-medium">
+                  智能组卷与在线考练工作台
+                </p>
+              </div>
+            )}
 
-            {/* Mode Switch: Segmented Control Tabs */}
-            <div className="w-full bg-surface-container p-1 rounded-xl flex items-center gap-1 mb-5">
-              <button
-                type="button"
-                onClick={() => {
-                  setTab('login');
-                  setErrorMsg('');
-                }}
-                className={`flex-1 py-2 text-center rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer ${
-                  tab === 'login'
-                    ? 'bg-surface-container-lowest text-primary shadow-xs'
-                    : 'text-on-surface-variant hover:text-on-surface'
-                }`}
-              >
-                账号登录 (Sign In)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setTab('register');
-                  setErrorMsg('');
-                }}
-                className={`flex-1 py-2 text-center rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer ${
-                  tab === 'register'
-                    ? 'bg-surface-container-lowest text-primary shadow-xs'
-                    : 'text-on-surface-variant hover:text-on-surface'
-                }`}
-              >
-                新用户注册 (Sign Up)
-              </button>
-            </div>
+            {/* Mode Switch: Segmented Control Tabs (Only in login/register modes) */}
+            {(tab === 'login' || tab === 'register') && (
+              <div className="w-full bg-surface-container p-1 rounded-xl flex items-center gap-1 mb-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('login');
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                  }}
+                  className={`flex-1 py-2 text-center rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer ${
+                    tab === 'login'
+                      ? 'bg-surface-container-lowest text-primary shadow-xs'
+                      : 'text-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  账号登录 (Sign In)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('register');
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                  }}
+                  className={`flex-1 py-2 text-center rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer ${
+                    tab === 'register'
+                      ? 'bg-surface-container-lowest text-primary shadow-xs'
+                      : 'text-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  新用户注册 (Sign Up)
+                </button>
+              </div>
+            )}
 
             {/* Notification & Alerts */}
             {errorMsg && (
@@ -460,78 +617,84 @@ export default function AuthView({
               </div>
             )}
 
-            {/* Main Form Fields */}
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Input 1: Identity / Email / Username */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-on-surface" htmlFor="identity-input">
-                  用户名 / 邮箱
-                </label>
-                <div className="relative flex items-center">
-                  <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
-                    person
-                  </span>
-                  <input
-                    id="identity-input"
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="请输入用户名或注册邮箱"
-                    required
-                    disabled={isLoading}
-                    className="w-full h-10 pl-9 pr-3 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
-                  />
-                </div>
+            {successMsg && (
+              <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs flex items-center gap-2 animate-fade-in">
+                <span className="material-symbols-outlined text-[18px] shrink-0">check_circle</span>
+                <span>{successMsg}</span>
               </div>
+            )}
 
-              {/* Input 2: Password */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-on-surface" htmlFor="password-input">
-                  登录密码
-                </label>
-                <div className="relative flex items-center">
-                  <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
-                    lock
-                  </span>
-                  <input
-                    id="password-input"
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={tab === 'register' ? '设置登录密码（至少 6 位）' : '请输入登录密码'}
-                    required
-                    disabled={isLoading}
-                    className="w-full h-10 pl-9 pr-10 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
-                  />
+            {/* VIEW MODE 1: FORGOT PASSWORD */}
+            {tab === 'forgot' ? (
+              forgotSuccessInfo ? (
+                <div className="space-y-4 py-1">
+                  <div className="p-4 rounded-2xl bg-surface-container-low border border-surface-container-high space-y-3">
+                    <div className="flex items-start gap-3">
+                      <span className="material-symbols-outlined text-primary text-[28px] shrink-0 mt-0.5">
+                        mark_email_read
+                      </span>
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-bold text-on-surface">密码重置邮件已分发！</h3>
+                        <p className="text-xs text-on-surface-variant leading-relaxed">
+                          系统已向目标账号 <strong className="text-on-surface">{forgotSuccessInfo.username}</strong> 生成包含专属重置凭证的动态邮件。
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* SPAM REMINDER CALLOUT */}
+                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs leading-relaxed space-y-1.5">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <span className="material-symbols-outlined text-[18px]">folder_special</span>
+                        <span>特别提示：请务必检查【垃圾箱】</span>
+                      </div>
+                      <p className="text-[11px] opacity-90">
+                        本邮件由 ExamCraft AI 自动化系统直接派发（未经外部商业企业认证），公共邮箱极大概率会将其自动归入<strong>【垃圾邮件】或【垃圾箱】</strong>，请前往垃圾箱查阅并点击动态链接重置。
+                      </p>
+                    </div>
+
+                    {/* Dev/Local Shortcut if available */}
+                    {forgotSuccessInfo.resetUrl && (
+                      <div className="pt-1">
+                        <a
+                          href={forgotSuccessInfo.resetUrl}
+                          className="w-full py-2 px-3 rounded-xl bg-primary text-on-primary text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm hover:opacity-95 transition-all"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                          <span>前往重置页面 (直达链接)</span>
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     type="button"
-                    aria-label="显示/隐藏密码"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 text-outline hover:text-on-surface cursor-pointer"
+                    onClick={() => {
+                      setForgotSuccessInfo(null);
+                      setTab('login');
+                      setErrorMsg('');
+                      setSuccessMsg('');
+                    }}
+                    className="w-full h-10 rounded-xl bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-semibold transition-colors cursor-pointer"
                   >
-                    <span className="material-symbols-outlined text-[18px]">
-                      {showPassword ? 'visibility_off' : 'visibility'}
-                    </span>
+                    返回账号登录
                   </button>
                 </div>
-              </div>
-
-              {/* Extra Register Fields */}
-              {tab === 'register' && (
-                <>
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-on-surface">
-                      确认密码
+                    <label className="block text-xs font-semibold text-on-surface" htmlFor="forgot-identity-input">
+                      用户名 / 注册邮箱
                     </label>
                     <div className="relative flex items-center">
                       <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
-                        lock_reset
+                        mail
                       </span>
                       <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="请再次输入登录密码"
+                        id="forgot-identity-input"
+                        type="text"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="请输入注册用户名或邮箱"
                         required
                         disabled={isLoading}
                         className="w-full h-10 pl-9 pr-3 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
@@ -539,102 +702,325 @@ export default function AuthView({
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-on-surface">身份类型</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <label
-                        className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition-all ${
-                          role === 'teacher'
-                            ? 'bg-primary/5 border-primary text-primary font-semibold'
-                            : 'bg-surface-container-low border-surface-container text-on-surface'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="user-role"
-                          value="teacher"
-                          checked={role === 'teacher'}
-                          onChange={() => setRole('teacher')}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-xs">教师 / 考务</span>
-                      </label>
-                      <label
-                        className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition-all ${
-                          role === 'student'
-                            ? 'bg-primary/5 border-primary text-primary font-semibold'
-                            : 'bg-surface-container-low border-surface-container text-on-surface'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="user-role"
-                          value="student"
-                          checked={role === 'student'}
-                          onChange={() => setRole('student')}
-                          className="text-primary focus:ring-primary"
-                        />
-                        <span className="text-xs">考生 / 学生</span>
-                      </label>
-                    </div>
+                  <div className="p-3 rounded-xl bg-surface-container-low text-[11px] text-on-surface-variant leading-relaxed">
+                    💡 提示：提交后系统将以 ExamCraft 官方身份直接向该账号派发时效为 15 分钟的专属重置凭证。若在收件箱中未看到，请特别留意查收<strong>【垃圾箱】</strong>。
                   </div>
-                </>
-              )}
 
-              {/* Options Row: Remember login state */}
-              <div className="flex items-center justify-between pt-1">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded text-primary focus:ring-primary bg-surface-container border-surface-container"
-                  />
-                  <span className="text-xs text-on-surface-variant font-medium">
-                    记住登录状态
-                  </span>
-                </label>
-              </div>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full h-11 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-60"
+                  >
+                    {isLoading ? (
+                      <>
+                        <span className="material-symbols-outlined text-[18px] animate-spin">
+                          progress_activity
+                        </span>
+                        <span>正在生成并发送...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[18px]">send</span>
+                        <span>发送重置密码邮件</span>
+                      </>
+                    )}
+                  </button>
 
-              {/* Submit CTA Button */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full h-11 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.99] mt-2 cursor-pointer disabled:opacity-60"
-              >
-                {isLoading ? (
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTab('login');
+                        setErrorMsg('');
+                        setSuccessMsg('');
+                      }}
+                      className="text-xs text-primary hover:underline font-semibold cursor-pointer"
+                    >
+                      想起密码了？返回登录
+                    </button>
+                  </div>
+                </form>
+              )
+            ) : tab === 'reset' ? (
+              /* VIEW MODE 2: DYNAMIC RESET PASSWORD */
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-on-surface" htmlFor="reset-new-password">
+                    设置新密码
+                  </label>
+                  <div className="relative flex items-center">
+                    <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
+                      lock
+                    </span>
+                    <input
+                      id="reset-new-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="设置新密码（至少 6 位）"
+                      required
+                      disabled={isLoading}
+                      className="w-full h-10 pl-9 pr-10 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
+                    />
+                    <button
+                      type="button"
+                      aria-label="显示/隐藏密码"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 text-outline hover:text-on-surface cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {showPassword ? 'visibility_off' : 'visibility'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-on-surface" htmlFor="reset-confirm-password">
+                    确认新密码
+                  </label>
+                  <div className="relative flex items-center">
+                    <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
+                      lock_reset
+                    </span>
+                    <input
+                      id="reset-confirm-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder="再次输入新密码"
+                      required
+                      disabled={isLoading}
+                      className="w-full h-10 pl-9 pr-3 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full h-11 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-60"
+                >
+                  {isLoading ? (
+                    <>
+                      <span className="material-symbols-outlined text-[18px] animate-spin">
+                        progress_activity
+                      </span>
+                      <span>正在更新密码...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                      <span>确认修改并立即登录</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="pt-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTab('login');
+                      setErrorMsg('');
+                      setSuccessMsg('');
+                    }}
+                    className="text-xs text-on-surface-variant hover:text-on-surface hover:underline font-semibold cursor-pointer"
+                  >
+                    放弃并返回登录
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* VIEW MODE 3: LOGIN / REGISTER */
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Input 1: Identity / Email / Username */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-on-surface" htmlFor="identity-input">
+                    用户名 / 邮箱
+                  </label>
+                  <div className="relative flex items-center">
+                    <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
+                      person
+                    </span>
+                    <input
+                      id="identity-input"
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="请输入用户名或注册邮箱"
+                      required
+                      disabled={isLoading}
+                      className="w-full h-10 pl-9 pr-3 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
+                    />
+                  </div>
+                </div>
+
+                {/* Input 2: Password */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-on-surface" htmlFor="password-input">
+                    登录密码
+                  </label>
+                  <div className="relative flex items-center">
+                    <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
+                      lock
+                    </span>
+                    <input
+                      id="password-input"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={tab === 'register' ? '设置登录密码（至少 6 位）' : '请输入登录密码'}
+                      required
+                      disabled={isLoading}
+                      className="w-full h-10 pl-9 pr-10 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
+                    />
+                    <button
+                      type="button"
+                      aria-label="显示/隐藏密码"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 text-outline hover:text-on-surface cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {showPassword ? 'visibility_off' : 'visibility'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Extra Register Fields */}
+                {tab === 'register' && (
                   <>
-                    <span className="material-symbols-outlined text-[18px] animate-spin">
-                      progress_activity
-                    </span>
-                    <span>处理中...</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined text-[18px]">
-                      {tab === 'login' ? 'login' : 'how_to_reg'}
-                    </span>
-                    <span>
-                      {tab === 'login' ? '立即登录' : '创建账号并开启云端体验'}
-                    </span>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-on-surface">
+                        确认密码
+                      </label>
+                      <div className="relative flex items-center">
+                        <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
+                          lock_reset
+                        </span>
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          placeholder="请再次输入登录密码"
+                          required
+                          disabled={isLoading}
+                          className="w-full h-10 pl-9 pr-3 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-on-surface">身份类型</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label
+                          className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition-all ${
+                            role === 'teacher'
+                              ? 'bg-primary/5 border-primary text-primary font-semibold'
+                              : 'bg-surface-container-low border-surface-container text-on-surface'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="user-role"
+                            value="teacher"
+                            checked={role === 'teacher'}
+                            onChange={() => setRole('teacher')}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-xs">教师 / 考务</span>
+                        </label>
+                        <label
+                          className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition-all ${
+                            role === 'student'
+                              ? 'bg-primary/5 border-primary text-primary font-semibold'
+                              : 'bg-surface-container-low border-surface-container text-on-surface'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="user-role"
+                            value="student"
+                            checked={role === 'student'}
+                            onChange={() => setRole('student')}
+                            className="text-primary focus:ring-primary"
+                          />
+                          <span className="text-xs">考生 / 学生</span>
+                        </label>
+                      </div>
+                    </div>
                   </>
                 )}
-              </button>
 
-              {/* Direct Guest Mode Link */}
-              <div className="pt-3 text-center border-t border-surface-container/60">
+                {/* Options Row: Remember login state & Forgot Password */}
+                <div className="flex items-center justify-between pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded text-primary focus:ring-primary bg-surface-container border-surface-container"
+                    />
+                    <span className="text-xs text-on-surface-variant font-medium">
+                      记住登录状态
+                    </span>
+                  </label>
+
+                  {tab === 'login' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTab('forgot');
+                        setErrorMsg('');
+                        setSuccessMsg('');
+                      }}
+                      className="text-xs text-primary hover:text-primary-container hover:underline font-semibold cursor-pointer"
+                    >
+                      忘记密码？
+                    </button>
+                  )}
+                </div>
+
+                {/* Submit CTA Button */}
                 <button
-                  type="button"
-                  onClick={() => {
-                    if (onGuest) onGuest();
-                  }}
-                  className="text-xs text-primary hover:text-primary-container hover:underline font-semibold cursor-pointer inline-flex items-center gap-1"
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full h-11 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.99] mt-2 cursor-pointer disabled:opacity-60"
                 >
-                  <span>免登录 · 立即以离线游客身份体验</span>
-                  <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                  {isLoading ? (
+                    <>
+                      <span className="material-symbols-outlined text-[18px] animate-spin">
+                        progress_activity
+                      </span>
+                      <span>处理中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[18px]">
+                        {tab === 'login' ? 'login' : 'how_to_reg'}
+                      </span>
+                      <span>
+                        {tab === 'login' ? '立即登录' : '创建账号并开启云端体验'}
+                      </span>
+                    </>
+                  )}
                 </button>
-              </div>
-            </form>
+
+                {/* Direct Guest Mode Link */}
+                <div className="pt-3 text-center border-t border-surface-container/60">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onGuest) onGuest();
+                    }}
+                    className="text-xs text-primary hover:text-primary-container hover:underline font-semibold cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <span>免登录 · 立即以离线游客身份体验</span>
+                    <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
 
           {/* Clean Footer */}

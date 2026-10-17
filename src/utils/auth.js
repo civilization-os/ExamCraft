@@ -89,11 +89,11 @@ export async function apiLogin(username, password) {
   return data.user;
 }
 
-export async function apiRegister(username, password) {
+export async function apiRegister(username, password, roleType = 'teacher') {
   const res = await fetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
+    body: JSON.stringify({ username, password, roleType })
   });
   const data = await res.json();
   if (!res.ok || !data.success) {
@@ -102,6 +102,41 @@ export async function apiRegister(username, password) {
   setToken(data.token);
   setStoredUser(data.user);
   return data.user;
+}
+
+export async function apiForgotPassword(identity) {
+  const res = await fetch('/api/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identity })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '申请重置密码失败');
+  }
+  return data;
+}
+
+export async function apiVerifyResetToken(token) {
+  const res = await fetch(`/api/auth/verify-reset-token?token=${encodeURIComponent(token)}`);
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '重置链接无效或已过期');
+  }
+  return data;
+}
+
+export async function apiResetPassword(token, newPassword) {
+  const res = await fetch('/api/auth/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, newPassword })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '重置密码失败');
+  }
+  return data;
 }
 
 export async function apiGetCurrentUser() {

@@ -10,6 +10,9 @@ import {
   authenticateUser,
   findUserById,
   changePassword,
+  createPasswordResetToken,
+  verifyPasswordResetToken,
+  resetPasswordWithToken,
   getUserSyncData,
   saveUserPaper,
   deleteUserPaper,
@@ -21,6 +24,7 @@ import {
   verifyToken,
   getTotalUserCount
 } from './user-storage.js';
+import { sendPasswordResetMail } from './mail-sender.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1156,8 +1160,8 @@ apiRouter.get('/auth/status', (req, res) => {
 // POST /api/auth/register — 注册新用户
 apiRouter.post('/auth/register', (req, res) => {
   try {
-    const { username, password } = req.body || {};
-    const result = registerUser(username, password);
+    const { username, password, roleType } = req.body || {};
+    const result = registerUser(username, password, roleType);
     res.json({
       success: true,
       message: '注册成功',
@@ -1187,6 +1191,72 @@ apiRouter.post('/auth/login', (req, res) => {
     res.status(400).json({
       success: false,
       error: error.message || '登录失败'
+    });
+  }
+});
+
+// POST /api/auth/forgot-password — 申请重置密码（发送野邮箱/应用名义邮件）
+apiRouter.post('/auth/forgot-password', async (req, res) => {
+  try {
+    const { identity } = req.body || {};
+    if (!identity || !String(identity).trim()) {
+      return res.status(400).json({ success: false, error: '请输入用户名或注册邮箱' });
+    }
+
+    const result = createPasswordResetToken(identity);
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:5173';
+    const resetUrl = `${protocol}://${host}/#/login?mode=reset&token=${result.token}`;
+
+    const mailResult = await sendPasswordResetMail({
+      toEmail: identity.includes('@') ? identity : '',
+      username: result.user.username,
+      resetUrl,
+      token: result.token
+    });
+
+    res.json({
+      success: true,
+      message: '密码重置邮件已生成并派发！若未在收件箱收到，请务必前往【垃圾箱/垃圾邮件】查找。',
+      resetUrl, // 方便本地调试与直达
+      delivered: mailResult.delivered,
+      user: result.user
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '申请重置密码失败'
+    });
+  }
+});
+
+// GET /api/auth/verify-reset-token — 校验重置令牌有效性
+apiRouter.get('/auth/verify-reset-token', (req, res) => {
+  const token = req.query.token;
+  const result = verifyPasswordResetToken(token);
+  if (!result.valid) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  res.json({ success: true, user: result.user });
+});
+
+// POST /api/auth/reset-password — 提交新密码完成重置
+apiRouter.post('/auth/reset-password', (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    if (!token) {
+      return res.status(400).json({ success: false, error: '缺少重置令牌' });
+    }
+    const user = resetPasswordWithToken(token, newPassword);
+    res.json({
+      success: true,
+      message: '密码重置成功，请使用新密码重新登录',
+      user
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '重置密码失败'
     });
   }
 });

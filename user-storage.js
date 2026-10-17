@@ -122,11 +122,11 @@ export function requireAuth(req, res, next) {
   if (!user) {
     return res.status(401).json({ success: false, error: '用户账户不存在' });
   }
-  req.user = { id: user.id, username: user.username, role: user.role };
+  req.user = { id: user.id, username: user.username, role: user.role, roleType: user.roleType || 'teacher' };
   next();
 }
 
-export function registerUser(username, password) {
+export function registerUser(username, password, roleType = 'teacher') {
   const cleanUsername = String(username || '').trim();
   if (!cleanUsername || cleanUsername.length < 2 || cleanUsername.length > 24) {
     throw new Error('用户名长度需在 2 到 24 个字符之间');
@@ -137,6 +137,8 @@ export function registerUser(username, password) {
   if (!password || password.length < 6) {
     throw new Error('密码长度不能少于 6 位');
   }
+
+  const cleanRoleType = roleType === 'student' ? 'student' : 'teacher';
 
   const users = loadUsers();
   const lowerName = cleanUsername.toLowerCase();
@@ -155,6 +157,7 @@ export function registerUser(username, password) {
     passwordHash,
     salt,
     role: isFirstUser ? 'admin' : 'user',
+    roleType: cleanRoleType,
     createdAt: Date.now()
   };
 
@@ -164,13 +167,14 @@ export function registerUser(username, password) {
   // Initialize user directory
   getUserDir(newUser.id);
 
-  const token = signToken({ userId: newUser.id, username: newUser.username, role: newUser.role });
+  const token = signToken({ userId: newUser.id, username: newUser.username, role: newUser.role, roleType: newUser.roleType });
   return {
     token,
     user: {
       id: newUser.id,
       username: newUser.username,
       role: newUser.role,
+      roleType: newUser.roleType,
       createdAt: newUser.createdAt
     }
   };
@@ -195,13 +199,14 @@ export function authenticateUser(username, password) {
     throw new Error('用户名或密码错误');
   }
 
-  const token = signToken({ userId: user.id, username: user.username, role: user.role });
+  const token = signToken({ userId: user.id, username: user.username, role: user.role, roleType: user.roleType || 'teacher' });
   return {
     token,
     user: {
       id: user.id,
       username: user.username,
       role: user.role,
+      roleType: user.roleType || 'teacher',
       createdAt: user.createdAt
     }
   };
@@ -215,6 +220,7 @@ export function findUserById(userId) {
     id: user.id,
     username: user.username,
     role: user.role,
+    roleType: user.roleType || 'teacher',
     createdAt: user.createdAt
   };
 }
@@ -241,6 +247,102 @@ export function changePassword(userId, oldPassword, newPassword) {
 
   saveUsers(users);
   return true;
+}
+
+export function createPasswordResetToken(identity) {
+  const clean = String(identity || '').trim().toLowerCase();
+  if (!clean) {
+    throw new Error('请输入用户名或注册邮箱');
+  }
+
+  const users = loadUsers();
+  const user = users.find(
+    (u) => u.username.toLowerCase() === clean || (u.email && u.email.toLowerCase() === clean)
+  );
+
+  if (!user) {
+    throw new Error('未找到该用户名或注册邮箱对应的账号');
+  }
+
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const resetTokenExpires = Date.now() + 15 * 60 * 1000; // 15 分钟有效
+
+  user.resetToken = resetToken;
+  user.resetTokenExpires = resetTokenExpires;
+  user.resetTokenCreatedAt = Date.now();
+  saveUsers(users);
+
+  return {
+    user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      roleType: user.roleType || 'teacher'
+    },
+    token: resetToken,
+    expiresAt: resetTokenExpires
+  };
+}
+
+export function verifyPasswordResetToken(token) {
+  const cleanToken = String(token || '').trim();
+  if (!cleanToken || cleanToken.length < 16) {
+    return { valid: false, error: '重置链接无效，请重新发起' };
+  }
+
+  const users = loadUsers();
+  const user = users.find((u) => u.resetToken === cleanToken);
+
+  if (!user) {
+    return { valid: false, error: '重置链接无效或已被使用' };
+  }
+
+  if (!user.resetTokenExpires || Date.now() > user.resetTokenExpires) {
+    return { valid: false, error: '重置链接已过期（时效15分钟），请重新申请' };
+  }
+
+  return {
+    valid: true,
+    user: {
+      id: user.id,
+      username: user.username
+    }
+  };
+}
+
+export function resetPasswordWithToken(token, newPassword) {
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error('新密码长度不能少于 6 位');
+  }
+
+  const cleanToken = String(token || '').trim();
+  const users = loadUsers();
+  const user = users.find((u) => u.resetToken === cleanToken);
+
+  if (!user) {
+    throw new Error('重置链接无效或已被使用');
+  }
+
+  if (!user.resetTokenExpires || Date.now() > user.resetTokenExpires) {
+    throw new Error('重置链接已过期（时效15分钟），请重新申请');
+  }
+
+  const newSalt = crypto.randomBytes(16).toString('hex');
+  user.passwordHash = crypto.scryptSync(newPassword, newSalt, 64).toString('hex');
+  user.salt = newSalt;
+  delete user.resetToken;
+  delete user.resetTokenExpires;
+  delete user.resetTokenCreatedAt;
+  user.updatedAt = Date.now();
+
+  saveUsers(users);
+
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    roleType: user.roleType || 'teacher'
+  };
 }
 
 export function getUserSyncData(userId) {
