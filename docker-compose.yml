@@ -3,14 +3,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: examcraft:latest
+    image: ghcr.io/civilization-os/examcraft:latest
     container_name: examcraft-workbench
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # 默认映射宿主机 3001 端口到容器内 3000（避免与宿主机常用 3000 端口冲突），可通过 EXAMCRAFT_PORT 变量覆盖
+      - "${EXAMCRAFT_PORT:-3001}:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - HOST=0.0.0.0
       # 支持通过环境变量直接注入模型密钥与端点配置（可覆盖配置文件）
       # - MODEL_API_KEY=sk-your-api-key-here
       # - MODEL_NAME=deepseek-chat
@@ -18,4 +20,5 @@ services:
       # - MODEL_PROTOCOL=openai-compatible
     volumes:
       # 持久化挂载配置文件（在 Web 界面中调整模型配置后可实时落盘持久化）
+      # 建议启动前先准备好文件: cp examcraft-config.example.json examcraft-config.json
       - ./examcraft-config.json:/app/examcraft-config.json

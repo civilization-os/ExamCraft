@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ limit: '5mb', extended: true }));
@@ -23,6 +24,6 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`[ExamCraft AI Workbench] Node server is listening on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`[ExamCraft AI Workbench] Node server is listening on http://${HOST}:${PORT}`);
 });

@@ -34,6 +34,7 @@ WORKDIR /app
 # 设置生产环境变量
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOST=0.0.0.0
 
 # 从构建阶段复制必要文件
 COPY package.json ./
@@ -42,6 +43,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.js ./server.js
 COPY --from=builder /app/api-router.js ./api-router.js
+COPY --from=builder /app/src ./src
 
 # 标注 OCI 镜像元数据，自动绑定 GitHub 仓库与 Packages
 LABEL org.opencontainers.image.source="https://github.com/civilization-os/ExamCraft"
@@ -56,7 +58,7 @@ EXPOSE 3000
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/model/config || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/model/config || exit 1
 
 # 启动 Node.js Express 生产服务器
 CMD ["node", "server.js"]

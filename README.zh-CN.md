@@ -89,19 +89,19 @@
 # 1. 从 GitHub Packages 拉取最新容器镜像
 docker pull ghcr.io/civilization-os/examcraft:latest
 
-# 2. 运行容器（映射本地 3000 端口）
+# 2. 运行容器（映射宿主机 3001 端口到容器内 3000 端口）
 docker run -d \
   --name examcraft \
-  -p 3000:3000 \
+  -p 3001:3000 \
   -v $(pwd)/examcraft-config.json:/app/examcraft-config.json \
   --restart unless-stopped \
   ghcr.io/civilization-os/examcraft:latest
 
 # 3. 在浏览器打开
-# 访问 http://localhost:3000
+# 访问 http://localhost:3001
 ```
 
-> **提示**：如果您的本地还没有 `examcraft-config.json`，可以使用模板快速生成：
+> **提示**：为避免 Docker 将尚未创建的文件自动挂载为同名目录，挂载前请先使用模板生成文件：
 > `cp examcraft-config.example.json examcraft-config.json`
 
 ---

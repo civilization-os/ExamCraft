@@ -123,11 +123,23 @@ let deepSeekBalanceCache = { checkedAt: 0, data: null, error: '' };
 
 export const apiRouter = express.Router();
 
+function getEffectiveConfigFile() {
+  try {
+    if (fs.existsSync(CONFIG_FILE) && fs.statSync(CONFIG_FILE).isDirectory()) {
+      return path.join(CONFIG_FILE, 'config.json');
+    }
+  } catch (e) {
+    // fallback
+  }
+  return CONFIG_FILE;
+}
+
 function loadSavedConfig() {
   let fileCfg = {};
+  const targetFile = getEffectiveConfigFile();
   try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
+    if (fs.existsSync(targetFile) && fs.statSync(targetFile).isFile()) {
+      const raw = fs.readFileSync(targetFile, 'utf8');
       fileCfg = JSON.parse(raw) || {};
     }
   } catch (e) {
@@ -170,7 +182,12 @@ function loadSavedConfig() {
 }
 
 function saveConfig(cfg) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8');
+  try {
+    const targetFile = getEffectiveConfigFile();
+    fs.writeFileSync(targetFile, JSON.stringify(cfg, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to save config file:', e.message);
+  }
 }
 
 let currentConfig = loadSavedConfig();
