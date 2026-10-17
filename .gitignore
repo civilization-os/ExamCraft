@@ -2,6 +2,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
 examcraft-config.json
 examcraft-model-usage.json
 examcraft-model-usage-daily.json

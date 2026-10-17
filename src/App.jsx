@@ -7,6 +7,8 @@ import ExamRoomView from './views/ExamRoomView';
 import ExamResultReportView from './views/ExamResultReportView';
 import MistakeNotebookView from './views/MistakeNotebookView';
 import SettingsView from './views/SettingsView';
+import { deduplicateQuestions } from './utils/questionTypes';
+import { inferPaperSubject } from './utils/paperSubject';
 
 const APP_PATHS = new Set(['dashboard', 'exam-generator', 'paper-library', 'question-bank', 'settings', 'exam-room', 'exam-result']);
 
@@ -81,12 +83,32 @@ export default function App() {
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          return parsed.map((p) => {
+            const clean = Array.isArray(p.questions) ? deduplicateQuestions(p.questions, p.title) : [];
+            return {
+              ...p,
+              subject: p.subject || inferPaperSubject(p),
+              questions: clean,
+              questionCount: clean.length
+            };
+          });
+        }
       }
     } catch {}
     return [];
   });
-  const [activePaper, setActivePaper] = useState(() => readStoredObject('examcraft_active_paper') || null);
+  const [activePaper, setActivePaper] = useState(() => {
+    const stored = readStoredObject('examcraft_active_paper');
+    if (!stored) return null;
+    const clean = Array.isArray(stored.questions) ? deduplicateQuestions(stored.questions, stored.title) : [];
+    return {
+      ...stored,
+      subject: stored.subject || inferPaperSubject(stored),
+      questions: clean,
+      questionCount: clean.length
+    };
+  });
   const [questions, setQuestions] = useState(() => (activePaper?.questions || []));
   const [activeSubmission, setActiveSubmission] = useState(() => readStoredObject('examcraft_active_submission'));
 
@@ -136,14 +158,23 @@ export default function App() {
 
   const handleSavePaper = (paper, navigateToLibrary = false) => {
     if (!paper) return;
+    const cleanQuestions = Array.isArray(paper.questions)
+      ? deduplicateQuestions(paper.questions, paper.title)
+      : [];
+    const normalizedPaper = {
+      ...paper,
+      subject: paper.subject || inferPaperSubject(paper),
+      questions: cleanQuestions,
+      questionCount: cleanQuestions.length
+    };
     setPapers((prev) => {
-      const existsIndex = prev.findIndex((p) => p.id === paper.id);
+      const existsIndex = prev.findIndex((p) => p.id === normalizedPaper.id);
       let next;
       if (existsIndex >= 0) {
         next = [...prev];
-        next[existsIndex] = paper;
+        next[existsIndex] = normalizedPaper;
       } else {
-        next = [paper, ...prev];
+        next = [normalizedPaper, ...prev];
       }
       try {
         localStorage.setItem('examcraft_papers', JSON.stringify(next));
@@ -198,13 +229,18 @@ export default function App() {
       setCurrentPath('exam-generator');
       return;
     }
+    const cleanQuestions = Array.isArray(paper.questions)
+      ? deduplicateQuestions(paper.questions, paper.title)
+      : [];
     const updatedPaper = {
       ...paper,
+      questions: cleanQuestions,
+      questionCount: cleanQuestions.length,
       status: paper.status === '已封卷' ? '已封卷' : '考试中'
     };
     setActivePaper(updatedPaper);
     handleSavePaper(updatedPaper, false);
-    setQuestions(paper.questions && paper.questions.length > 0 ? paper.questions : []);
+    setQuestions(cleanQuestions);
     setCurrentPath('exam-room');
   };
 
@@ -280,7 +316,7 @@ export default function App() {
       )}
 
       {/* Main Container */}
-      <main className={`flex-1 flex flex-col ${!isFullScreenMode ? 'pt-14' : ''}`}>
+      <main className={`flex-1 flex flex-col ${!isFullScreenMode ? 'pt-14 pb-16 md:pb-0' : ''}`}>
         {currentPath === 'dashboard' && (
           <DashboardView
             papers={papers}
@@ -343,6 +379,25 @@ export default function App() {
           />
         )}
       </main>
+
+      {!isFullScreenMode && (
+        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-outline-variant/30 bg-surface-container-lowest/95 px-1 pt-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(25,25,45,0.06)] backdrop-blur-md md:hidden" aria-label="手机端主导航">
+          {[
+            { path: 'dashboard', label: '首页', icon: 'dashboard' },
+            { path: 'exam-generator', label: '组卷', icon: 'auto_fix_high' },
+            { path: 'paper-library', label: '试卷', icon: 'library_books' },
+            { path: 'question-bank', label: '题集', icon: 'collections_bookmark' }
+          ].map((item) => {
+            const active = currentPath === item.path;
+            return (
+              <button key={item.path} type="button" onClick={() => setCurrentPath(item.path)} aria-current={active ? 'page' : undefined} className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium transition-colors ${active ? 'text-primary' : 'text-on-surface-variant hover:bg-surface-container-low'}`}>
+                <span className={`material-symbols-outlined text-[20px] ${active ? 'material-symbols-fill' : ''}`} aria-hidden="true">{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 }

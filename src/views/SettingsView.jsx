@@ -98,27 +98,31 @@ export default function SettingsView() {
     return { papersCount, subsCount, mistakesCount };
   });
 
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
   const handleClearAllData = () => {
-    if (window.confirm('确定要清空所有本地数据与历史记录吗？此操作将彻底删除本地已保存的试卷、作答报告及题集，并重载页面恢复纯净状态。')) {
-      try {
-        localStorage.removeItem('examcraft_papers');
-        localStorage.removeItem('examcraft_submissions');
-        localStorage.removeItem('examcraft_notebook_data');
-        localStorage.removeItem('examcraft_active_paper');
-        localStorage.removeItem('examcraft_active_submission');
-        localStorage.removeItem('examcraft_generator_session');
-        localStorage.removeItem('examcraft_scratchpad_default');
-        localStorage.removeItem('examcraft_exam_default_layout');
-        localStorage.removeItem('examcraft_exam_show_answers_default');
-        localStorage.removeItem('examcraft_scratchpad_agent_tone');
-        localStorage.removeItem('examcraft_exam_split_ratio');
-        Object.keys(localStorage).forEach((k) => {
-          if (k.startsWith('examcraft_scratchpad_')) localStorage.removeItem(k);
-        });
-      } catch {}
-      alert('✅ 所有本地数据与缓存已彻底清空！页面即将自动刷新。');
-      window.location.reload();
-    }
+    setShowClearConfirm(true);
+  };
+
+  const executeClearAllData = () => {
+    try {
+      localStorage.removeItem('examcraft_papers');
+      localStorage.removeItem('examcraft_submissions');
+      localStorage.removeItem('examcraft_notebook_data');
+      localStorage.removeItem('examcraft_active_paper');
+      localStorage.removeItem('examcraft_active_submission');
+      localStorage.removeItem('examcraft_generator_session');
+      localStorage.removeItem('examcraft_scratchpad_default');
+      localStorage.removeItem('examcraft_exam_default_layout');
+      localStorage.removeItem('examcraft_exam_show_answers_default');
+      localStorage.removeItem('examcraft_scratchpad_agent_tone');
+      localStorage.removeItem('examcraft_exam_split_ratio');
+      Object.keys(localStorage).forEach((k) => {
+        if (k.startsWith('examcraft_scratchpad_')) localStorage.removeItem(k);
+      });
+    } catch {}
+    setShowClearConfirm(false);
+    window.location.reload();
   };
 
   // Fetch current config on mount
@@ -269,15 +273,15 @@ export default function SettingsView() {
   };
 
   return (
-    <div className="flex flex-col w-full pb-16">
-      <div className="w-full max-w-[1000px] mx-auto px-4 sm:px-margin-desktop py-space-xl flex flex-col gap-space-xl">
+    <div className="flex min-w-0 flex-col w-full pb-16">
+      <div className="w-full min-w-0 max-w-[1000px] mx-auto px-3 sm:px-margin-desktop py-4 sm:py-space-xl flex flex-col gap-4 sm:gap-space-xl">
         {/* Title Header */}
-        <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-xs">
+        <section className="bg-surface-container-lowest p-4 sm:p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-xs">
           <div className="inline-flex items-center gap-space-xs px-2.5 py-0.5 rounded-full bg-primary-fixed text-primary font-label-mono text-label-mono">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
             <span>POWERED BY @CIVILIZATION/MODEL-CORE</span>
           </div>
-          <h1 className="font-headline-xl text-headline-xl text-on-surface font-semibold">
+          <h1 className="font-headline-xl text-[25px] leading-8 sm:text-headline-xl text-on-surface font-semibold">
             模型核心与 API Key 配置中心
           </h1>
           <p className="font-body-md text-body-md text-on-surface-variant">
@@ -285,7 +289,7 @@ export default function SettingsView() {
           </p>
         </section>
 
-        <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
+        <section className="bg-surface-container-lowest p-4 sm:p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
           <div>
             <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold">答题默认布局</h2>
             <p className="mt-1 text-body-sm text-on-surface-variant">设置进入考试时的默认工作区。考试中仍可通过顶部按钮临时切换；拖动分隔线调整的宽度会单独记住。</p>
@@ -317,7 +321,7 @@ export default function SettingsView() {
           <div className="text-label-sm text-secondary" aria-live="polite">默认布局已保存在本机设置中。</div>
         </section>
 
-        <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
+        <section className="bg-surface-container-lowest p-4 sm:p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
           <div>
             <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold">解析预览默认答案显示</h2>
             <p className="mt-1 text-body-sm text-on-surface-variant">控制智能组卷的题稿解析预览首次打开时，是否展示标准答案和解析。只影响预览显示，不会删除试卷中的答案。</p>
@@ -349,7 +353,7 @@ export default function SettingsView() {
           <div className="text-label-sm text-secondary" aria-live="polite">默认显示偏好已保存在本机设置中。</div>
         </section>
 
-        <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
+        <section className="bg-surface-container-lowest p-4 sm:p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
           <div>
             <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold">草稿纸助手语气</h2>
             <p className="mt-1 text-body-sm text-on-surface-variant">选择助手的默认交流方式，只影响操作反馈和安全提示，不会改变作图、誊写或防代答规则。设置保存在本机。</p>
@@ -817,6 +821,54 @@ export default function SettingsView() {
           </div>
         </section>
       </div>
+
+      {/* Clear All Data Confirm Dialog */}
+      {showClearConfirm && (
+        <div
+          className="fixed inset-0 z-[70] bg-on-background/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setShowClearConfirm(false);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            className="bg-surface-container-lowest text-on-surface rounded-2xl max-w-md w-full p-6 shadow-2xl border border-outline-variant/40 space-y-4 animate-in zoom-in-95 duration-200"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-error/10 text-error flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-[24px]">delete_forever</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
+                  清空所有本地数据？
+                </h3>
+                <p className="mt-1.5 text-body-sm text-on-surface-variant leading-relaxed">
+                  此操作将彻底删除本地已保存的全部试卷（{localStats.papersCount} 份）、历史模考作答记录（{localStats.subsCount} 次）以及错题本收录题目（{localStats.mistakesCount} 题）。删除后无法恢复。
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="px-4 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={executeClearAllData}
+                className="px-4 py-2 rounded-xl bg-error text-on-error hover:bg-error/90 font-label-md font-semibold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-[16px]">delete_forever</span>
+                <span>确认清空并刷新</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

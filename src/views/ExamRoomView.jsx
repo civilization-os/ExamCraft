@@ -2,10 +2,10 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import ScratchpadCanvas from '../components/ScratchpadCanvas';
 import { getQuestionDifficulty } from '../utils/paperMetrics';
-import { getQuestionTypeClass, normalizeQuestionType, stripAnswerMaterial } from '../utils/questionTypes';
+import { getQuestionTypeClass, normalizeQuestionType, stripAnswerMaterial, healQuestionOptions, deduplicateQuestions } from '../utils/questionTypes';
 
 const prefersSplitExamLayout = () => {
-  try { return localStorage.getItem('examcraft_exam_default_layout') !== 'stacked'; }
+  try { return window.matchMedia('(min-width: 1024px)').matches && localStorage.getItem('examcraft_exam_default_layout') !== 'stacked'; }
   catch { return true; }
 };
 
@@ -20,7 +20,8 @@ export default function ExamRoomView({
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [isAnswerCardCollapsed, setIsAnswerCardCollapsed] = useState(false);
   const [modelUsageStatus, setModelUsageStatus] = useState(null);
-  const normalizeQuestions = (list) => (list || []).map((question) => {
+  const normalizeQuestions = (list) => deduplicateQuestions(list, activePaper?.title || '').map((rawQuestion) => {
+    const question = healQuestionOptions(rawQuestion);
     let userAnswer = question.userAnswer;
     if (typeof userAnswer === 'string' && /^\s*\{/.test(userAnswer) && /"latex"\s*:/.test(userAnswer)) {
       try {
@@ -65,7 +66,7 @@ export default function ExamRoomView({
 
   // Initialize questionList: try to restore saved answers if user previously sealed or paused
   const [questionList, setQuestionList] = useState(() => {
-    if (!activePaper?.id) return questions || [];
+    if (!activePaper?.id) return normalizeQuestions(questions || []);
     try {
       const saved = localStorage.getItem(`examcraft_answers_${activePaper.id}`);
       if (saved) {
@@ -73,7 +74,7 @@ export default function ExamRoomView({
         if (Array.isArray(parsed) && parsed.length > 0) return normalizeQuestions(parsed);
       }
     } catch {}
-    return normalizeQuestions(questions);
+    return normalizeQuestions(questions || []);
   });
 
   useEffect(() => {
@@ -129,6 +130,7 @@ export default function ExamRoomView({
   const [submitProgressText, setSubmitProgressText] = useState('');
   const [submitProgressStage, setSubmitProgressStage] = useState(0);
   const [submitElapsedSeconds, setSubmitElapsedSeconds] = useState(0);
+  const [submitAiUsage, setSubmitAiUsage] = useState({ checked: 0, total: 0, calls: 0, totalTokens: 0, estimatedCostCny: 0, costKnown: true });
 
   useEffect(() => {
     if (!isSubmitting) {
@@ -195,6 +197,14 @@ export default function ExamRoomView({
   const [showScratchpad, setShowScratchpad] = useState(prefersSplitExamLayout);
   const [isScratchpadMaximized, setIsScratchpadMaximized] = useState(false);
   const [isSplitWorkspace, setIsSplitWorkspace] = useState(prefersSplitExamLayout);
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.matchMedia('(max-width: 639px)').matches);
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 639px)');
+    const updateViewport = () => setIsMobileViewport(media.matches);
+    updateViewport();
+    media.addEventListener?.('change', updateViewport);
+    return () => media.removeEventListener?.('change', updateViewport);
+  }, []);
   const [splitRatio, setSplitRatio] = useState(() => {
     try {
       const saved = Number(localStorage.getItem('examcraft_exam_split_ratio'));
@@ -598,6 +608,7 @@ export default function ExamRoomView({
     setIsSubmitModalOpen(false);
     setIsSubmitting(true);
     setSubmitProgressStage(0);
+    setSubmitAiUsage({ enabled: false, checked: 0, failed: 0, total: 0, calls: 0, totalTokens: 0, estimatedCostCny: 0, costKnown: true });
     setSubmitProgressText('正在核对客观题并汇总本次作答...');
 
     // 1. Evaluate answers
@@ -675,13 +686,90 @@ export default function ExamRoomView({
     });
 
     const totalPaperScore = activePaper?.totalScore || questionList.reduce((sum, q) => sum + (q.score || 5), 0);
-    const autoCheckedCount = gradedQuestions.filter((q) => q.gradingStatus === 'auto-checked' && q.userAnswer).length;
-    let accuracy = autoCheckedCount ? Math.round((correctCount / autoCheckedCount) * 100) : 0;
     const durationTotal = activePaper?.duration ? activePaper.duration * 60 : 5400;
     const durationSpent = Math.max(10, durationTotal - secondsLeft);
 
-    setSubmitProgressText('正在生成本次作答诊断...');
-    setSubmitProgressStage(1);
+    // Ask the configured model to independently review each answered question,
+    // one request at a time to keep provider load predictable.
+    const answeredIndexes = gradedQuestions.reduce((indexes, q, index) => {
+      if (q.userAnswer?.trim()) indexes.push(index);
+      return indexes;
+    }, []);
+    let availableModelStatus = modelUsageStatus;
+    if (!availableModelStatus) {
+      try {
+        const statusResponse = await fetch('/api/model/status');
+        const statusData = await statusResponse.json();
+        if (statusData.success) {
+          availableModelStatus = statusData;
+          setModelUsageStatus(statusData);
+        }
+      } catch {}
+    }
+    const modelAvailable = availableModelStatus?.model?.hasApiKey === true;
+    const usageTotals = { enabled: modelAvailable, checked: 0, failed: 0, total: answeredIndexes.length, calls: 0, totalTokens: 0, estimatedCostCny: 0, costKnown: true };
+    setSubmitAiUsage({ ...usageTotals });
+    if (modelAvailable && answeredIndexes.length > 0) {
+      setSubmitProgressStage(1);
+      for (let position = 0; position < answeredIndexes.length; position += 1) {
+        const questionIndex = answeredIndexes[position];
+        const q = gradedQuestions[questionIndex];
+        setSubmitProgressText(`AI 正在复核第 ${q.num || questionIndex + 1} 题（${position + 1}/${answeredIndexes.length}）…`);
+        try {
+          const response = await fetch('/api/model/grade-question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              question: {
+                num: q.num,
+                type: q.type,
+                prompt: q.prompt,
+                options: q.options,
+                maxScore: Number(q.score) || 0,
+                userAnswer: q.userAnswer,
+                standardAnswer: q.standardAnswer,
+                analysis: q.analysis,
+                localCheck: typeof q.isCorrect === 'boolean' ? q.isCorrect : null,
+                scratchpad: q.scratchpad
+              }
+            })
+          });
+          const result = await response.json();
+          if (!response.ok || !result.success || !result.data) throw new Error(result.error || 'AI 复核失败');
+
+          const review = result.data;
+          const suggestedScore = review.scoreObtained === null || review.scoreObtained === undefined
+            ? null
+            : Math.min(Math.max(0, Number(q.score) || 0), Math.max(0, Number(review.scoreObtained) || 0));
+          gradedQuestions[questionIndex] = {
+            ...q,
+            ...(suggestedScore !== null ? {
+              scoreObtained: suggestedScore,
+              isCorrect: review.isCorrect === true,
+              gradingStatus: 'ai-graded'
+            } : { gradingStatus: 'manual-review' }),
+            aiInsight: typeof review.comment === 'string' ? review.comment.slice(0, 1200) : q.aiInsight
+          };
+          usageTotals.checked += 1;
+          usageTotals.calls += Number(result.usage ? 1 : 0);
+          usageTotals.totalTokens += Number(result.usage?.totalTokens) || 0;
+          if (result.usage?.estimatedCostCny !== null && result.usage?.estimatedCostCny !== undefined && Number.isFinite(Number(result.usage.estimatedCostCny))) usageTotals.estimatedCostCny += Number(result.usage.estimatedCostCny);
+          else usageTotals.costKnown = false;
+        } catch (error) {
+          console.warn(`AI question review failed (${q.num || questionIndex + 1}):`, error);
+          usageTotals.failed += 1;
+        }
+        setSubmitAiUsage({ ...usageTotals });
+      }
+    }
+
+    calculatedScore = gradedQuestions.reduce((sum, question) => sum + (Number(question.scoreObtained) || 0), 0);
+    correctCount = gradedQuestions.filter((question) => question.userAnswer?.trim() && question.isCorrect === true).length;
+    const answeredCountForAccuracy = gradedQuestions.filter((question) => question.userAnswer?.trim()).length;
+    let accuracy = answeredCountForAccuracy ? Math.round((correctCount / answeredCountForAccuracy) * 100) : 0;
+
+    setSubmitProgressText('正在生成全卷作答诊断...');
+    setSubmitProgressStage(2);
 
     let aiReviewData = null;
     try {
@@ -698,29 +786,11 @@ export default function ExamRoomView({
             index,
             num: q.num,
             type: q.type,
-            prompt: String(q.prompt || '').slice(0, 2400),
-            options: Array.isArray(q.options) ? q.options.slice(0, 8).map((option) => ({ key: option.key, text: String(option.text || option.content || '').slice(0, 400) })) : [],
+            prompt: String(q.prompt || '').slice(0, 500),
             isCorrect: q.isCorrect,
             scoreObtained: q.scoreObtained,
             maxScore: Number(q.score) || 0,
-            userAnswer: q.userAnswer,
-            standardAnswer: String(q.standardAnswer || '').slice(0, 1600),
-            analysis: String(q.analysis || '').slice(0, 1000),
-            scratchpad: {
-              text: String(q.scratchpad?.text || '').slice(0, 800),
-              // Send compact, readable vector instructions only; never serialize canvas image data.
-              elements: (q.scratchpad?.elements || []).slice(0, 8).map((element) => ({
-                title: String(element.title || '').slice(0, 100),
-                actions: (element.actions || []).slice(0, 8).map((action) => ({
-                  type: action.type,
-                  content: typeof action.content === 'string' ? action.content.slice(0, 500) : undefined,
-                  expr: typeof action.expr === 'string' ? action.expr.slice(0, 180) : undefined,
-                  label: typeof action.label === 'string' ? action.label.slice(0, 120) : undefined,
-                  shapeType: action.shapeType,
-                  plane: action.plane
-                }))
-              }))
-            }
+            aiInsight: String(q.aiInsight || '').slice(0, 300)
           }))
         })
       });
@@ -732,7 +802,7 @@ export default function ExamRoomView({
       console.warn('AI evaluation request failed:', e);
     }
 
-    setSubmitProgressStage(2);
+    setSubmitProgressStage(3);
     setSubmitProgressText('正在整理逐题评语并保存报告...');
 
     if (Array.isArray(aiReviewData?.questionReviews)) {
@@ -792,7 +862,8 @@ export default function ExamRoomView({
       totalScore: totalPaperScore,
       accuracy,
       questions: gradedQuestions,
-      aiOverallReview: aiReviewData
+      aiOverallReview: aiReviewData,
+      aiGradingUsage: { ...usageTotals, estimatedCostCny: usageTotals.costKnown ? usageTotals.estimatedCostCny : null }
     };
 
     // Save to localStorage history
@@ -902,9 +973,9 @@ export default function ExamRoomView({
   return (
     <div className="w-full flex-1 flex flex-col bg-background min-h-screen">
       {/* Top Floating Minimalist Exam Status Strip */}
-      <header className="sticky top-0 z-40 w-full bg-surface-container-lowest/95 backdrop-blur-md border-b border-outline-variant/30 px-4 sm:px-margin-desktop py-space-sm flex items-center justify-between shadow-sm">
+      <header className="sticky top-0 z-40 w-full bg-surface-container-lowest/95 backdrop-blur-md border-b border-outline-variant/30 px-3 sm:px-margin-desktop py-2 sm:py-space-sm flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 shadow-sm">
         {/* Left: Exam Title & Secure Integrity Status */}
-        <div className="flex items-center space-x-space-md min-w-0">
+        <div className="flex flex-1 items-center space-x-1 sm:space-x-space-md min-w-0">
           <button
             type="button"
             onClick={onExit}
@@ -947,7 +1018,7 @@ export default function ExamRoomView({
         </div>
 
         {/* Right: Telemetry & Actions */}
-        <div className="flex items-center space-x-space-sm sm:space-x-space-md">
+        <div className="ml-auto flex items-center space-x-1 sm:space-x-space-md">
           {/* Live model usage remains visible while the global workspace header is hidden. */}
           <div
             className="hidden lg:flex shrink-0 items-center gap-1 rounded-lg border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-label-mono text-[10px] text-on-surface-variant"
@@ -1005,7 +1076,7 @@ export default function ExamRoomView({
               <span className="material-symbols-outlined text-[14px]">
                 {isTimerRunning ? 'lock' : 'lock_open'}
               </span>
-              <span>{isTimerRunning ? '封卷 (封盘)' : '启封'}</span>
+              <span>{isTimerRunning ? <><span className="hidden sm:inline">封卷 (封盘)</span><span className="sm:hidden">封卷</span></> : '启封'}</span>
             </button>
           </div>
 
@@ -1016,7 +1087,7 @@ export default function ExamRoomView({
               if (isSplitWorkspace) setIsSplitWorkspace(false);
               setShowScratchpad(!showScratchpad);
             }}
-            className={`hidden sm:inline-flex items-center space-x-1.5 px-3 py-1 font-sans text-[12px] font-medium rounded-lg border transition cursor-pointer ${
+            className={`inline-flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1 font-sans text-[11px] sm:text-[12px] font-medium rounded-lg border transition cursor-pointer ${
               showScratchpad
                 ? 'bg-primary text-on-primary border-primary shadow-xs'
                 : 'bg-surface text-on-surface-variant hover:text-on-surface border-outline-variant/50 hover:bg-surface-container'
@@ -1024,7 +1095,7 @@ export default function ExamRoomView({
             title={`打开第 ${currentQ?.num} 题专属草稿演算本`}
           >
             <span className="material-symbols-outlined text-[17px]">draw</span>
-            <span>第 {currentQ?.num} 题草稿</span>
+            <span className="hidden sm:inline">第 {currentQ?.num} 题草稿</span>
             {Boolean(
               localStorage.getItem(scratchpadCanvasStorageKey) ||
               localStorage.getItem(`${scratchpadCanvasStorageKey}_elements`)
@@ -1067,7 +1138,8 @@ export default function ExamRoomView({
           <button
             type="button"
             onClick={() => setIsSubmitModalOpen(true)}
-            className="inline-flex items-center space-x-1 px-3 sm:px-space-lg py-1.5 bg-primary hover:bg-primary-container text-on-primary font-label-md text-label-md rounded-lg shadow-sm transition-all active:scale-95 cursor-pointer"
+            className="inline-flex items-center space-x-1 px-2 sm:px-space-lg py-1.5 bg-primary hover:bg-primary-container text-on-primary text-[11px] sm:font-label-md sm:text-label-md rounded-lg shadow-sm transition-all active:scale-95 cursor-pointer"
+            title="交卷并提交评测"
           >
             <span className="material-symbols-outlined text-[18px]">check_circle</span>
             <span className="hidden sm:inline">交卷并提交评测</span>
@@ -1076,7 +1148,7 @@ export default function ExamRoomView({
       </header>
 
       {/* Main Focus Runner Layout */}
-      <div className={`w-full ${isSplitWorkspace ? 'max-w-none' : 'max-w-7xl'} mx-auto px-4 sm:px-margin-tablet lg:px-margin-desktop py-space-xl flex flex-col space-y-space-xl pb-24`}>
+      <div className={`w-full min-w-0 ${isSplitWorkspace ? 'max-w-none' : 'max-w-7xl'} mx-auto px-3 sm:px-margin-tablet lg:px-margin-desktop py-3 sm:py-space-xl flex flex-col space-y-4 sm:space-y-space-xl pb-24`}>
         {/* Answer card matrix */}
         <section className="bg-surface-container-lowest rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 shadow-xs border border-outline-variant/30 flex flex-col gap-2 sm:gap-3 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-3 select-none">
@@ -1141,7 +1213,7 @@ export default function ExamRoomView({
 
         <div ref={splitWorkspaceRef} className={`${isSplitWorkspace ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,var(--answer-ratio))_12px_minmax(360px,1fr)] items-start' : 'flex flex-col'} gap-space-md xl:gap-space-lg min-w-0`} style={isSplitWorkspace ? { '--answer-ratio': `${splitRatio * 100}%` } : undefined}>
         <div className="min-w-0 space-y-space-md">
-        <section className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 flex flex-col space-y-space-md min-w-0">
+        <section className="bg-surface-container-lowest rounded-xl p-3 sm:p-space-xl shadow-sm border border-outline-variant/40 flex flex-col space-y-space-md min-w-0">
           <div className="flex items-center justify-between gap-3 pb-space-xs border-b border-surface-container">
             <div className="flex items-center gap-space-sm min-w-0">
               <span className="shrink-0 px-2.5 py-1 bg-primary-fixed text-on-primary-fixed font-headline-sm text-headline-sm rounded font-semibold">题号 {currentQ.num}</span>
@@ -1559,7 +1631,7 @@ export default function ExamRoomView({
             >
               <span className="h-16 w-1 rounded-full bg-outline-variant/60 group-hover:bg-primary group-focus:bg-primary transition-colors" />
             </div>
-            <aside className="min-w-0 h-[calc(100vh-240px)] min-h-[520px] sticky top-4">
+            <aside className="min-w-0 h-[min(72dvh,640px)] min-h-[380px] xl:h-[calc(100vh-240px)] xl:min-h-[520px] xl:sticky xl:top-4">
               {renderScratchpadCanvas(true)}
             </aside>
           </>
@@ -1601,10 +1673,10 @@ export default function ExamRoomView({
           <div
             ref={scratchpadModalRef}
             style={{
-              left: !isScratchpadMaximized && scratchpadPos ? `${scratchpadPos.x}px` : undefined,
-              top: !isScratchpadMaximized && scratchpadPos ? `${scratchpadPos.y}px` : undefined,
-              bottom: !isScratchpadMaximized && !scratchpadPos ? '20px' : undefined,
-              right: !isScratchpadMaximized && !scratchpadPos ? '20px' : undefined,
+              left: !isMobileViewport && !isScratchpadMaximized && scratchpadPos ? `${scratchpadPos.x}px` : undefined,
+              top: !isMobileViewport && !isScratchpadMaximized && scratchpadPos ? `${scratchpadPos.y}px` : undefined,
+              bottom: !isMobileViewport && !isScratchpadMaximized && !scratchpadPos ? '20px' : undefined,
+              right: !isMobileViewport && !isScratchpadMaximized && !scratchpadPos ? '20px' : undefined,
             }}
             className={`z-50 shadow-2xl ${
               isDraggingScratchpad
@@ -1613,6 +1685,8 @@ export default function ExamRoomView({
             } ${
               isScratchpadMaximized
                 ? 'fixed inset-2 sm:inset-4 lg:inset-6 animate-in zoom-in-95'
+                : isMobileViewport
+                ? 'fixed inset-x-2 bottom-2 top-auto w-auto h-[min(78dvh,680px)] min-h-0 max-h-[calc(100dvh-1rem)] resize-none overflow-hidden animate-in slide-in-from-bottom-5'
                 : 'fixed w-[760px] max-w-[96vw] h-[min(680px,88vh)] min-h-[420px] max-h-[88vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
             }`}
           >
@@ -1694,13 +1768,22 @@ export default function ExamRoomView({
             <div className="h-2 overflow-hidden rounded-full bg-surface-container" role="progressbar" aria-label="交卷评测进度">
               <div className="exam-submit-progress-sweep h-full w-[38%] rounded-full bg-primary" />
             </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-xs sm:text-sm">
-              {['核对答案', '生成 AI 诊断', '整理并保存'].map((label, index) => (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs sm:text-sm">
+              {['核对答案', '逐题 AI 复核', '生成全卷诊断', '整理并保存'].map((label, index) => (
                 <div key={label} className={`rounded-lg px-2 py-2 transition-colors ${index < submitProgressStage ? 'bg-secondary-container/60 text-secondary' : index === submitProgressStage ? 'bg-primary-container/50 text-primary font-semibold' : 'bg-surface-container-low text-on-surface-variant'}`}>
                   {index < submitProgressStage ? '✓ ' : index === submitProgressStage ? '● ' : ''}{label}
                 </div>
               ))}
             </div>
+            {submitAiUsage.total > 0 && (
+              <p className="text-center text-xs text-on-surface-variant">
+                {submitAiUsage.enabled
+                  ? `逐题 AI 复核 ${submitAiUsage.checked}/${submitAiUsage.total} 题${submitAiUsage.failed ? ` · 失败 ${submitAiUsage.failed} 题` : ''}`
+                  : '未配置模型，逐题复核使用本地判分'}
+                {submitAiUsage.totalTokens > 0 ? ` · ${submitAiUsage.totalTokens.toLocaleString()} Tokens` : ''}
+                {submitAiUsage.costKnown && submitAiUsage.calls > 0 ? ` · 约 ¥${submitAiUsage.estimatedCostCny.toFixed(4)}` : ''}
+              </p>
+            )}
             <p className="text-center text-xs text-on-surface-variant">已用时 {Math.floor(submitElapsedSeconds / 60)}:{String(submitElapsedSeconds % 60).padStart(2, '0')}</p>
           </div>
         </div>

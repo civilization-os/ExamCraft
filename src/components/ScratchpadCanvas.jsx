@@ -672,6 +672,7 @@ export default function ScratchpadCanvas({
 
   // ==================== Agent Loop 状态 ====================
   const [isAssistantCollapsed, setIsAssistantCollapsed] = useState(false);
+  const [mobileWorkspaceTab, setMobileWorkspaceTab] = useState('canvas');
   const [spokenInput, setSpokenInput] = useState('');
   const [showFormulaReference, setShowFormulaReference] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
@@ -2440,15 +2441,24 @@ export default function ScratchpadCanvas({
         </div>
       </div>
 
-      {/* 主体工作区：手绘画布 与 公式板书 一体同屏并存 */}
+      <div className="grid grid-cols-2 gap-1.5 border-b border-outline-variant/20 bg-surface-container-low/40 p-1.5 lg:hidden" data-no-drag>
+        <button type="button" onClick={() => setMobileWorkspaceTab('canvas')} aria-pressed={mobileWorkspaceTab === 'canvas'} className={`flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold transition ${mobileWorkspaceTab === 'canvas' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:bg-surface-container'}`}>
+          <span className="material-symbols-outlined text-[16px]">draw</span>手绘草稿
+        </button>
+        <button type="button" onClick={() => { setMobileWorkspaceTab('assistant'); setIsAssistantCollapsed(false); setIsFocusMode(false); }} aria-pressed={mobileWorkspaceTab === 'assistant'} className={`flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold transition ${mobileWorkspaceTab === 'assistant' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:bg-surface-container'}`}>
+          <span className="material-symbols-outlined text-[16px]">edit_note</span>聊天助手
+        </button>
+      </div>
+
+      {/* 主体工作区：桌面并排显示，手机端通过顶部切换手绘与助手 */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row w-full h-full p-2 gap-2 overflow-y-auto lg:overflow-hidden">
         {/* 左侧：手绘涂鸦主画板 */}
         <div
           ref={containerRef}
-          className={`relative h-[min(58vh,460px)] min-h-[280px] lg:h-full rounded-[3px] border border-[#e8e2d4] overflow-hidden touch-none shadow-sm transition-all duration-200 ${
+          className={`relative h-[min(48dvh,440px)] min-h-[220px] max-h-[440px] lg:h-full lg:min-h-0 lg:max-h-none rounded-[3px] border border-[#e8e2d4] overflow-hidden touch-none shadow-sm transition-all duration-200 ${mobileWorkspaceTab === 'canvas' ? '' : 'hidden lg:block'} ${
             tool === 'select' ? 'cursor-grab' : 'cursor-crosshair'
           } ${
-            isAssistantCollapsed ? 'w-full' : 'flex-1 min-w-[320px]'
+            isAssistantCollapsed ? 'w-full' : 'flex-1 min-w-0 lg:min-w-[320px]'
           }`}
           style={{
             backgroundColor: `rgba(255, 254, 248, ${paperOpacity})`,
@@ -2502,7 +2512,7 @@ export default function ScratchpadCanvas({
 
         {/* 右侧：一体化公式板书与 Agent Loop 帮画/帮写协作区 */}
         {!isAssistantCollapsed && !isFocusMode && (
-          <div className="w-full lg:w-[420px] xl:w-[460px] h-[min(48vh,360px)] min-h-[260px] lg:h-full flex flex-col gap-2 shrink-0 min-h-0 animate-in fade-in duration-150">
+          <div className={`w-full lg:w-[420px] xl:w-[460px] h-[min(54dvh,480px)] min-h-[260px] lg:h-full flex flex-col gap-2 shrink-0 min-h-0 animate-in fade-in duration-150 ${mobileWorkspaceTab === 'assistant' ? '' : 'hidden lg:flex'}`}>
             {/* 模块 1：Agent Loop 口述帮画 & 帮写工作区 */}
             <div className="flex flex-col gap-2 flex-1 min-h-0 overflow-hidden px-1">
               <div className="flex items-center justify-between gap-3 pb-2 border-b border-outline-variant/15">

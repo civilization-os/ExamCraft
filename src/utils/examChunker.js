@@ -1,3 +1,6 @@
+import { isPseudoPassage } from './questionTypes.js';
+import { inferPaperSubject } from './paperSubject.js';
+
 // Client-side Passage-Aware Exam Chunker
 // Breaks long exams (English reading passages, big math papers) into lightweight chunks
 // Prevents HTTP 413 (Payload Too Large) and LLM context/output token overflows.
@@ -12,7 +15,10 @@ export function extractExamMeta(mdText) {
     const line = lines[i].trim();
     if (line.startsWith('# ') && !line.startsWith('### ')) {
       title = line.replace(/^#\s+/, '').trim();
-      if (title.includes('数学') && (title.includes('硕士') || title.includes('考研') || title.includes('统考'))) {
+      if (/408|计算机/.test(title)) {
+        duration = 180;
+        totalScore = 150;
+      } else if (title.includes('数学') && (title.includes('硕士') || title.includes('考研') || title.includes('统考'))) {
         duration = 180;
         totalScore = 150;
       } else if (title.includes('英语') && (title.includes('硕士') || title.includes('考研'))) {
@@ -30,7 +36,8 @@ export function extractExamMeta(mdText) {
     }
   }
 
-  return { title, duration, totalScore };
+  const subject = inferPaperSubject(title);
+  return { title, duration, totalScore, subject };
 }
 
 export function sliceMarkdownIntoChunks(mdText) {
@@ -42,11 +49,12 @@ export function sliceMarkdownIntoChunks(mdText) {
   let passageBuffer = [];
   let isCollectingPassage = false;
   let inDetails = false;
+  let isHeaderReset = true;
 
   const flushPassage = () => {
     if (passageBuffer.length > 0) {
       const candidate = passageBuffer.join('\n').trim();
-      if (candidate && !candidate.match(/^`?\d+~\d+`?\s*小题/) && !candidate.match(/^每(?:小)?题\s*\d+\s*分/)) {
+      if (isCollectingPassage && candidate && !isPseudoPassage(candidate)) {
         currentPassage = candidate;
       }
       passageBuffer = [];
@@ -60,19 +68,27 @@ export function sliceMarkdownIntoChunks(mdText) {
     if (!line) {
       if (isCollectingPassage && passageBuffer.length > 0) {
         passageBuffer.push('');
+      } else if (questionBlocks.length > 0) {
+        questionBlocks[questionBlocks.length - 1].lines.push(rawLine);
       }
       continue;
     }
 
     if (line.includes('<details>')) inDetails = true;
 
-    // Section header (## ...)
-    if (!inDetails && (line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) || line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i)) && !line.match(/^##\s*\d+$/)) {
+    // Section header (## ... or plain 一、单项选择题 ...)
+    const sectionMatch = !inDetails && (
+      line.match(/^##\s+[一二三四五六七八九十0-9]+[、\.、\s]/) ||
+      line.match(/^##\s+(?:Section|Part|第一部分|第二部分|第三部分|第四部分)/i) ||
+      line.match(/^[一二三四五六七八九十]+[、\.．\s]+(?:单项|多项|选择|填空|综合|解答|简答|计算|证明|阅读|完形|应用)/)
+    );
+    if (sectionMatch && !line.match(/^##\s*\d+$/)) {
       flushPassage();
       currentSection = line.replace(/^##\s+/, '').trim();
       currentPassage = '';
       currentPassageTitle = '';
-      isCollectingPassage = true;
+      isCollectingPassage = false;
+      isHeaderReset = true;
       continue;
     }
 
@@ -83,6 +99,7 @@ export function sliceMarkdownIntoChunks(mdText) {
       currentPassageTitle = passageMatch[1].trim();
       currentPassage = '';
       isCollectingPassage = true;
+      isHeaderReset = true;
       passageBuffer.push(rawLine);
       continue;
     }
@@ -93,13 +110,13 @@ export function sliceMarkdownIntoChunks(mdText) {
 
     if (!inDetails) {
       // 1. Bold numbers like **1.**, **21.**, **48.**, **1**
-      const mBold = line.match(/^\*\*(\d+)[\.、\s]*\*\*\s*(.*)$/);
+      const mBold = line.match(/^\*\*(\d+)[\.、．\s]*\*\*\s*(.*)$/);
       // 2. Hash headers like ### 1, ## 21
-      const mHash = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
-      // 3. Plain numbered questions commonly extracted from PDF, including full-width punctuation.
-      const mNum = line.match(/^(\d+)[\.．、)]\s*([^\d%].*)$/);
-      const mParenNum = line.match(/^[（(](\d+)[）)]\s*([^\d%].*)$/);
-      const mCnNum = line.match(/^第\s*(\d+)\s*题[.．、：:\s]*(.*)$/);
+      const mHash = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、．\s]*(.*)$/);
+      // 3. Chinese question numbering: 第 1 题, 第1题
+      const mCnNum = line.match(/^第\s*(\d+)\s*题[\.．、：:\s]*(.*)$/);
+      // 4. Plain numbered questions (1. , 1、 , 1． ; excludes sub-questions like (1) or decimals like 3.14)
+      const mNum = line.match(/^(\d+)[\.．、]\s*(.*)$/);
 
       if (mBold) {
         isQHeader = true;
@@ -107,12 +124,23 @@ export function sliceMarkdownIntoChunks(mdText) {
       } else if (mHash && !passageMatch) {
         isQHeader = true;
         qNum = parseInt(mHash[1], 10);
-      } else if ((mNum || mParenNum || mCnNum) && !line.includes('%') && !isCollectingPassage) {
-        const candidateNum = parseInt((mNum || mParenNum || mCnNum)[1], 10);
+      } else if (mCnNum) {
+        isQHeader = true;
+        qNum = parseInt(mCnNum[1], 10);
+      } else if (mNum && !line.includes('%') && !line.match(/^\d+[\.．]\d+/)) {
+        const candidateNum = parseInt(mNum[1], 10);
         const lastNum = questionBlocks.length ? (questionBlocks[questionBlocks.length - 1].qNum || 0) : 0;
-        if (candidateNum === lastNum + 1) {
-          isQHeader = true;
-          qNum = candidateNum;
+        if (candidateNum >= 1 && candidateNum <= 150) {
+          if (isHeaderReset || questionBlocks.length === 0) {
+            isQHeader = true;
+            qNum = candidateNum;
+          } else if (candidateNum > lastNum) {
+            isQHeader = true;
+            qNum = candidateNum;
+          } else if (candidateNum === 1) {
+            isQHeader = true;
+            qNum = candidateNum;
+          }
         }
       }
     }
@@ -120,11 +148,14 @@ export function sliceMarkdownIntoChunks(mdText) {
     if (isQHeader && qNum >= 1 && qNum <= 150) {
       flushPassage();
       isCollectingPassage = false;
+      isHeaderReset = false;
+      const validPassage = currentPassage && !isPseudoPassage(currentPassage) ? currentPassage : '';
+      const validPassageTitle = validPassage ? currentPassageTitle : '';
       questionBlocks.push({
         qNum,
         section: currentSection,
-        passageTitle: currentPassageTitle,
-        passage: currentPassage,
+        passageTitle: validPassageTitle,
+        passage: validPassage,
         lines: [rawLine]
       });
       continue;
@@ -132,7 +163,7 @@ export function sliceMarkdownIntoChunks(mdText) {
 
     if (questionBlocks.length > 0 && !isCollectingPassage) {
       questionBlocks[questionBlocks.length - 1].lines.push(rawLine);
-    } else {
+    } else if (isCollectingPassage) {
       passageBuffer.push(rawLine);
     }
 

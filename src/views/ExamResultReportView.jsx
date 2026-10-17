@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import SelectMenu from '../components/SelectMenu';
-import { getQuestionTypeClass } from '../utils/questionTypes';
+import { getQuestionTypeClass, isPseudoPassage } from '../utils/questionTypes';
 
 export default function ExamResultReportView({
   submission,
@@ -37,7 +37,8 @@ export default function ExamResultReportView({
     accuracy = 0,
     questions = [],
     totalScore = questions.reduce((sum, q) => sum + (Number(q.score) || 0), 0),
-    aiOverallReview = null
+    aiOverallReview = null,
+    aiGradingUsage = null
   } = submission;
 
   // Question filter: 'all' | 'wrong' | 'correct' | 'unanswered'
@@ -323,10 +324,10 @@ export default function ExamResultReportView({
   };
 
   return (
-    <div className="w-full flex-1 flex flex-col bg-background min-h-screen pb-24">
+    <div className="w-full min-w-0 flex-1 flex flex-col bg-background min-h-screen pb-24">
       {/* 1. Top Minimalist Telemetry & Action Navigation */}
-      <header className="sticky top-0 z-40 w-full bg-surface-container-lowest/95 backdrop-blur-md border-b border-outline-variant/30 px-4 sm:px-margin-desktop py-space-sm flex items-center justify-between shadow-xs">
-        <div className="flex items-center space-x-space-md min-w-0">
+      <header className="sticky top-0 z-40 w-full bg-surface-container-lowest/95 backdrop-blur-md border-b border-outline-variant/30 px-3 sm:px-margin-desktop py-2 sm:py-space-sm flex flex-wrap items-center justify-between gap-2 shadow-xs">
+        <div className="flex flex-1 items-center space-x-2 sm:space-x-space-md min-w-0">
           <button
             type="button"
             onClick={onBackToLibrary}
@@ -350,14 +351,14 @@ export default function ExamResultReportView({
           </div>
         </div>
 
-        <div className="flex items-center space-x-space-sm sm:space-x-space-md">
+        <div className="flex w-full sm:w-auto items-center justify-end space-x-1 sm:space-x-space-md">
           <button
             type="button"
             onClick={() => setIsExportModalOpen(true)}
-            className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 bg-primary hover:bg-primary-container text-on-primary font-label-md text-label-md rounded-lg shadow-sm transition-all active:scale-95 cursor-pointer font-medium"
+            className="inline-flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3.5 py-1.5 bg-primary hover:bg-primary-container text-on-primary text-[11px] sm:font-label-md sm:text-label-md rounded-lg shadow-sm transition-all active:scale-95 cursor-pointer font-medium"
           >
             <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
-            <span>📥 结果转题集 (自由组合)</span>
+            <span className="hidden min-[420px]:inline">📥 结果转题集</span>
           </button>
           <button
             type="button"
@@ -370,20 +371,20 @@ export default function ExamResultReportView({
           <button
             type="button"
             onClick={onBackToLibrary}
-            className="inline-flex items-center space-x-1 px-3 py-1.5 bg-surface-container-low hover:bg-surface-container text-on-surface-variant font-label-md text-label-md rounded-lg border border-outline-variant/30 transition-colors cursor-pointer"
+            className="inline-flex items-center space-x-1 px-2 sm:px-3 py-1.5 bg-surface-container-low hover:bg-surface-container text-on-surface-variant text-[11px] sm:font-label-md sm:text-label-md rounded-lg border border-outline-variant/30 transition-colors cursor-pointer"
           >
-            <span>返回试卷库</span>
+            <span className="hidden min-[420px]:inline">返回试卷库</span>
           </button>
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="w-full max-w-7xl mx-auto px-4 sm:px-margin-tablet lg:px-margin-desktop py-space-xl flex flex-col space-y-space-xl">
+      <main className="w-full min-w-0 max-w-7xl mx-auto px-3 sm:px-margin-tablet lg:px-margin-desktop py-4 sm:py-space-xl flex flex-col space-y-4 sm:space-y-space-xl">
         
         {/* 2. Score & AI Master Review Dashboard */}
-        <section className="bg-surface-container-lowest rounded-2xl p-space-xl shadow-sm border border-outline-variant/30 flex flex-col lg:flex-row gap-space-xl items-stretch">
+        <section className="bg-surface-container-lowest rounded-2xl p-3 sm:p-space-xl shadow-sm border border-outline-variant/30 flex flex-col lg:flex-row gap-3 sm:gap-space-xl items-stretch">
           {/* Left: Score & Key KPI Cards */}
-          <div className="lg:w-80 shrink-0 flex flex-col justify-between p-space-lg bg-surface-container-low rounded-xl border border-outline-variant/30 space-y-space-md">
+          <div className="lg:w-80 shrink-0 flex flex-col justify-between p-3 sm:p-space-lg bg-surface-container-low rounded-xl border border-outline-variant/30 space-y-space-md">
             <div>
               <div className="flex items-center justify-between text-on-surface-variant font-label-mono text-label-mono mb-1">
                   <span>AUTO-CHECKED SCORE</span>
@@ -455,6 +456,14 @@ export default function ExamResultReportView({
               <p className="text-body-md text-on-surface-variant leading-relaxed bg-surface-container-low/50 p-space-md rounded-xl border border-outline-variant/20">
                 {aiOverallReview?.summary || '本次智能诊断暂不可用。您仍可根据逐题得分、标准答案与解析进行复盘。'}
               </p>
+              {aiGradingUsage?.total > 0 && (
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-on-surface-variant" aria-label="AI逐题复核用量">
+                  <span>{aiGradingUsage.enabled === false ? '未配置模型，逐题复核使用本地判分' : `AI 逐题复核：${aiGradingUsage.checked}/${aiGradingUsage.total} 题`}</span>
+                  {aiGradingUsage.failed > 0 && <span>复核失败 {aiGradingUsage.failed} 题</span>}
+                  {aiGradingUsage.totalTokens > 0 && <span>{Number(aiGradingUsage.totalTokens).toLocaleString()} Tokens</span>}
+                  {aiGradingUsage.estimatedCostCny !== null && aiGradingUsage.estimatedCostCny !== undefined && Number.isFinite(Number(aiGradingUsage.estimatedCostCny)) && aiGradingUsage.calls > 0 && <span>约 ¥{Number(aiGradingUsage.estimatedCostCny).toFixed(4)}</span>}
+                </p>
+              )}
             </div>
 
             {/* Strengths & Weaknesses Tags */}
@@ -536,7 +545,7 @@ export default function ExamResultReportView({
         </section>
 
         {/* 3. Filter Pill Bar & Question Mini-Map Matrix */}
-        <section className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/30 flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+        <section className="min-w-0 bg-surface-container-lowest rounded-xl p-3 sm:p-space-md shadow-sm border border-outline-variant/30 flex flex-col md:flex-row md:items-center justify-between gap-space-md">
           {/* Left: Filter Pills */}
           <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto pb-1 md:pb-0">
             <button
@@ -739,7 +748,7 @@ export default function ExamResultReportView({
                   </div>
 
                   {/* Passage context if English Reading / Comprehension */}
-                  {q.passage && (
+                  {q.passage && !isPseudoPassage(q.passage) && (
                     <div className="bg-surface-container-low/40 rounded-xl p-space-md border border-outline-variant/30 text-body-sm leading-relaxed text-on-surface-variant max-h-56 overflow-y-auto font-serif">
                       <div className="flex items-center space-x-1 text-primary font-semibold text-[12px] mb-1 font-sans">
                         <span className="material-symbols-outlined text-[16px]">menu_book</span>

@@ -4,6 +4,16 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    min-width: 320px;
+    overflow-x: hidden;
+  }
+
   button:focus-visible,
   a:focus-visible,
   [role='button']:focus-visible {
@@ -48,6 +58,15 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     background: #777587;
+  }
+}
+
+/* Keep form controls comfortable and prevent iOS Safari from zooming the page on focus. */
+@media (max-width: 639px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px !important;
   }
 }
 

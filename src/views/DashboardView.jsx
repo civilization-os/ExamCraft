@@ -104,15 +104,15 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
 
   return (
     <div className="flex flex-col w-full pb-16">
-      <div className="w-full max-w-[1400px] mx-auto px-4 sm:px-margin-desktop py-space-xl flex flex-col gap-space-2xl">
+      <div className="w-full min-w-0 max-w-[1400px] mx-auto px-3 sm:px-margin-desktop py-4 sm:py-space-xl flex flex-col gap-6 sm:gap-space-2xl">
         {/* Welcome Hero Banner */}
-        <section className="bg-surface-container-lowest rounded-2xl p-space-xl shadow-sm border border-outline-variant/30 relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-space-xl">
+        <section className="bg-surface-container-lowest rounded-2xl p-4 sm:p-space-xl shadow-sm border border-outline-variant/30 relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-space-xl">
           <div className="space-y-space-xs z-10 max-w-2xl">
             <div className="inline-flex items-center gap-space-xs px-2.5 py-0.5 rounded-full bg-primary-fixed text-primary font-label-mono text-label-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
               <span>EXAMCRAFT AI WORKBENCH v2.4</span>
             </div>
-            <h1 className="font-headline-xl text-headline-xl text-on-surface font-semibold tracking-tight">
+            <h1 className="font-headline-xl text-[26px] leading-8 sm:text-headline-xl text-on-surface font-semibold tracking-tight">
               从组卷、模考到错题复盘
             </h1>
             <p className="font-body-lg text-body-lg text-on-surface-variant">
@@ -120,7 +120,7 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-space-sm z-10 shrink-0">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:flex gap-2 sm:gap-space-sm z-10 shrink-0">
             <button
               type="button"
               onClick={() => onNavigate('exam-generator')}
@@ -141,18 +141,18 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
         </section>
 
         {/* Stats 4 Cards */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-space-md">
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-space-md">
           {stats.map((s) => (
             <div
               key={s.label}
-              className="bg-surface-container-lowest p-space-lg rounded-xl shadow-sm border border-outline-variant/30 flex flex-col justify-between"
+              className="min-w-0 bg-surface-container-lowest p-3 sm:p-space-lg rounded-xl shadow-sm border border-outline-variant/30 flex flex-col justify-between"
             >
               <div className="flex items-center justify-between">
-                <span className="font-label-md text-label-md text-on-surface-variant">{s.label}</span>
-                <span className={`material-symbols-outlined text-[24px] ${s.color}`}>{s.icon}</span>
+                <span className="min-w-0 font-label-md text-[11px] leading-tight sm:text-label-md text-on-surface-variant">{s.label}</span>
+                <span className={`material-symbols-outlined text-[20px] sm:text-[24px] ${s.color}`}>{s.icon}</span>
               </div>
-              <div className="mt-space-md">
-                <p className="font-headline-xl text-headline-xl font-bold text-on-surface font-mono">{s.value}</p>
+              <div className="mt-2 sm:mt-space-md">
+                <p className="font-headline-xl text-[23px] leading-7 sm:text-headline-xl font-bold text-on-surface font-mono">{s.value}</p>
                 <p className="font-label-sm text-label-sm text-on-surface-variant mt-1 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
                   {s.change}
@@ -162,7 +162,7 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
           ))}
         </section>
 
-        <section className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-space-lg shadow-sm" aria-label="AI Token 用量">
+        <section className="min-w-0 rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-3 sm:p-space-lg shadow-sm" aria-label="AI Token 用量">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-primary text-[22px]">token</span>

@@ -40,8 +40,7 @@ export function normalizeQuestionType(question, examTitle = '') {
   const hasOptions = hasChoiceOptions(question);
   const blankCue = /_{2,}|＿{2,}|…{2,}|\.{4,}|\(\s{2,}\)|（\s{2,}）|填入.*?空|空格|横线处/.test(prompt);
 
-  // Never infer choice solely from a low question number. Explicit options win;
-  // otherwise use discipline-specific exam structure and visible blank markers.
+  // If options exist, distinguish choice types
   if (hasOptions) {
     if (/英语|English/i.test(title) && num >= 1 && num <= 20) return '完形填空';
     if (/英语|English/i.test(title) && num >= 21 && num <= 40) return '阅读理解';
@@ -49,15 +48,32 @@ export function normalizeQuestionType(question, examTitle = '') {
     if (/政治/.test(title) && num >= 17 && num <= 33) return '多项选择题';
     return /多项选择|多选/.test(rawType) ? '多项选择题' : '单项选择题';
   }
-  if (/数学/.test(title) && num >= 11 && num <= 16) return '填空题';
+
+  // Explicit blank marker
   if (blankCue || /填空/.test(rawType)) return '填空题';
 
-  if (/英语|English/i.test(title) && num >= 21 && num <= 40) return '阅读理解';
-  if (/英语|English/i.test(title) && num >= 41 && num <= 45) return '英语新题型';
-  if (/英语|English/i.test(title) && num === 46) return '英译汉翻译';
-  if (/英语|English/i.test(title) && num >= 47) return '写作题';
-  if (/政治/.test(title) && num >= 34) return '分析题';
-  if (/408|计算机/.test(title) && num >= 41) return '综合应用题';
+  // Standard exam structures by discipline
+  if (/408|计算机/.test(title)) {
+    if (num >= 1 && num <= 40) return '单项选择题';
+    if (num >= 41) return '综合应用题';
+  }
+  if (/数学/.test(title)) {
+    if (num >= 1 && num <= 10) return '单项选择题';
+    if (num >= 11 && num <= 16) return '填空题';
+    if (num >= 17) return '解答题';
+  }
+  if (/政治/.test(title)) {
+    if (num >= 1 && num <= 16) return '单项选择题';
+    if (num >= 17 && num <= 33) return '多项选择题';
+    if (num >= 34) return '分析题';
+  }
+  if (/英语|English/i.test(title)) {
+    if (num >= 1 && num <= 20) return '完形填空';
+    if (num >= 21 && num <= 40) return '阅读理解';
+    if (num >= 41 && num <= 45) return '英语新题型';
+    if (num === 46) return '英译汉翻译';
+    if (num >= 47) return '写作题';
+  }
 
   if (rawType && !/^(?:选择题|客观题|试题|考题)$/.test(rawType)) return rawType;
   if (/分析|论述|材料/.test(title)) return '分析题';
@@ -72,3 +88,255 @@ export function getQuestionInputKind(question) {
   if (/填空/.test(type)) return 'blank';
   return 'written';
 }
+
+export function isPseudoPassage(text) {
+  if (!text || typeof text !== 'string') return true;
+  const clean = text.trim().replace(/[\s\r\n\t]+/g, '');
+  if (!clean) return true;
+
+  // 1. High-confidence exam instruction keywords (if text is under 180 chars)
+  const instructionKeywords = [
+    '符合题意要求',
+    '符合题目要求',
+    '符合试题要求',
+    '符合题意的一项',
+    '符合题目要求的一项',
+    '四个选项中',
+    '每小题给出的四个选项',
+    '下列每题给出的',
+    '下列各题给出的',
+    '在每小题给出的',
+    '只有一个选项',
+    '有一个选项',
+    '只有一项是符合',
+    '只有一项符合',
+    '选出符合题意',
+    '选出最符合',
+    '答题卡',
+    '答题区域内作答',
+    '超出答题区域',
+    '草稿纸上答题无效',
+    '在草稿纸、试卷上答题无效',
+    '试卷上作答无效',
+    '考试时间',
+    '试卷满分',
+    '本大题共',
+    '本大题分值',
+    '本卷共',
+    '请将答案写在',
+    '请考生按要求作答',
+    '考生务必将自己的',
+    '准考证号填写',
+  ];
+
+  if (clean.length < 180 && instructionKeywords.some(kw => clean.includes(kw))) {
+    return true;
+  }
+
+  // 2. Starts with typical exam instruction patterns
+  if (/^(?:下列每(?:小)?题|在每小题给出的|只有一个选项|有一个选项|本(?:大)?题共|每(?:小)?题\s*\d+\s*分|共\s*\d+\s*分|请将答案|考试时间\s*\d+|在试卷上作答无效|考生务必)/.test(clean)) {
+    return true;
+  }
+
+  // 3. Question numbering / score summary boilerplate (e.g. `1~40小题，每小题2分，共80分`)
+  if (/^`?\d+[~～\-—]\d+`?(?:题|小题)?(?:[，,、\s]*每(?:小)?题\s*\d+\s*分)?(?:[，,、\s]*共\s*\d+\s*分)?(?:[。\.])?$/.test(clean)) {
+    return true;
+  }
+
+  // 4. Short strings (< 40 chars) ending with or containing general choice cues
+  if (clean.length < 40 && /(?:符合题[意目]|选项中|选择题|共\s*\d+\s*分|每小题\s*\d+\s*分)/.test(clean)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function healQuestionOptions(q) {
+  if (!q) return q;
+  let res = { ...q };
+
+  // Strip pseudo-passages that are actually exam directions/instructions
+  if (res.passage && isPseudoPassage(res.passage)) {
+    delete res.passage;
+    delete res.passageTitle;
+    delete res.passageGroupId;
+  }
+
+  // Extract options from prompt if options array is missing or incomplete (< 2)
+  if ((!Array.isArray(res.options) || res.options.length < 2) && typeof res.prompt === 'string') {
+    const inlineOptRegex = /(?:^|\n|\s{2,}|[;；])(?:[\(（\[]([A-H])[\)）\]][\.、．:：\s]?|([A-H])[\.、．:：])/g;
+    const matches = [];
+    let m;
+    while ((m = inlineOptRegex.exec(res.prompt)) !== null) {
+      const key = (m[1] || m[2]).toUpperCase();
+      matches.push({ key, index: m.index, matchLen: m[0].length });
+    }
+    if (matches.length >= 2 && matches[0].key === 'A' && matches[1].key === 'B') {
+      const promptCut = matches[0].index;
+      const extractedOptions = [];
+      for (let i = 0; i < matches.length; i++) {
+        const cur = matches[i];
+        const textStart = cur.index + cur.matchLen;
+        const textEnd = i + 1 < matches.length ? matches[i + 1].index : res.prompt.length;
+        const optText = res.prompt.substring(textStart, textEnd).trim().replace(/^[\.、．:：\s]+/, '').trim();
+        extractedOptions.push({ key: cur.key, text: optText });
+      }
+      if (extractedOptions.length >= 2) {
+        res.options = extractedOptions;
+        res.prompt = res.prompt.slice(0, promptCut).trim();
+      }
+    }
+  }
+
+  if (Array.isArray(res.options) && res.options.length > 0) {
+    const healedOptions = [];
+    const inlineOptRegex = /(?:^|\s+|[;；])(?:[\(（\[]([A-H])[\)）\]][\.、．:：\s]?|([A-H])[\.、．:：])/g;
+    for (const opt of res.options) {
+      if (typeof opt === 'string') {
+        const matches = [];
+        let m;
+        inlineOptRegex.lastIndex = 0;
+        while ((m = inlineOptRegex.exec(opt)) !== null) {
+          matches.push({ key: (m[1] || m[2]).toUpperCase(), index: m.index, matchLen: m[0].length });
+        }
+        if (matches.length > 1) {
+          for (let i = 0; i < matches.length; i++) {
+            const cur = matches[i];
+            const textStart = cur.index + cur.matchLen;
+            const textEnd = i + 1 < matches.length ? matches[i + 1].index : opt.length;
+            healedOptions.push({ key: cur.key, text: opt.substring(textStart, textEnd).trim().replace(/^[\.、．:：\s]+/, '').trim() });
+          }
+        } else {
+          healedOptions.push({ key: String.fromCharCode(65 + healedOptions.length), text: opt.trim() });
+        }
+        continue;
+      }
+      const optionText = typeof opt?.text === 'string' ? opt.text : typeof opt?.content === 'string' ? opt.content : '';
+      inlineOptRegex.lastIndex = 0;
+      if (opt && optionText && inlineOptRegex.test(optionText)) {
+        const trimmed = optionText.trim();
+        const hasLeadingKey = /^(?:[\(（\[]?[A-H][\)）\]]?[\.、．:：\s])/.test(trimmed);
+        const full = hasLeadingKey ? trimmed : `${opt.key || 'A'}、 ${trimmed}`;
+        const matches = [];
+        let m;
+        inlineOptRegex.lastIndex = 0;
+        while ((m = inlineOptRegex.exec(full)) !== null) {
+          const key = (m[1] || m[2]).toUpperCase();
+          matches.push({ key, index: m.index, matchLen: m[0].length });
+        }
+        if (matches.length > 1) {
+          for (let i = 0; i < matches.length; i++) {
+            const cur = matches[i];
+            const textStart = cur.index + cur.matchLen;
+            const textEnd = i + 1 < matches.length ? matches[i + 1].index : full.length;
+            let text = full.substring(textStart, textEnd).trim().replace(/^([\.、．:：\s]+)/, '').trim();
+            healedOptions.push({ key: cur.key, text });
+          }
+          continue;
+        }
+      }
+      if (opt && typeof opt.text === 'string') {
+        const cleanText = opt.text.replace(/^([\.、．:：\s]+)/, '').trim();
+        healedOptions.push({ ...opt, text: cleanText });
+      } else if (opt && typeof opt.content === 'string') {
+        healedOptions.push({ ...opt, text: opt.content.replace(/^([\.、．:：\s]+)/, '').trim() });
+      } else {
+        healedOptions.push(opt);
+      }
+    }
+    const seen = new Set();
+    const finalOptions = healedOptions.filter(o => {
+      if (!o || !o.key) return false;
+      const k = String(o.key).toUpperCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      o.key = k;
+      return true;
+    });
+    res.options = finalOptions;
+  }
+  return res;
+}
+
+export const healQuestion = healQuestionOptions;
+
+export function deduplicateQuestions(questions = [], examTitle = '') {
+  if (!Array.isArray(questions) || questions.length === 0) return [];
+  const map = new Map();
+
+  for (const rawQ of questions) {
+    if (!rawQ) continue;
+    const q = healQuestionOptions(rawQ);
+    const num = Number.parseInt(String(q.num || q.id || '').replace(/\D/g, ''), 10);
+    const key = Number.isFinite(num) && num > 0 ? num : (q.id || `q_${map.size + 1}`);
+
+    if (!map.has(key)) {
+      map.set(key, {
+        ...q,
+        id: q.id || `q_${key}`,
+        num: String(key).padStart(2, '0'),
+        type: normalizeQuestionType(q, examTitle)
+      });
+    } else {
+      const existing = map.get(key);
+
+      // Score comparison to see which question object is more complete/authoritative
+      const scoreCandidate = (cand) => {
+        let score = 0;
+        if (cand.options && Array.isArray(cand.options) && cand.options.length >= 2) score += 50;
+        if (cand.prompt && cand.prompt.length > 20) score += Math.min(30, cand.prompt.length / 5);
+        if (cand.standardAnswer) score += 10;
+        if (cand.analysis && cand.analysis.length > 10) score += 10;
+        if (cand.section && !cand.section.includes('临时') && !cand.section.includes('通用')) score += 5;
+        const numVal = Number.parseInt(String(cand.num || cand.id || '').replace(/\D/g, ''), 10);
+        const t = String(cand.type || '');
+        if (numVal <= 40 && /选择/.test(t)) score += 20;
+        if (numVal >= 41 && /综合|解答|应用/.test(t)) score += 20;
+        return score;
+      };
+
+      const existingScore = scoreCandidate(existing);
+      const newScore = scoreCandidate(q);
+
+      const base = newScore > existingScore ? { ...q } : { ...existing };
+      const secondary = newScore > existingScore ? existing : q;
+
+      // Merge secondary fields into base if missing in base
+      if ((!base.options || base.options.length < 2) && secondary.options?.length >= 2) {
+        base.options = secondary.options;
+        base.type = secondary.type;
+      }
+      if (!base.standardAnswer && secondary.standardAnswer) {
+        base.standardAnswer = secondary.standardAnswer;
+      }
+      if (!base.analysis && secondary.analysis) {
+        base.analysis = secondary.analysis;
+      } else if (secondary.analysis && base.analysis && !base.analysis.includes(secondary.analysis.slice(0, 30))) {
+        base.analysis = `${base.analysis}\n\n${secondary.analysis}`;
+      }
+      if ((!base.passage || isPseudoPassage(base.passage)) && secondary.passage && !isPseudoPassage(secondary.passage)) {
+        base.passage = secondary.passage;
+        base.passageTitle = secondary.passageTitle;
+      }
+      if (!base.prompt || base.prompt.length < 15) {
+        base.prompt = secondary.prompt || base.prompt;
+      }
+
+      base.id = key;
+      base.num = String(key).padStart(2, '0');
+      base.type = normalizeQuestionType(base, examTitle);
+      map.set(key, base);
+    }
+  }
+
+  const result = Array.from(map.values());
+  result.sort((a, b) => {
+    const numA = parseInt(String(a.num || a.id).replace(/\D/g, ''), 10) || 0;
+    const numB = parseInt(String(b.num || b.id).replace(/\D/g, ''), 10) || 0;
+    return numA - numB;
+  });
+  return result;
+}
+
+
+

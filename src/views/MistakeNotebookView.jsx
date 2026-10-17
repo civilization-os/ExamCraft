@@ -202,16 +202,16 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
   };
 
   return (
-    <div className="flex flex-col w-full pb-16">
+    <div className="flex min-w-0 flex-col w-full pb-16">
       {/* Top Ambient Glow Line */}
       <div className="h-0.5 w-full bg-gradient-to-r from-primary-container via-surface-tint to-secondary"></div>
 
       {/* Workbench Main Container */}
-      <div className="w-full px-4 sm:px-margin-desktop py-space-xl flex flex-col lg:flex-row gap-space-xl">
+      <div className="w-full min-w-0 px-3 sm:px-margin-desktop py-4 sm:py-space-xl flex flex-col lg:flex-row gap-4 sm:gap-space-xl">
         {/* LEFT SIDEBAR: Question Bank Navigation */}
         <aside className="w-full lg:w-[280px] flex-shrink-0 flex flex-col gap-space-lg">
           {/* Primary Classification Hub */}
-          <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex flex-col gap-space-xs">
+          <div className="min-w-0 bg-surface-container-lowest p-3 sm:p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex flex-col gap-space-xs">
             <div className="flex items-center justify-between px-space-xs pb-space-xs">
               <span className="font-label-mono text-label-mono text-on-surface-variant tracking-wider uppercase">
                 题库体系分类
@@ -220,7 +220,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
             </div>
 
             {/* Quick Filters */}
-            <nav className="flex flex-col gap-0.5">
+            <nav className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-1">
               <button
                 type="button"
                 onClick={() => setActiveCategory('all')}
@@ -314,7 +314,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
           </div>
 
           {/* Custom Folder Tree */}
-          <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
+          <div className="min-w-0 max-h-[30vh] overflow-y-auto lg:max-h-none bg-surface-container-lowest p-3 sm:p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex flex-col gap-space-sm">
             <div className="flex items-center justify-between px-space-xs">
               <span className="font-label-mono text-label-mono text-on-surface-variant tracking-wider uppercase">
                 我的题集文件夹
@@ -383,9 +383,9 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
         </aside>
 
         {/* RIGHT/MAIN CANVAS: Question Stream & Topic Dashboard */}
-        <section className="flex-1 min-w-0 flex flex-col gap-space-lg">
+        <section className="flex-1 min-w-0 flex flex-col gap-space-md sm:gap-space-lg">
           {/* Top Folder Telemetry Banner */}
-          <div className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/30 flex flex-col gap-space-lg relative overflow-hidden">
+          <div className="bg-surface-container-lowest rounded-xl p-4 sm:p-space-xl shadow-sm border border-outline-variant/30 flex flex-col gap-4 sm:gap-space-lg relative overflow-hidden">
             <div className="absolute right-0 top-0 bottom-0 w-80 bg-gradient-to-l from-primary-fixed/20 to-transparent pointer-events-none"></div>
             <div className="flex flex-col md:flex-row md:items-start justify-between gap-space-lg z-10">
               <div className="flex flex-col gap-space-xs">
@@ -400,7 +400,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                     {mistakes.length > 0 ? '重点攻坚中' : '等待收录'}
                   </span>
                 </div>
-                <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-semibold">
+                <h1 className="font-headline-lg text-[23px] leading-7 sm:text-headline-lg text-on-surface tracking-tight font-semibold">
                   {activeCategory === 'mistakes' ? '错题本 (重点复盘)' :
                    activeCategory === 'fav' ? '高频收藏好题集' :
                    activeCategory === 'ai' ? 'AI 举一反三变式题' :
@@ -471,7 +471,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 return (
                 <article
                   key={item.id}
-                  className={`bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border transition-all flex flex-col gap-space-md hover:shadow-md ${
+                  className={`bg-surface-container-lowest rounded-xl p-4 sm:p-space-xl shadow-sm border transition-all flex flex-col gap-space-md hover:shadow-md ${
                     isCorrect ? 'border-secondary/40' : (isManualReview ? 'border-primary/30' : 'border-outline-variant/30')
                   }`}
                 >

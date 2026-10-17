@@ -1,7 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import SelectMenu from '../components/SelectMenu';
 import { calculatePaperMetrics } from '../utils/paperMetrics';
-import { getQuestionTypeClass } from '../utils/questionTypes';
+import { getQuestionTypeClass, isPseudoPassage } from '../utils/questionTypes';
+import {
+  inferPaperSubject,
+  DEFAULT_SUBJECTS,
+  getCustomSubjects,
+  addCustomSubject,
+  removeCustomSubject,
+  getSubjectBadgeStyle
+} from '../utils/paperSubject';
 
 // Dynamically compute real question and section breakdown from paper
 function getPaperStructure(paper) {
@@ -90,7 +98,7 @@ function getQuestionPreviewContent(q, idx) {
     if (optionsText) {
       return `【选项】${optionsText}`;
     }
-    if (q.passage) {
+    if (q.passage && !isPseudoPassage(q.passage)) {
       const cleanPassage = q.passage.replace(/[#*`_]/g, '').trim();
       return `【篇章阅读】${cleanPassage.slice(0, 80)}...`;
     }
@@ -105,17 +113,7 @@ function getQuestionPreviewContent(q, idx) {
 }
 
 function getPaperSubject(paper) {
-  const explicit = String(paper?.subject || paper?.subjectName || paper?.discipline || '').trim();
-  if (explicit) return explicit;
-
-  const searchable = [paper?.title, ...(Array.isArray(paper?.tags) ? paper.tags : [])]
-    .filter(Boolean)
-    .join(' ');
-  if (/408|计算机统考|计算机学科专业基础/.test(searchable)) return '408';
-  if (/英语\s*[一二12]|英\s*[一二12]|考研英语/.test(searchable)) return '英语';
-  if (/数学\s*[一二12]|数\s*[一二12]|高等数学|线性代数|概率论|考研数学/.test(searchable)) return '数学';
-  if (/政治|思想政治|马克思|毛中特|史纲|思修|考研政治/.test(searchable)) return '政治';
-  return '未分类';
+  return inferPaperSubject(paper);
 }
 
 export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onDeletePaper, onNavigate, onViewSubmission }) {
@@ -125,6 +123,12 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
   const [sortBy, setSortBy] = useState('date-desc');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [paperList, setPaperList] = useState(() => (papers || []));
+  const [customSubjects, setCustomSubjects] = useState(getCustomSubjects);
+  const [isAddSubjectModalOpen, setIsAddSubjectModalOpen] = useState(false);
+  const [newSubjectInput, setNewSubjectInput] = useState('');
+  const [subjectEditingPaper, setSubjectEditingPaper] = useState(null);
+  const [editingPaperSubject, setEditingPaperSubject] = useState('');
+  const [customInputInModal, setCustomInputInModal] = useState('');
 
   React.useEffect(() => {
     setPaperList(papers || []);
@@ -235,12 +239,65 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
     counts.set(subject, (counts.get(subject) || 0) + 1);
     return counts;
   }, new Map());
-  const subjects = [
-    { label: '全部科目', count: paperList.length },
-    ...Array.from(subjectCounts.entries())
-      .sort(([a], [b]) => a === '未分类' ? 1 : b === '未分类' ? -1 : a.localeCompare(b, 'zh-CN'))
-      .map(([label, count]) => ({ label, count }))
-  ];
+
+  const allSubjectLabels = useMemo(() => {
+    const set = new Set([
+      ...DEFAULT_SUBJECTS,
+      ...customSubjects,
+      ...Array.from(subjectCounts.keys()).filter((k) => k !== '未分类')
+    ]);
+    return Array.from(set);
+  }, [customSubjects, subjectCounts]);
+
+  const subjects = useMemo(() => {
+    const list = [
+      { label: '全部科目', count: paperList.length },
+      ...allSubjectLabels.map((label) => ({
+        label,
+        count: subjectCounts.get(label) || 0,
+        isCustom: customSubjects.includes(label)
+      }))
+    ];
+    const unclassifiedCount = subjectCounts.get('未分类') || 0;
+    if (unclassifiedCount > 0) {
+      list.push({ label: '未分类', count: unclassifiedCount });
+    }
+    return list;
+  }, [paperList.length, allSubjectLabels, subjectCounts, customSubjects]);
+
+  const handleAddCustomSubject = (rawName) => {
+    const name = (rawName || newSubjectInput).trim();
+    if (!name) return;
+    const updated = addCustomSubject(name);
+    setCustomSubjects(updated);
+    setNewSubjectInput('');
+    setIsAddSubjectModalOpen(false);
+    setActiveSubject(name);
+    showToast(`已添加科目分类「${name}」`);
+  };
+
+  const handleRemoveCustomSubject = (name) => {
+    const updated = removeCustomSubject(name);
+    setCustomSubjects(updated);
+    if (activeSubject === name) setActiveSubject('全部科目');
+    showToast(`已移除自定义科目「${name}」`);
+  };
+
+  const handleUpdatePaperSubject = (paperId, rawSubject) => {
+    const subject = String(rawSubject || '').trim();
+    if (!subject) return;
+    const target = paperList.find((p) => p.id === paperId);
+    if (!target) return;
+    const updated = { ...target, subject };
+    setPaperList((prev) => prev.map((p) => (p.id === paperId ? updated : p)));
+    if (onSavePaper) onSavePaper(updated, false);
+    if (!DEFAULT_SUBJECTS.includes(subject) && subject !== '未分类') {
+      const list = addCustomSubject(subject);
+      setCustomSubjects(list);
+    }
+    setSubjectEditingPaper(null);
+    showToast(`已将《${target.title}》归类为「${subject}」`);
+  };
 
   const handleSaveNote = (id) => {
     const current = paperList.find((paper) => paper.id === id);
@@ -250,10 +307,10 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
   };
 
   return (
-    <div className="flex flex-col w-full pb-16">
-      <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-margin-desktop py-space-xl flex flex-col gap-space-xl">
+    <div className="flex min-w-0 flex-col w-full pb-16">
+      <div className="w-full min-w-0 max-w-[1440px] mx-auto px-3 sm:px-margin-desktop py-4 sm:py-space-xl flex flex-col gap-4 sm:gap-space-xl">
         {/* 1. Header Area: Workstation Telemetry & Action Panel */}
-        <section className="flex flex-col md:flex-row md:items-end justify-between gap-space-lg bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30">
+        <section className="flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-space-lg bg-surface-container-lowest p-4 sm:p-space-xl rounded-xl shadow-sm border border-outline-variant/30">
           <div className="flex flex-col gap-space-xs max-w-3xl">
             <div className="flex items-center gap-space-sm">
               <span className="px-2 py-0.5 rounded bg-primary-fixed text-on-primary-fixed-variant font-label-mono text-label-mono uppercase tracking-wider font-semibold">
@@ -262,7 +319,7 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
               <span className="text-outline-variant font-label-mono text-label-mono">/</span>
               <span className="text-on-surface-variant font-label-mono text-label-mono">STORAGE OCCUPANCY: {paperList.length} ARTIFACTS</span>
             </div>
-            <h1 className="font-headline-xl text-headline-xl text-on-surface font-semibold tracking-tight">
+            <h1 className="font-headline-xl text-[25px] leading-8 sm:text-headline-xl text-on-surface font-semibold tracking-tight">
               试卷库 (Exam Repository)
             </h1>
             <p className="font-body-md text-body-md text-on-surface-variant leading-relaxed">
@@ -275,9 +332,9 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
         {/* 2. Filtering & Workbench Control Strip */}
         <section className="flex flex-col gap-space-md bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-outline-variant/30">
           {/* Search & Controls Top Tier */}
-          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-space-md">
+          <div className="flex min-w-0 flex-col lg:flex-row items-stretch lg:items-center justify-between gap-space-md">
             {/* Search Input with Scope Icon */}
-            <div className="relative flex-1 min-w-[280px]">
+            <div className="relative flex-1 min-w-0 w-full">
               <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">
                 search
               </span>
@@ -294,7 +351,7 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
             </div>
 
             {/* Sorting & Views Controls */}
-            <div className="flex items-center gap-space-sm flex-wrap sm:flex-nowrap">
+            <div className="flex items-center justify-between sm:justify-start gap-2 sm:gap-space-sm flex-wrap">
               <div className="flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded border border-outline-variant/30">
                 <span className="material-symbols-outlined text-on-surface-variant text-[16px]">swap_vert</span>
                 <span className="font-label-sm text-label-sm text-on-surface-variant">排序:</span>
@@ -360,31 +417,57 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
             </div>
           </div>
 
-          <div className="flex items-center gap-2 overflow-x-auto border-t border-outline-variant/20 pt-2 pb-1">
-            <span className="shrink-0 font-label-sm text-label-sm text-on-surface-variant">科目</span>
+          <div className="flex items-center gap-2 overflow-x-auto border-t border-outline-variant/20 pt-2 pb-1 scrollbar-none">
+            <span className="shrink-0 font-label-sm text-label-sm text-on-surface-variant font-medium">科目</span>
             {subjects.map((subject) => {
               const isActive = activeSubject === subject.label;
               return (
-                <button
-                  key={subject.label}
-                  type="button"
-                  onClick={() => setActiveSubject(subject.label)}
-                  aria-pressed={isActive}
-                  className={`shrink-0 px-3 py-1 rounded-full font-label-sm text-label-sm transition-colors cursor-pointer ${
-                    isActive
-                      ? 'bg-secondary/15 text-secondary border border-secondary/30 font-semibold'
-                      : 'bg-surface-container-low text-on-surface-variant border border-transparent hover:border-secondary/20 hover:text-secondary'
-                  }`}
-                >
-                  {subject.label} <span className="opacity-75">{subject.count}</span>
-                </button>
+                <div key={subject.label} className="relative group/subj shrink-0 flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubject(subject.label)}
+                    aria-pressed={isActive}
+                    className={`shrink-0 px-3 py-1 rounded-full font-label-sm text-label-sm transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      isActive
+                        ? 'bg-secondary/15 text-secondary border border-secondary/30 font-semibold'
+                        : 'bg-surface-container-low text-on-surface-variant border border-transparent hover:border-secondary/20 hover:text-secondary'
+                    }`}
+                  >
+                    <span>{subject.label}</span>
+                    <span className="opacity-75">{subject.count}</span>
+                  </button>
+                  {subject.isCustom && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveCustomSubject(subject.label);
+                      }}
+                      className="opacity-0 group-hover/subj:opacity-100 hover:text-error text-outline transition-opacity ml-[-6px] mr-1 p-0.5 rounded-full hover:bg-surface-container cursor-pointer text-[12px] leading-none"
+                      title={`删除自定义分类「${subject.label}」`}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               );
             })}
+
+            {/* Add Subject Button */}
+            <button
+              type="button"
+              onClick={() => setIsAddSubjectModalOpen(true)}
+              className="shrink-0 px-2.5 py-1 rounded-full font-label-sm text-label-sm text-primary hover:bg-primary/10 border border-dashed border-primary/40 flex items-center gap-1 transition-colors cursor-pointer ml-1"
+              title="添加新科目分类"
+            >
+              <span className="material-symbols-outlined text-[14px]">add</span>
+              <span>添加科目</span>
+            </button>
           </div>
         </section>
 
         {/* 3. Exam Card Matrix Grid */}
-        <div className={viewMode === 'grid' ? 'grid grid-cols-1 xl:grid-cols-2 gap-space-lg' : 'flex flex-col gap-space-md'}>
+        <div className={viewMode === 'grid' ? 'grid min-w-0 grid-cols-1 xl:grid-cols-2 gap-3 sm:gap-space-lg' : 'flex min-w-0 flex-col gap-space-md'}>
           {filteredPapers.length === 0 ? (
             <div className="col-span-full py-16 flex flex-col items-center justify-center text-center p-8 bg-surface-container-lowest rounded-2xl border border-dashed border-outline-variant/40">
               <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4">
@@ -417,15 +500,30 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
                 <div className={`absolute top-0 left-0 bottom-0 w-1 ${paper.sourceType === 'clone' ? 'bg-primary' : 'bg-secondary-fixed-dim'}`}></div>
 
                 <div className="p-space-lg pl-[calc(1rem+6px)] flex flex-col gap-space-md">
-                  {/* Top Row: Source, Time, Bookmark */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-space-xs">
+                  {/* Top Row: Source, Subject, Time, Bookmark */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-space-xs flex-wrap">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container font-label-mono text-label-mono text-primary font-medium">
                         <span className="material-symbols-outlined text-[13px]">
                           {paper.sourceType === 'clone' ? 'picture_as_pdf' : 'neurology'}
                         </span>
                         {paper.source}
                       </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSubjectEditingPaper(paper);
+                          setEditingPaperSubject(getPaperSubject(paper));
+                          setCustomInputInModal('');
+                        }}
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-medium transition-all hover:scale-105 cursor-pointer shadow-2xs ${getSubjectBadgeStyle(getPaperSubject(paper))}`}
+                        title="点击修改此试卷的科目分类"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">school</span>
+                        <span>{getPaperSubject(paper)}</span>
+                        <span className="material-symbols-outlined text-[11px] opacity-60">edit</span>
+                      </button>
                       <span className="text-on-surface-variant font-label-mono text-label-mono">{paper.date}</span>
                     </div>
                     <button
@@ -737,6 +835,19 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
                             >
                               <span className="material-symbols-outlined text-[16px] text-outline">visibility</span>
                               <span>大试卷排版总览</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuPaperId(null);
+                                setSubjectEditingPaper(paper);
+                                setEditingPaperSubject(getPaperSubject(paper));
+                                setCustomInputInModal('');
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-container transition-colors text-left cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[16px] text-secondary">school</span>
+                              <span>修改科目分类</span>
                             </button>
                             <div className="my-1 border-t border-outline-variant/30" />
                             <button
@@ -1229,6 +1340,202 @@ export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onD
                 className="px-4 py-2 rounded-lg bg-error text-on-error font-label-md hover:bg-error/90 transition-colors cursor-pointer"
               >
                 删除试卷
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 4: 添加科目分类 */}
+      {isAddSubjectModalOpen && (
+        <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[22px]">category</span>
+                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">添加科目分类</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddSubjectModalOpen(false);
+                  setNewSubjectInput('');
+                }}
+                className="w-8 h-8 rounded-full hover:bg-surface-container flex items-center justify-center text-outline cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[12px] font-label-mono text-on-surface-variant block mb-1">
+                  科目名称
+                </label>
+                <input
+                  type="text"
+                  value={newSubjectInput}
+                  onChange={(e) => setNewSubjectInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCustomSubject();
+                    }
+                  }}
+                  placeholder="例如：自命题830、离散数学、数据结构、信号系统..."
+                  className="w-full px-3 py-2 bg-surface-container-low rounded-lg text-body-sm border border-outline-variant/40 focus:border-primary focus:outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <span className="text-[11px] font-label-mono text-outline block mb-1.5">快捷推荐（点击直接添加）：</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {['408', '考研数学', '考研英语', '考研政治', '管理类联考', '自命题专业课', '数据结构', '计算机组成原理', '操作系统', '计算机网络', '信号与系统', '离散数学', '物理学', '化学', '法硕联考'].map(preset => {
+                    const exists = allSubjectLabels.includes(preset);
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        disabled={exists}
+                        onClick={() => handleAddCustomSubject(preset)}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                          exists
+                            ? 'bg-surface-container text-outline opacity-40 cursor-not-allowed'
+                            : 'bg-surface-container hover:bg-primary/10 hover:text-primary text-on-surface-variant border border-outline-variant/20'
+                        }`}
+                      >
+                        {exists ? `✓ ${preset}` : `+ ${preset}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddSubjectModalOpen(false);
+                  setNewSubjectInput('');
+                }}
+                className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md hover:bg-surface-container-high transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={!newSubjectInput.trim()}
+                onClick={() => handleAddCustomSubject()}
+                className="px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md hover:bg-primary/90 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
+              >
+                确定添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 5: 修改试卷科目分类 */}
+      {subjectEditingPaper && (
+        <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-surface-container-lowest rounded-2xl max-w-lg w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in fade-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-secondary text-[22px]">school</span>
+                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">修改试卷科目分类</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubjectEditingPaper(null)}
+                className="w-8 h-8 rounded-full hover:bg-surface-container flex items-center justify-center text-outline cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-[12px] font-label-mono text-outline mb-0.5">当前试卷：</p>
+                <p className="text-body-md font-bold text-on-surface truncate">《{subjectEditingPaper.title}》</p>
+              </div>
+
+              <div>
+                <label className="text-[12px] font-label-mono text-on-surface-variant block mb-2">
+                  选择划分到的科目：
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+                  {allSubjectLabels.map((sub) => {
+                    const isSelected = editingPaperSubject === sub && !customInputInModal.trim();
+                    return (
+                      <button
+                        key={sub}
+                        type="button"
+                        onClick={() => {
+                          setEditingPaperSubject(sub);
+                          setCustomInputInModal('');
+                        }}
+                        className={`px-3 py-2 rounded-xl border text-[13px] font-medium flex items-center justify-between transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-secondary text-white border-secondary shadow-xs font-semibold'
+                            : 'bg-surface-container-low hover:bg-surface-container text-on-surface border-outline-variant/30'
+                        }`}
+                      >
+                        <span className="truncate">{sub}</span>
+                        {isSelected && <span className="material-symbols-outlined text-[16px]">check</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[12px] font-label-mono text-on-surface-variant block mb-1">
+                  或输入自定义科目名称：
+                </label>
+                <input
+                  type="text"
+                  value={customInputInModal}
+                  onChange={(e) => setCustomInputInModal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const targetSubject = customInputInModal.trim() || editingPaperSubject;
+                      handleUpdatePaperSubject(subjectEditingPaper.id, targetSubject);
+                    }
+                  }}
+                  placeholder="输入新科目名直接归类并新增该科目..."
+                  className="w-full px-3 py-2 bg-surface-container-low rounded-lg text-body-sm border border-outline-variant/40 focus:border-secondary focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => setSubjectEditingPaper(null)}
+                className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md hover:bg-surface-container-high transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const targetSubject = customInputInModal.trim() || editingPaperSubject;
+                  handleUpdatePaperSubject(subjectEditingPaper.id, targetSubject);
+                }}
+                className="px-4 py-2 rounded-lg bg-secondary text-on-secondary font-label-md hover:bg-secondary/90 transition-colors cursor-pointer font-semibold shadow-xs"
+              >
+                保存分类
               </button>
             </div>
           </div>

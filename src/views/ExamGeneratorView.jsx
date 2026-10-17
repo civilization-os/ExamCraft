@@ -1,14 +1,24 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import SelectMenu from '../components/SelectMenu';
 import { extractExamMeta, sliceMarkdownIntoChunks } from '../utils/examChunker';
 import { calculatePaperMetrics } from '../utils/paperMetrics';
-import { getQuestionTypeClass } from '../utils/questionTypes';
+import { getQuestionTypeClass, healQuestionOptions, deduplicateQuestions } from '../utils/questionTypes';
+import { inferPaperSubject, DEFAULT_SUBJECTS, getCustomSubjects } from '../utils/paperSubject';
 
 function loadGeneratorSession() {
   try {
     const session = JSON.parse(localStorage.getItem('examcraft_generator_session') || 'null');
-    return session && typeof session === 'object' ? session : null;
+    if (!session || typeof session !== 'object') return null;
+    if (session.parsedExam && Array.isArray(session.parsedExam.questions)) {
+      const healed = deduplicateQuestions(
+        session.parsedExam.questions.map(healQuestionOptions),
+        session.parsedExam.title
+      );
+      session.parsedExam.questions = healed;
+      session.parsedExam.questionCount = healed.length;
+    }
+    return session;
   } catch {
     return null;
   }
@@ -31,6 +41,29 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
     restoredSession?.activeMode || (restoredSession?.parseInProgress ? 'markdown' : 'clone')
   ));
   const [saveToast, setSaveToast] = useState(null); // { title: string, id: string }
+  const [confirmModal, setConfirmModal] = useState(null);
+  const [appToast, setAppToast] = useState(null); // { id, type, title, message }
+  const [modelConfig, setModelConfig] = useState(null);
+  const [parseEngineMode, setParseEngineMode] = useState('ai'); // 'ai' | 'local'
+
+  useEffect(() => {
+    fetch('/api/model/config')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.config) {
+          setModelConfig(data.config);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const showToast = useCallback((type, message, title = '提示') => {
+    const id = Date.now();
+    setAppToast({ id, type, title, message });
+    setTimeout(() => {
+      setAppToast(prev => (prev?.id === id ? null : prev));
+    }, 4500);
+  }, []);
   
   // Custom Spec State (Entry 2)
   
@@ -40,7 +73,19 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
     () => markdownText.trim() ? sliceMarkdownIntoChunks(markdownText).length : 0,
     [markdownText]
   );
-  const [parsedExam, setParsedExam] = useState(() => restoredSession?.parsedExam || null);
+  const [parsedExam, setParsedExam] = useState(() => {
+    if (!restoredSession?.parsedExam) return null;
+    const pe = restoredSession.parsedExam;
+    if (Array.isArray(pe.questions)) {
+      const healed = deduplicateQuestions(pe.questions.map(healQuestionOptions), pe.title);
+      return {
+        ...pe,
+        questionCount: healed.length,
+        questions: healed
+      };
+    }
+    return pe;
+  });
   const [isParsingAI, setIsParsingAI] = useState(false);
   const [showAnswers, setShowAnswers] = useState(() => {
     try { return localStorage.getItem('examcraft_exam_show_answers_default') !== 'false'; }
@@ -64,6 +109,9 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
   const [aiAssistLoading, setAiAssistLoading] = useState(false);
   const [customAiPrompt, setCustomAiPrompt] = useState('');
   const [flashSuccessId, setFlashSuccessId] = useState(null);
+  const [checkingQId, setCheckingQId] = useState(null); // id of question being checked and fixed by model
+  const [isBatchInspecting, setIsBatchInspecting] = useState(false);
+  const [inspectProgress, setInspectProgress] = useState({ current: 0, total: 0 });
 
   // File upload & AI Clone state (Entry 1)
   const [cloneRawText, setCloneRawText] = useState('');
@@ -121,7 +169,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
   // Progressive Chunked AI Parser
   // Cuts long texts into lightweight passage-aware batches, preventing HTTP 413 and LLM output token overflows
-  const runProgressiveChunkParser = async (mdText, { resume = true } = {}) => {
+  const runProgressiveChunkParser = async (mdText, { resume = true, confirmed = false } = {}) => {
     if (!mdText || !mdText.trim()) return;
     if (parseRequestInFlightRef.current || isParsingAI) return;
     const chunks = sliceMarkdownIntoChunks(mdText);
@@ -139,7 +187,43 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
       .filter(line => /\d/.test(line) && /每(?:小)?题|小题.*分|题.*每.*分/.test(line))
       .slice(0, 30)
       .join('\n');
-    if (chunks.length > 12 && !window.confirm(`这份题稿将拆为 ${chunks.length} 批，产生多次模型调用。仍要继续吗？建议先拆分题稿。`)) return;
+
+    const willUseModel = Boolean(modelConfig?.hasApiKey);
+    const activeModelName = modelConfig?.modelName || 'deepseek-flash';
+    const activeModelLabel = activeModelName.toLowerCase() === 'deepseek-flash'
+      ? 'DeepSeek Flash'
+      : activeModelName;
+
+    if (chunks.length > 8 && !confirmed && !canResume) {
+      setConfirmModal({
+        title: '题稿分批解析提醒',
+        badge: `${chunks.length} 批`,
+        icon: 'auto_awesome',
+        iconBg: 'bg-primary/10 text-primary',
+        confirmIcon: 'play_arrow',
+        description: `题稿已切分为 ${chunks.length} 批，解析结果会逐步生成，降低长文本截断风险并保留已完成的题目。`,
+        modelUsage: {
+          mode: willUseModel ? 'ai' : 'local',
+          title: willUseModel ? '将调用 AI 模型' : '使用本地规则解析',
+          detail: willUseModel
+            ? `${activeModelLabel} · 预计 ${chunks.length} 次请求，按实际 Token 用量计费`
+            : '不发送模型请求 · 不产生 Token 消耗'
+        },
+        details: [
+          { label: '切分批次', value: `${chunks.length} 批` },
+          { label: '预计题数', value: `约 ${chunks.flatMap(c => c.qNums).length || '全卷'} 道` },
+          { label: '进度控制', value: '可暂停，之后继续' }
+        ],
+        tip: '解析完成的批次会保留；暂停后可以从未完成的批次继续。',
+        tipTone: 'info',
+        confirmText: willUseModel ? `开始 AI 解析 · ${chunks.length} 批` : `开始本地解析 · ${chunks.length} 批`,
+        cancelText: '返回修改',
+        onConfirm: () => {
+          runProgressiveChunkParser(mdText, { resume, confirmed: true });
+        }
+      });
+      return;
+    }
 
     parseRequestInFlightRef.current = true;
     const currentJobId = ++activeJobIdRef.current;
@@ -147,6 +231,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
     parseAbortControllerRef.current = controller;
     setParseNeedsResume(false);
     setIsParsingAI(true);
+    setParseEngineMode('ai');
     setParseSourceText(mdText);
     const usageSummary = canResume && savedSession.parseUsageSummary
       ? { ...savedSession.parseUsageSummary, totalCalls: chunks.length, complete: false }
@@ -182,7 +267,8 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
     setChunkProgress({ current: resumeFrom, total: chunks.length, summary: chunks[resumeFrom]?.summary || (resumeFrom ? '准备继续未完成批次...' : '准备切片解析...') });
     setCompletedChunkCount(resumeFrom);
 
-    const accumulatedQuestions = canResume ? [...(savedSession.parsedExam?.questions || [])] : [];
+    const initialAccumulated = canResume ? (savedSession.parsedExam?.questions || []) : [];
+    const accumulatedQuestions = deduplicateQuestions(initialAccumulated, meta.title);
     let interrupted = false;
 
     for (let i = resumeFrom; i < chunks.length; i++) {
@@ -230,7 +316,8 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
         const retriesUsed = Number(data.structuredRetryCount) || 0;
         usageSummary.structuredRetries += retriesUsed;
         retryBudgetRemaining = Math.max(0, retryBudgetRemaining - retriesUsed);
-        if (data.mode === 'algorithmic') usageSummary.fallbackCalls += 1;
+        const isAlgorithmicFallback = data.mode === 'algorithmic' || data.usedAI === false;
+        if (isAlgorithmicFallback) usageSummary.fallbackCalls += 1;
         if (data.truncationDetected) usageSummary.truncatedCalls = (Number(usageSummary.truncatedCalls) || 0) + 1;
         setParseUsageSummary({ ...usageSummary });
         if (data.usage?.usageReported) {
@@ -247,7 +334,10 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
           setParseUsageSummary({ ...usageSummary });
         }
         if (data.success && data.questions && data.questions.length > 0) {
-          accumulatedQuestions.push(...data.questions);
+          const healed = data.questions.map(healQuestionOptions);
+          const merged = deduplicateQuestions([...accumulatedQuestions, ...healed], meta.title);
+          accumulatedQuestions.length = 0;
+          accumulatedQuestions.push(...merged);
 
           // Progressive live stream update into KaTeX preview
           setParsedExam(prev => {
@@ -257,19 +347,25 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
               const numB = parseInt(String(b.num || b.id).replace(/\D/g, ''), 10) || 0;
               return numA - numB;
             });
+            const hasAi = usageSummary.completedCalls > 0;
+            const hasFallback = usageSummary.fallbackCalls > 0;
+            const computedMode = hasAi ? 'ai' : (hasFallback ? 'fallback' : 'local');
             return {
               ...prev,
               title: prev?.title || meta.title,
               duration: prev?.duration || meta.duration,
               totalScore: prev?.totalScore || meta.totalScore,
               questionCount: sorted.length,
-              questions: sorted
+              questions: sorted,
+              parseMode: computedMode,
+              fallbackCalls: usageSummary.fallbackCalls,
+              modelName: hasAi ? (data.modelName || modelConfig?.modelName) : null
             };
           });
         }
         setCompletedChunkCount(i + 1);
       } catch (err) {
-        console.warn(`[Chunk ${i + 1} parse error]:`, err.message);
+        if (!controller.signal.aborted) console.warn(`[Chunk ${i + 1} parse error]:`, err.message);
         interrupted = true;
         if (!controller.signal.aborted) {
           setAiEnhanceMessage(`第 ${i + 1} 批解析连接中断，已保留之前结果；点击 AI 解析可从未完成批次继续。`);
@@ -298,10 +394,69 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
     }
   };
 
+  const pauseChunkParsing = () => {
+    if (!parseRequestInFlightRef.current || !parseAbortControllerRef.current) return;
+    setAiEnhanceMessage('解析已暂停，已完成的批次和题目已保留；可从未完成批次继续解析。');
+    parseAbortControllerRef.current.abort();
+  };
+
+  const runLocalRuleParser = async (mdText) => {
+    if (!mdText || !mdText.trim()) {
+      showToast('warning', '请先输入或粘贴题稿内容。', '内容为空');
+      return;
+    }
+    if (parseRequestInFlightRef.current || isParsingAI) return;
+    setIsParsingAI(true);
+    setParseEngineMode('local');
+    setAiEnhanceMessage('⚡ 正在使用纯本地规则引擎解析试卷（免模型 / 0 Token 消耗）…');
+
+    try {
+      const res = await fetch('/api/model/parse-markdown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: mdText, useAI: false })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        const exam = data.data;
+        const healed = (exam.questions || []).map(healQuestionOptions);
+        exam.questions = deduplicateQuestions(healed, exam.title);
+        exam.questionCount = exam.questions.length;
+        exam.parseMode = 'local';
+        exam.modelName = null;
+        setParsedExam(exam);
+        setParsedMarkdownSource(mdText);
+        setCompletedChunkCount(0);
+        setParseNeedsResume(false);
+        setParseUsageSummary({
+          completedCalls: 0,
+          totalCalls: 0,
+          totalTokens: 0,
+          estimatedCostCny: 0,
+          pricedCalls: 0,
+          unpricedCalls: 0,
+          structuredRetries: 0,
+          fallbackCalls: 0,
+          truncatedCalls: 0,
+          complete: true,
+          mode: 'local'
+        });
+        setAiEnhanceMessage(`⚡ 纯本地规则引擎解析完成：共规整 ${exam.questions?.length || 0} 道试题（完全未调用大模型，0 Token 消耗）。`);
+        showToast('success', `纯本地规则解析完成，共规整 ${exam.questions?.length || 0} 道试题（免模型）`, '本地解析成功');
+      } else {
+        showToast('error', data.error || '本地规则解析失败', '解析失败');
+      }
+    } catch (err) {
+      showToast('error', `本地规则解析异常: ${err.message}`, '解析异常');
+    } finally {
+      setIsParsingAI(false);
+    }
+  };
+
   const importTextIntoMarkdownParser = async (text) => {
     const content = String(text || '').trim();
     if (!content) {
-      alert('没有读取到试卷文字，请检查文件内容或重新粘贴。');
+      showToast('warning', '没有读取到试卷文字，请检查文件内容或重新粘贴。', '读取为空');
       return;
     }
     if (parseRequestInFlightRef.current || isParsingAI) return;
@@ -378,18 +533,34 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
   // Delete a Question
   const handleDeleteQuestion = (qId) => {
-    if (!window.confirm('确定要从试卷中删除本道题目吗？删除后试卷将重新排序与计分。')) return;
-    if (!parsedExam || !parsedExam.questions) return;
-    const filtered = parsedExam.questions.filter(q => q.id !== qId);
-    filtered.forEach((q, idx) => {
-      const newNum = idx + 1;
-      q.num = String(newNum).padStart(2, '0');
+    const targetQ = parsedExam?.questions?.find(q => q.id === qId);
+    setConfirmModal({
+      title: '删除试题确认',
+      icon: 'delete',
+      iconBg: 'bg-error/10 text-error',
+      confirmIcon: 'delete',
+      confirmVariant: 'error',
+      description: targetQ 
+        ? `确定要从当前试卷中删除第 ${targetQ.num || qId} 题吗？`
+        : '确定要从试卷中删除本道题目吗？',
+      tip: '删除后，试卷题号将自动重新顺延编号，试卷总分也将重新计算。',
+      confirmText: '确认删除',
+      cancelText: '取消',
+      onConfirm: () => {
+        if (!parsedExam || !parsedExam.questions) return;
+        const filtered = parsedExam.questions.filter(q => q.id !== qId);
+        filtered.forEach((q, idx) => {
+          const newNum = idx + 1;
+          q.num = String(newNum).padStart(2, '0');
+        });
+        setParsedExam(prev => ({
+          ...prev,
+          questions: filtered,
+          questionCount: filtered.length
+        }));
+        showToast('info', '题目已从试卷中移除，总分已重新计算。', '已删除');
+      }
     });
-    setParsedExam(prev => ({
-      ...prev,
-      questions: filtered,
-      questionCount: filtered.length
-    }));
   };
 
   // Visual flash indicator for updated question
@@ -425,24 +596,121 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
         triggerFlashSuccess(q.id);
         setAiEnhanceMessage(`✨ 题目 #${q.num || q.id} 已完成 AI 智能微调！已应用最新排版与分步推导。`);
       } else {
-        alert(data.error || '单题 AI 辅助修改失败，请检查 API Key 配置。');
+        showToast('error', data.error || '单题 AI 辅助修改失败，请检查 API Key 配置。', '修改失败');
       }
     } catch (err) {
-      alert(`AI 辅助修改调用异常: ${err.message}`);
+      showToast('error', `AI 辅助修改调用异常: ${err.message}`, '接口异常');
     } finally {
       setAiAssistLoading(false);
     }
   };
 
+  // Single Question Model Check & Fix
+  const handleCheckAndFixQuestion = async (q) => {
+    if (checkingQId || isParsingAI) return;
+    setCheckingQId(q.id);
+    try {
+      const res = await fetch('/api/model/question-check-and-fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q })
+      });
+      const data = await res.json();
+      if (data.success && data.updatedQuestion) {
+        const healed = healQuestionOptions(data.updatedQuestion);
+        setParsedExam(prev => ({
+          ...prev,
+          questions: (prev?.questions || []).map(item => item.id === q.id ? healed : item)
+        }));
+        triggerFlashSuccess(q.id);
+        if (data.needsFix) {
+          const detail = (data.issues && data.issues.length > 0) ? data.issues.join('；') : '已拆分合并选项并规范 LaTeX';
+          showToast('success', `题目 #${q.num || q.id} 已由模型完成修正：${detail}`, '模型修正成功');
+          setAiEnhanceMessage(`✅ 题目 #${q.num || q.id} 模型质检并修正成功：${detail}`);
+        } else {
+          showToast('success', `题目 #${q.num || q.id} 模型质检通过：选项结构与公式完全规范，无须改动`, '质检合格');
+        }
+      } else {
+        showToast('error', data.error || '模型质检失败，请检查网络或 API Key', '质检失败');
+      }
+    } catch (err) {
+      showToast('error', `质检接口异常: ${err.message}`, '请求失败');
+    } finally {
+      setCheckingQId(null);
+    }
+  };
+
+  // Full Paper Batch Model Inspection & Fix
+  const handleBatchCheckAndFix = async () => {
+    if (!parsedExam?.questions?.length || isBatchInspecting || isParsingAI) return;
+    setIsBatchInspecting(true);
+    const qs = [...parsedExam.questions];
+    setInspectProgress({ current: 0, total: qs.length });
+    let fixedCount = 0;
+    const updatedList = [...qs];
+
+    try {
+      for (let i = 0; i < qs.length; i++) {
+        setInspectProgress({ current: i + 1, total: qs.length });
+        const curQ = qs[i];
+        try {
+          const res = await fetch('/api/model/question-check-and-fix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: curQ })
+          });
+          const data = await res.json();
+          if (data.success && data.updatedQuestion) {
+            const healed = healQuestionOptions(data.updatedQuestion);
+            updatedList[i] = healed;
+            if (data.needsFix) fixedCount += 1;
+            setParsedExam(prev => ({
+              ...prev,
+              questions: [...updatedList]
+            }));
+          }
+        } catch (itemErr) {
+          console.warn(`[Batch inspect question ${curQ.num || i + 1} failed]:`, itemErr);
+        }
+      }
+      showToast('success', `AI 全卷质检已完成：共巡检 ${qs.length} 道试题，模型智能修正了 ${fixedCount} 道题目！`, '全卷质检完成');
+      setAiEnhanceMessage(`🎉 AI 全卷质检完成：共巡检 ${qs.length} 道试题，模型智能修正并规整了 ${fixedCount} 道题目！`);
+    } catch (err) {
+      showToast('error', `批量质检异常: ${err.message}`, '质检中断');
+    } finally {
+      setIsBatchInspecting(false);
+    }
+  };
+
   // Parse text extracted by the user or uploaded from a supported text file.
-  const triggerAiCloneWithText = async (textToAnalyze, fileName = '导入试卷.pdf') => {
+  const triggerAiCloneWithText = async (textToAnalyze, fileName = '导入试卷.pdf', { confirmed = false } = {}) => {
     if (!textToAnalyze || !textToAnalyze.trim()) {
-      alert('请先输入或粘贴试卷内容');
+      showToast('warning', '请先输入或粘贴试卷内容', '内容为空');
       return;
     }
     if (cloneRequestInFlightRef.current || isAiCloning) return;
     const chunks = sliceMarkdownIntoChunks(textToAnalyze);
-    if (chunks.length > 12 && !window.confirm(`这份试卷将拆为 ${chunks.length} 批，产生多次模型调用。仍要继续吗？建议先拆分试卷。`)) return;
+    if (chunks.length > 8 && !confirmed) {
+      setConfirmModal({
+        title: '试卷分批解析提醒',
+        badge: `${chunks.length} 批`,
+        icon: 'auto_awesome',
+        iconBg: 'bg-primary/10 text-primary',
+        confirmIcon: 'play_arrow',
+        description: `该试卷篇幅较长，已自动切分为 ${chunks.length} 个批次逐步送入大模型，以保证每一部分的结构化提取质量。`,
+        details: [
+          { label: '预估切分批次', value: `${chunks.length} 批` },
+          { label: '试卷来源', value: fileName }
+        ],
+        tip: '提示：多次模型调用将按批次流式完成，解析完成后将自动生成答题卡与排版。',
+        confirmText: `继续全卷解析（${chunks.length} 批）`,
+        cancelText: '取消',
+        onConfirm: () => {
+          triggerAiCloneWithText(textToAnalyze, fileName, { confirmed: true });
+        }
+      });
+      return;
+    }
     cloneRequestInFlightRef.current = true;
     setIsAiCloning(true);
     setCloneStage(1);
@@ -494,6 +762,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
       const paper = {
         id: 'cloned-' + Date.now(),
         title: meta.title || fileName.replace(/\.[^/.]+$/, '') || 'AI 识别试卷',
+        subject: inferPaperSubject(meta.title || fileName),
         source: '试卷文本识别',
         sourceType: 'ai-imported',
         date: '刚刚',
@@ -525,7 +794,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
         solutions: paper.typeBreakdown.solutions
       });
     } catch (err) {
-      alert(`AI 导入切片解析失败: ${err.message}`);
+      showToast('error', `AI 导入切片解析失败: ${err.message}`, '解析失败');
       setCloneStage(0);
     } finally {
       cloneRequestInFlightRef.current = false;
@@ -568,7 +837,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
     const extension = file.name.split('.').pop()?.toLowerCase();
     e.target.value = '';
     if (!['pdf', 'md', 'markdown', 'tex', 'txt'].includes(extension)) {
-      alert('当前支持 PDF、Markdown、TeX 和 TXT 文件。Word 文档请先复制题目文本后粘贴到输入框。');
+      showToast('warning', '当前支持 PDF、Markdown、TeX 和 TXT 文件。Word 文档请先复制题目文本后粘贴到输入框。', '格式提示');
       return;
     }
 
@@ -585,7 +854,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
         await importTextIntoMarkdownParser(content);
       } catch (error) {
         setUploadedFile(null);
-        alert(`PDF 导入失败：${error.message || '无法读取文件'}`);
+        showToast('error', `PDF 导入失败：${error.message || '无法读取文件'}`, '导入异常');
       } finally {
         setIsReadingPdf(false);
       }
@@ -624,26 +893,35 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
       return null;
     }
 
+    const deduplicated = deduplicateQuestions(parsedExam.questions, parsedExam.title);
+
+    const modelTag = parsedExam.parseMode === 'local'
+      ? '#纯本地规则解析'
+      : `#AI模型规整(${parsedExam.modelName || modelConfig?.modelName || 'deepseek-flash'})`;
+
     return {
       id: parsedExam.id || ('md-exam-' + Date.now()),
       title: parsedExam.title || '《Markdown 自定义试卷》',
-      source: 'Markdown 题稿生成 (AI 深度规整)',
+      subject: parsedExam.subject || inferPaperSubject(parsedExam),
+      source: parsedExam.parseMode === 'local'
+        ? 'Markdown 题稿生成 (纯本地规则引擎)'
+        : `Markdown 题稿生成 (AI 大模型: ${parsedExam.modelName || modelConfig?.modelName || 'deepseek-flash'})`,
       sourceType: 'markdown',
       date: '刚刚',
-      questionCount: parsedExam.questions.length,
+      questionCount: deduplicated.length,
       totalScore: parsedExam.totalScore || 100,
       duration: parsedExam.duration || 120,
-      difficulty: calculatePaperMetrics(parsedExam).difficulty,
-      tags: ['#Markdown录入', '#KaTeX公式渲染', '#已存试卷库'],
+      difficulty: calculatePaperMetrics({ ...parsedExam, questions: deduplicated }).difficulty,
+      tags: ['#Markdown录入', '#KaTeX公式渲染', modelTag, '#已存试卷库'],
       status: '未作答 (已保存)',
-      questions: parsedExam.questions
+      questions: deduplicated
     };
   };
 
   const handleSaveMarkdownExam = (goToLibrary = false) => {
     const paper = buildMarkdownPaperObject();
     if (!paper) {
-      alert('未能从 Markdown 中解析到有效试题，请先在左侧输入试卷内容。');
+      showToast('warning', '未能从 Markdown 中解析到有效试题，请先在左侧输入试卷内容。', '内容为空');
       return;
     }
 
@@ -659,7 +937,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
   const handleLaunchMarkdownExam = () => {
     const paper = buildMarkdownPaperObject();
     if (!paper) {
-      alert('未能从 Markdown 中解析到有效试题，请检查文本格式。');
+      showToast('warning', '未能从 Markdown 中解析到有效试题，请检查文本格式。', '未解析出题目');
       return;
     }
 
@@ -680,7 +958,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
   );
 
   return (
-    <div className="flex flex-col w-full relative min-h-full pb-16">
+    <div className="flex flex-col w-full min-w-0 relative min-h-full pb-16 overflow-x-hidden">
       {/* Background Matrix */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden select-none">
         <div className="absolute -top-32 left-1/4 w-[640px] h-[360px] bg-primary/5 rounded-full blur-[120px]"></div>
@@ -696,7 +974,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
         </svg>
       </div>
 
-      <div className="relative z-10 w-full max-w-[1440px] mx-auto px-4 sm:px-margin-desktop py-space-xl flex flex-col gap-space-xl">
+      <div className="relative z-10 w-full max-w-[1440px] mx-auto px-3 sm:px-margin-desktop py-4 sm:py-space-xl flex flex-col gap-4 sm:gap-space-xl min-w-0">
         {/* Top Header & Workstation Telemetry */}
         <section className="flex flex-col lg:flex-row lg:items-end justify-between gap-space-lg">
           <div className="space-y-space-xs max-w-2xl">
@@ -704,7 +982,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
               <span>试卷创建工作台 · 两种方式 · 统一进入考场</span>
             </div>
-            <h1 className="font-headline-xl text-headline-xl text-on-surface tracking-tight font-semibold">
+            <h1 className="font-headline-xl text-[26px] leading-8 sm:text-headline-xl text-on-surface tracking-tight font-semibold">
               创建或导入试卷
             </h1>
             <p className="font-body-lg text-body-lg text-on-surface-variant">
@@ -713,12 +991,12 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
           </div>
 
           {/* Telemetry Chips */}
-          <div className="flex items-center gap-space-md font-label-mono text-label-mono flex-wrap">
-            <div className="px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface border border-outline-variant/30">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:flex items-center gap-2 sm:gap-space-md font-label-mono text-[10px] sm:text-label-mono">
+            <div className="min-w-0 px-2 sm:px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface border border-outline-variant/30">
               <span className="material-symbols-outlined text-secondary text-[16px]">verified</span>
               <span>KaTeX 公式高保真排版: 就绪</span>
             </div>
-            <div className="px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface border border-outline-variant/30">
+            <div className="min-w-0 px-2 sm:px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface border border-outline-variant/30">
               <span className="material-symbols-outlined text-primary text-[16px]">auto_awesome</span>
               <span>按需使用 AI 解析与整理</span>
             </div>
@@ -726,45 +1004,45 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
         </section>
 
         {/* Triple Mode Selector Pills */}
-        <div className="flex items-center p-1.5 bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant/30 gap-1.5 overflow-x-auto">
+        <div className="grid grid-cols-2 p-1 bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant/30 gap-1.5 min-w-0">
           <button
             type="button"
             onClick={() => setActiveMode('clone')}
-            className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl font-label-md text-label-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            className={`min-w-0 py-2 px-2 sm:py-2.5 sm:px-4 rounded-xl font-label-md text-[12px] sm:text-label-md transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer ${
               activeMode === 'clone'
                 ? 'bg-primary text-on-primary font-semibold shadow-xs'
                 : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low'
             }`}
           >
-            <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
-            <span className="flex flex-col items-start text-left leading-tight">
+            <span className="material-symbols-outlined text-[16px] sm:text-[18px] shrink-0">picture_as_pdf</span>
+            <span className="min-w-0 flex flex-col items-start text-left leading-tight">
               <span>识别已有试卷</span>
-              <span className={`mt-0.5 text-[10px] font-normal ${activeMode === 'clone' ? 'text-on-primary/80' : 'text-on-surface-variant'}`}>上传或粘贴 · AI 结构化</span>
+              <span className={`hidden sm:block mt-0.5 text-[10px] font-normal ${activeMode === 'clone' ? 'text-on-primary/80' : 'text-on-surface-variant'}`}>上传或粘贴 · AI 结构化</span>
             </span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveMode('markdown')}
-            className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl font-label-md text-label-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            className={`min-w-0 py-2 px-2 sm:py-2.5 sm:px-4 rounded-xl font-label-md text-[12px] sm:text-label-md transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer ${
               activeMode === 'markdown'
                 ? 'bg-primary text-on-primary font-semibold shadow-xs'
                 : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low'
             }`}
           >
-            <span className="material-symbols-outlined text-[18px]">markdown</span>
-            <span className="flex flex-col items-start text-left leading-tight">
+            <span className="material-symbols-outlined text-[16px] sm:text-[18px] shrink-0">markdown</span>
+            <span className="min-w-0 flex flex-col items-start text-left leading-tight">
               <span>编辑 Markdown 题稿</span>
-              <span className={`mt-0.5 text-[10px] font-normal ${activeMode === 'markdown' ? 'text-on-primary/80' : 'text-on-surface-variant'}`}>编写或导入 · 实时预览</span>
+              <span className={`hidden sm:block mt-0.5 text-[10px] font-normal ${activeMode === 'markdown' ? 'text-on-primary/80' : 'text-on-surface-variant'}`}>编写或导入 · 实时预览</span>
             </span>
           </button>
         </div>
 
         {/* MODE 1: Raw Exam Text Parsing */}
         {activeMode === 'clone' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-xl items-stretch">
-            {/* Left: Input (Dropzone + Direct Paste Textarea + AI Action) */}
-            <section className="relative rounded-xl bg-surface-container-lowest shadow-sm p-space-xl border border-primary ring-2 ring-primary flex flex-col justify-between space-y-space-md">
+          <div className="w-full">
+            {/* Input (Dropzone + Direct Paste Textarea + AI Action) */}
+            <section className="relative min-w-0 rounded-2xl bg-surface-container-lowest shadow-sm p-4 sm:p-space-xl md:p-8 border border-outline-variant/30 flex flex-col justify-between space-y-space-md overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-1 bg-primary"></div>
               <div className="space-y-space-sm">
                 <div className="flex items-center justify-between pb-space-xs">
@@ -795,7 +1073,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                   <p className="mt-1 font-label-md text-label-md text-on-surface font-semibold">
                     选择或拖拽试卷文件至此处 (<span className="text-primary hover:underline">浏览本地文件</span>)
                   </p>
-                  <p className="font-label-mono text-[11px] text-on-surface-variant">支持 PDF、Markdown、TeX、TXT；PDF 将提取文字后交由 AI 识别，扫描版 PDF 需先 OCR</p>
+                    <p className="px-1 font-label-mono text-[10px] sm:text-[11px] text-on-surface-variant leading-relaxed">支持 PDF、Markdown、TeX、TXT；PDF 提取文字后交由 AI 识别，扫描版需先 OCR</p>
                 </label>
                 {isReadingPdf && (
                   <p className="flex items-center gap-1.5 text-xs text-primary" role="status" aria-live="polite">
@@ -816,7 +1094,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                     value={cloneRawText}
                     onChange={(e) => setCloneRawText(e.target.value)}
                     placeholder="可在此粘贴从 Word、PDF、网页或其他渠道复制的任意非结构化试卷文本..."
-                    className="w-full h-32 p-space-sm bg-surface-container-low rounded-lg font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 resize-none leading-relaxed"
+                    className="w-full h-36 sm:h-48 p-space-sm bg-surface-container-low rounded-lg font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 resize-y leading-relaxed"
                   />
                 </div>
 
@@ -846,266 +1124,197 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                 )}
               </div>
 
-              {/* Primary AI Trigger Button */}
-              <div className="pt-space-md">
-                <button
-                  type="button"
-                  onClick={() => importTextIntoMarkdownParser(cloneRawText)}
-                  disabled={isReadingPdf || isParsingAI || !cloneRawText.trim()}
-                  className="w-full h-11 px-space-lg rounded-lg bg-primary-container hover:bg-primary text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
-                >
-                  <span className={`material-symbols-outlined text-[20px] ${isParsingAI ? 'animate-spin' : ''}`}>
-                    {isParsingAI ? 'progress_activity' : 'bolt'}
-                  </span>
-                  <span>{isReadingPdf ? '正在提取 PDF 文字…' : isParsingAI ? '正在分批解析试题…' : 'AI 识别并生成试卷'}</span>
-                </button>
-              </div>
-            </section>
-
-            {/* Right: AI Output Preview Card & Quick Actions with Score/Duration Adjustments */}
-            <div className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 flex flex-col justify-between space-y-space-md">
-              <div className="space-y-space-md">
-                <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-secondary text-[20px]">verified</span>
-                    <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
-                      {clonedPaperResult ? '试卷识别结果' : '文本识别能力'}
-                    </h3>
-                  </div>
-                  {clonedPaperResult && (
-                    <span className="px-2 py-0.5 rounded bg-secondary/15 text-secondary font-label-mono text-code-sm font-semibold">
-                      就绪可开考
+              {/* Primary AI Trigger Button & Model Tag */}
+              <div className="pt-space-md space-y-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="font-semibold text-on-surface">本次识别模型调用标注：</span>
+                  {modelConfig?.hasApiKey ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold font-mono text-[11px]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>【会调用模型】{modelConfig.modelName || 'deepseek-flash'}</span>
+                      <span className="text-[10px] opacity-75 font-normal">（自动补全推导与选项，产生 Token 调用）</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 font-semibold text-[11px]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      <span>【不调用模型】未检测到 API Key · 走纯本地规则</span>
+                      <span className="text-[10px] opacity-75 font-normal">（0 Token 消耗）</span>
                     </span>
                   )}
                 </div>
 
-                {clonedPaperResult ? (
-                  <div className="space-y-space-md">
-                    {/* Header info with interactive Score / Duration / Title edit */}
-                    <div className="p-space-md bg-surface-container-low rounded-xl space-y-3 border border-outline-variant/20">
-                      <div>
-                        <label className="text-[11px] font-label-mono text-on-surface-variant block mb-0.5">试卷标题</label>
-                        <input
-                          type="text"
-                          value={clonedPaperResult.title}
-                          onChange={(e) => setClonedPaperResult(p => ({ ...p, title: e.target.value }))}
-                          className="w-full h-8 px-2 bg-surface-container-lowest rounded font-headline-sm text-on-surface font-bold border border-outline-variant/30 focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-
-                      {/* Score and Duration controls */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="p-2 rounded bg-surface-container-lowest flex items-center justify-between border border-outline-variant/20">
-                          <div>
-                            <span className="text-[11px] text-on-surface-variant block">试卷总分</span>
-                            <span className="font-label-mono font-bold text-primary text-label-md">
-                              {clonedPaperResult.totalScore} <span className="text-[10px] text-on-surface-variant">分</span>
-                            </span>
-                          </div>
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setClonedPaperResult(p => ({ ...p, totalScore: Math.max(10, p.totalScore - 10) }))}
-                              className="w-6 h-6 rounded bg-surface-container hover:bg-surface-container-high text-on-surface text-center font-bold cursor-pointer"
-                            >-</button>
-                            <button
-                              type="button"
-                              onClick={() => setClonedPaperResult(p => ({ ...p, totalScore: p.totalScore + 10 }))}
-                              className="w-6 h-6 rounded bg-surface-container hover:bg-surface-container-high text-on-surface text-center font-bold cursor-pointer"
-                            >+</button>
-                          </div>
-                        </div>
-
-                        <div className="p-2 rounded bg-surface-container-lowest flex items-center justify-between border border-outline-variant/20">
-                          <div>
-                            <span className="text-[11px] text-on-surface-variant block">建议限时</span>
-                            <span className="font-label-mono font-bold text-secondary text-label-md">
-                              {clonedPaperResult.duration} <span className="text-[10px] text-on-surface-variant">分钟</span>
-                            </span>
-                          </div>
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setClonedPaperResult(p => ({ ...p, duration: Math.max(10, p.duration - 10) }))}
-                              className="w-6 h-6 rounded bg-surface-container hover:bg-surface-container-high text-on-surface text-center font-bold cursor-pointer"
-                            >-</button>
-                            <button
-                              type="button"
-                              onClick={() => setClonedPaperResult(p => ({ ...p, duration: p.duration + 10 }))}
-                              className="w-6 h-6 rounded bg-surface-container hover:bg-surface-container-high text-on-surface text-center font-bold cursor-pointer"
-                            >+</button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 text-[12px] font-label-mono text-on-surface-variant">
-                        <span>总题量: {clonedPaperResult.questionCount} 题</span>
-                        <span>·</span>
-                        <span>选择: {clonedPaperResult.typeBreakdown?.choices || 0}</span>
-                        <span>·</span>
-                        <span>填空: {clonedPaperResult.typeBreakdown?.blanks || 0}</span>
-                        <span>·</span>
-                        <span>解答: {clonedPaperResult.typeBreakdown?.solutions || 0}</span>
-                      </div>
-                    </div>
-
-                    {/* Preview Questions */}
-                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                      {clonedPaperResult.questions.map((q, idx) => (
-                        <div key={idx} className="p-2.5 rounded-lg bg-surface-container-low border border-outline-variant/20 space-y-1 text-body-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold font-label-mono text-on-surface">第 {q.num || idx + 1} 题</span>
-                            <span className={`px-2 py-0.5 rounded border text-[11px] font-semibold ${getQuestionTypeClass(q.type)}`}>{q.type}</span>
-                            <span className="text-primary font-semibold font-label-mono">{q.score}分</span>
-                            <span className="text-secondary font-semibold font-mono text-[12px]">标答: {q.standardAnswer}</span>
-                          </div>
-                          <MathMarkdown content={q.prompt} className="text-on-surface font-medium" />
-                          {q.analysis && (
-                            <div className="p-2 rounded bg-surface-container text-[12px] text-on-surface-variant">
-                              <span className="font-semibold text-primary">解析: </span>
-                              <MathMarkdown content={q.analysis} />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-space-sm">
-                    <div className="p-space-md rounded-lg bg-surface-container-low flex items-start gap-space-sm">
-                      <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">format_shapes</span>
-                      <div>
-                        <p className="font-semibold text-label-md text-on-surface">全格式自适应大模型解析</p>
-                      <p className="text-body-sm text-on-surface-variant">自动识别篇章、题干、选项与标答，并整理为结构化试题。</p>
-                      </div>
-                    </div>
-                    <div className="p-space-md rounded-lg bg-surface-container-low flex items-start gap-space-sm">
-                      <span className="material-symbols-outlined text-secondary text-[20px] mt-0.5">functions</span>
-                      <div>
-                        <p className="font-semibold text-label-md text-on-surface">复杂高等数学 LaTeX 向量化</p>
-                        <p className="text-body-sm text-on-surface-variant">对多重积分、偏导数、特征值矩阵与微积分展开式原位提取并完成 KaTeX 渲染。</p>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-primary/15 bg-primary/5 px-space-md py-space-sm text-body-sm text-on-surface-variant">
-                      <div className="font-label-md font-semibold text-primary">识别完成后的去向</div>
-                      <p className="mt-1">直接开考会留在入口一的流程；需要手动改题稿时，再选择下方“转到 Markdown 工作台”。</p>
-                    </div>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => importTextIntoMarkdownParser(cloneRawText)}
+                  disabled={isReadingPdf || isParsingAI || !cloneRawText.trim()}
+                  className="w-full h-11 px-space-lg rounded-lg bg-primary hover:bg-primary/90 text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                >
+                  <span className={`material-symbols-outlined text-[20px] ${isParsingAI ? 'animate-spin' : ''}`}>
+                    {isParsingAI ? 'progress_activity' : 'bolt'}
+                  </span>
+                  <span>
+                    {isReadingPdf
+                      ? '正在提取 PDF 文字…'
+                      : isParsingAI
+                      ? '正在分批解析试题…'
+                      : modelConfig?.hasApiKey
+                      ? `AI 识别并生成试卷（调用模型: ${modelConfig.modelName || 'deepseek-flash'}）`
+                      : '纯本地规则识别并生成试卷（免模型）'}
+                  </span>
+                </button>
               </div>
-
-              {/* Action buttons */}
-              <div className="space-y-2 pt-2 border-t border-surface-container">
-                {clonedPaperResult ? (
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSaveClone(false)}
-                      className="flex-1 h-10 px-3 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-headline-sm text-label-md flex items-center justify-center gap-1.5 border border-primary/30 shadow-xs transition-all active:scale-[0.99] cursor-pointer"
-                      title="保存试卷到试卷库，后续可随时开考或管理"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
-                      <span>保存试卷到试卷库</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleLaunchClone}
-                      className="flex-[1.2] h-10 px-4 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-label-md flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.99] cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">play_circle</span>
-                    <span>进入考场</span>
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleLaunchClone}
-                    disabled={!clonedPaperResult}
-                    className="w-full h-10 px-space-lg rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">play_circle</span>
-                    <span>进入考场</span>
-                  </button>
-                )}
-                {clonedPaperResult && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (clonedPaperResult.markdown) {
-                        setMarkdownText(clonedPaperResult.markdown);
-                      }
-                      setActiveMode('markdown');
-                    }}
-                    className="w-full h-9 px-space-md rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md flex items-center justify-center gap-space-xs transition-colors cursor-pointer border border-outline-variant/30"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">edit</span>
-                    <span>转到 Markdown 工作台继续编辑（可选）</span>
-                  </button>
-                )}
-              </div>
-            </div>
+            </section>
           </div>
         )}
 
         {activeMode === 'markdown' && (
           <div className="flex flex-col gap-space-lg">
             {/* Control Bar */}
-            <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex items-center justify-between gap-space-md flex-wrap">
-              <div className="flex items-center gap-2 text-on-surface-variant font-label-sm">
-                <span className="material-symbols-outlined text-[18px] text-primary">edit_note</span>
-                <span>编辑或粘贴题稿后，使用 AI 解析生成预览；解析会按题目分批调用模型</span>
+            <div className="bg-surface-container-lowest p-3 sm:p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex flex-col gap-3">
+              {/* Model Usage Status Header */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-surface-container text-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-on-surface flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[16px] text-primary">psychology</span>
+                    <span>本次解析模型标注：</span>
+                  </span>
+                  {modelConfig?.hasApiKey ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold font-mono text-[11px]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>【会调用模型】{modelConfig.modelName || 'deepseek-flash'}</span>
+                      <span className="text-[10px] opacity-75 font-normal">（自动规范公式与选项，产生 Token 调用）</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 font-semibold text-[11px]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      <span>【不调用模型】未检测到 API Key · 走纯本地规则引擎</span>
+                      <span className="text-[10px] opacity-75 font-normal">（免模型 / 0 Token 消耗）</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-on-surface-variant flex items-center gap-1.5">
+                  <span>当前排版预览状态：</span>
+                  {parsedExam?.parseMode === 'local' ? (
+                    <span className="font-semibold text-amber-700 dark:text-amber-400">⚡ 纯本地规则解析</span>
+                  ) : parsedExam?.parseMode === 'fallback' ? (
+                    <span className="font-semibold text-amber-700 dark:text-amber-400" title="大模型响应超时或中断，已由本地规则兜底提取">⚠️ 本地规则兜底解析（模型未响应/超时）</span>
+                  ) : parsedExam?.parseMode === 'ai' || (parseUsageSummary && parseUsageSummary.completedCalls > 0) ? (
+                    <span className="font-semibold text-primary">🤖 大模型深度规整 ({parsedExam?.modelName || modelConfig?.modelName || 'AI'})</span>
+                  ) : (
+                    <span className="opacity-70">等待题稿解析</span>
+                  )}
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => runProgressiveChunkParser(markdownText, { resume: false })}
-                  disabled={!markdownText.trim() || isParsingAI}
-                  title={`按篇章切片调用模型，预计 ${markdownBatchCount} 批`}
-                  className="px-3 py-1.5 rounded-lg bg-primary text-on-primary font-label-sm font-semibold transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50"
-                >
-                  <span className={`material-symbols-outlined text-[16px] ${isParsingAI ? 'animate-spin' : ''}`}>{isParsingAI ? 'progress_activity' : 'auto_awesome'}</span>
-                  <span>{isParsingAI ? '正在解析…' : `${hasCurrentParse ? 'AI 重新解析' : 'AI 解析'}（${markdownBatchCount} 批）`}</span>
-                </button>
-                {canContinueParse && (
+              {/* Main Actions Bar */}
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div className="min-w-0 flex items-start sm:items-center gap-2 text-on-surface-variant font-label-sm">
+                  <span className="material-symbols-outlined text-[18px] text-primary">edit_note</span>
+                  <span>可选择【AI 大模型深度解析】或【纯本地规则快速解析（免模型 / 0 Token）】</span>
+                </div>
+
+                <div className="grid w-full grid-cols-1 min-[420px]:grid-cols-2 md:flex md:w-auto md:flex-wrap items-stretch gap-2">
+                  {/* Primary AI Model Parse Button */}
                   <button
                     type="button"
-                    onClick={() => runProgressiveChunkParser(markdownText, { resume: true })}
-                    disabled={isParsingAI}
-                    title={`从第 ${completedChunkCount + 1} / ${markdownBatchCount} 批继续解析`}
-                    className="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm font-semibold transition-colors cursor-pointer border border-outline-variant/30 flex items-center gap-1 disabled:opacity-50"
+                    onClick={() => runProgressiveChunkParser(markdownText, { resume: false })}
+                    disabled={!markdownText.trim() || isParsingAI}
+                    title={modelConfig?.hasApiKey ? `调用 ${modelConfig.modelName} 深度切片解析，预计 ${markdownBatchCount} 批` : '未配置 API Key，将使用本地规则'}
+                    className="min-w-0 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg bg-primary text-on-primary font-label-sm font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-xs"
                   >
-                    <span className="material-symbols-outlined text-[16px]">play_arrow</span>
-                    <span>继续解析</span>
+                    <span className={`material-symbols-outlined text-[16px] ${isParsingAI && parseEngineMode === 'ai' ? 'animate-spin' : ''}`}>
+                      {isParsingAI && parseEngineMode === 'ai' ? 'progress_activity' : 'auto_awesome'}
+                    </span>
+                    <span>
+                      {isParsingAI && parseEngineMode === 'ai'
+                        ? 'AI 正在解析…'
+                        : `${hasCurrentParse ? 'AI 重新解析' : 'AI 模型解析'}（${markdownBatchCount} 批 · ${modelConfig?.modelName || '调用模型'}）`}
+                    </span>
                   </button>
-                )}
 
-                <button
-                  type="button"
-                  onClick={() => setShowAnswers(!showAnswers)}
-                  className="px-3 py-1.5 rounded-lg bg-surface-container text-on-surface hover:text-primary font-label-sm transition-colors cursor-pointer flex items-center gap-1 border border-outline-variant/30"
-                >
-                  <span className="material-symbols-outlined text-[16px]">
-                    {showAnswers ? 'visibility' : 'visibility_off'}
-                  </span>
-                  <span>{showAnswers ? '隐藏标答/解析' : '显示标答/解析'}</span>
-                </button>
+                  {/* Fast Local Rule Parser Button (0 Token / No Model) */}
+                  <button
+                    type="button"
+                    onClick={() => runLocalRuleParser(markdownText)}
+                    disabled={!markdownText.trim() || isParsingAI}
+                    title="完全不调用大模型，由本地规则引擎秒级提取题目与选项，0 费用消耗"
+                    className="min-w-0 px-2.5 py-2 sm:py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface border border-outline-variant/30 font-label-sm font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    <span className={`material-symbols-outlined text-[16px] text-amber-500 ${isParsingAI && parseEngineMode === 'local' ? 'animate-spin' : ''}`}>
+                      {isParsingAI && parseEngineMode === 'local' ? 'progress_activity' : 'offline_bolt'}
+                    </span>
+                    <span>{isParsingAI && parseEngineMode === 'local' ? '本地解析中…' : '纯本地解析（免模型 / 0 Token）'}</span>
+                  </button>
+
+                  {canContinueParse && (
+                    <button
+                      type="button"
+                      onClick={() => runProgressiveChunkParser(markdownText, { resume: true })}
+                      disabled={isParsingAI}
+                      title={`从第 ${completedChunkCount + 1} / ${markdownBatchCount} 批继续解析`}
+                      className="min-w-0 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm font-semibold transition-colors cursor-pointer border border-outline-variant/30 flex items-center justify-center gap-1 disabled:opacity-50"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+                      <span>继续解析</span>
+                    </button>
+                  )}
+
+                  {isParsingAI && (
+                    <button
+                      type="button"
+                      onClick={pauseChunkParsing}
+                      className="min-w-0 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-label-sm font-semibold transition-colors cursor-pointer border border-amber-200 flex items-center justify-center gap-1"
+                      title="停止当前批次请求并保留已完成结果，可稍后继续"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">pause</span>
+                      <span>暂停</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAnswers(!showAnswers)}
+                    className="min-w-0 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg bg-surface-container text-on-surface hover:text-primary font-label-sm transition-colors cursor-pointer flex items-center justify-center gap-1 border border-outline-variant/30"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">
+                      {showAnswers ? 'visibility' : 'visibility_off'}
+                    </span>
+                    <span>{showAnswers ? '隐藏标答/解析' : '显示标答/解析'}</span>
+                  </button>
+                </div>
               </div>
+
               {parseUsageSummary && (
-                <div className="w-full flex items-center gap-2 text-xs text-on-surface-variant" aria-live="polite">
-                  <span className="material-symbols-outlined text-[15px] text-primary">monitoring</span>
-                  <span>
-                    本次解析：{parseUsageSummary.totalTokens.toLocaleString()} tokens
-                    {' · '}
-                    {parseUsageSummary.pricedCalls > 0
-                      ? `约 ¥${parseUsageSummary.estimatedCostCny.toFixed(6)}`
-                      : '费用暂不可估'}
-                    {' · '}
-                    {parseUsageSummary.complete
-                      ? `已统计 ${parseUsageSummary.completedCalls}/${parseUsageSummary.totalCalls} 批`
-                      : `统计中 ${parseUsageSummary.completedCalls}/${parseUsageSummary.totalCalls} 批`}
-                    {parseUsageSummary.unpricedCalls > 0 && '（部分批次费用未计价）'}
+                <div className="w-full min-w-0 flex flex-wrap items-start sm:items-center gap-x-2 gap-y-1 text-xs text-on-surface-variant pt-2 border-t border-surface-container/60" aria-live="polite">
+                  <span className="material-symbols-outlined text-[15px] text-primary">
+                    {parseUsageSummary.mode === 'local' ? 'offline_bolt' : 'monitoring'}
                   </span>
+                  {parseUsageSummary.mode === 'local' ? (
+                    <span className="font-semibold text-amber-700 dark:text-amber-400">
+                      ⚡ 本次为纯本地规则解析：完全未调用大模型 · 0 Token 消耗 · 0 网络费用
+                    </span>
+                  ) : parseUsageSummary.completedCalls === 0 && parseUsageSummary.fallbackCalls > 0 ? (
+                    <span className="font-semibold text-amber-700 dark:text-amber-400">
+                      ⚠️ 本地规则兜底解析：大模型调用超时或中断，未产生有效模型规整，已由本地规则自动兜底
+                    </span>
+                  ) : (
+                    <span>
+                      <strong className="text-primary font-semibold font-mono mr-1">
+                        🤖 已调用大模型 [{parsedExam?.modelName || modelConfig?.modelName || 'deepseek-flash'}]
+                      </strong>
+                      ：{parseUsageSummary.totalTokens.toLocaleString()} tokens
+                      {' · '}
+                      {parseUsageSummary.pricedCalls > 0
+                        ? `约 ¥${parseUsageSummary.estimatedCostCny.toFixed(6)}`
+                        : '费用暂不可估'}
+                      {' · '}
+                      {parseUsageSummary.complete
+                        ? `已统计 ${parseUsageSummary.completedCalls}/${parseUsageSummary.totalCalls} 批`
+                        : `统计中 ${parseUsageSummary.completedCalls}/${parseUsageSummary.totalCalls} 批`}
+                      {parseUsageSummary.unpricedCalls > 0 && '（部分批次费用未计价）'}
+                    </span>
+                  )}
                   {parseUsageSummary.structuredRetries > 0 && (
                     <span className="text-amber-700">结构纠错 {parseUsageSummary.structuredRetries}/{parseUsageSummary.retryLimit ?? '—'} 次</span>
                   )}
@@ -1118,8 +1327,8 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
             {/* AI Status / Notice Banner */}
             {aiEnhanceMessage && (
-              <div className="p-3 bg-secondary-container/40 border border-secondary/30 rounded-xl text-secondary text-body-sm flex items-center justify-between animate-in fade-in">
-                <div className="flex items-center gap-2 font-medium">
+              <div className="p-3 bg-secondary-container/40 border border-secondary/30 rounded-xl text-secondary text-body-sm flex items-start sm:items-center justify-between gap-2 animate-in fade-in">
+                <div className="min-w-0 flex items-start gap-2 font-medium">
                   <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
                   <span>{aiEnhanceMessage}</span>
                 </div>
@@ -1134,12 +1343,12 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
             )}
 
             {/* Split Screen: Editor on Left, KaTeX Live Preview with AI Loading & In-place Editing on Right */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-lg items-stretch">
+            <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-space-lg items-stretch">
               {/* Left: Markdown Source Editor */}
-              <div className="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 p-space-lg flex flex-col justify-between space-y-space-sm">
+              <div className="min-w-0 bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 p-3 sm:p-space-lg flex flex-col justify-between space-y-space-sm">
                 <div>
-                  <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-space-xs border-b border-surface-container">
+                    <div className="min-w-0 flex flex-wrap items-center gap-2">
                       <span className="material-symbols-outlined text-primary text-[18px]">edit_note</span>
                       <span className="font-label-md text-label-md font-semibold text-on-surface">Markdown 题稿源码编辑器</span>
                     </div>
@@ -1150,7 +1359,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                           <span>AI 正在分析文本...</span>
                         </span>
                       )}
-                      <span className="font-mono text-label-mono text-on-surface-variant">
+                      <span className="font-mono text-[10px] sm:text-label-mono text-on-surface-variant">
                         {markdownText.length} 字符 · {markdownText.split('\n').length} 行
                       </span>
                     </div>
@@ -1160,7 +1369,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                     value={markdownText}
                     onChange={(e) => setMarkdownText(e.target.value)}
                     placeholder="在此编写或粘贴 Markdown 试卷文本，编辑完成后点击上方“AI 解析”..."
-                    className="w-full h-[620px] mt-2 p-3.5 bg-surface-container-low rounded-lg font-mono text-code-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 leading-relaxed resize-none"
+                    className="w-full h-[46vh] min-h-[280px] max-h-[520px] sm:h-[620px] sm:max-h-none mt-2 p-3 bg-surface-container-low rounded-lg font-mono text-[12px] sm:text-code-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 leading-relaxed resize-y"
                   />
                 </div>
 
@@ -1178,7 +1387,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
               </div>
 
               {/* Right: KaTeX Exam Paper Preview with Interactive Editing */}
-              <div className="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 p-space-lg flex flex-col justify-between space-y-space-md relative overflow-hidden">
+              <div className="min-w-0 bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 p-3 sm:p-space-lg flex flex-col justify-between space-y-space-md relative overflow-hidden">
                 <div className="space-y-space-md">
                   {/* Preview Header & AI Synchronizer Indicator */}
                   <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
@@ -1191,20 +1400,33 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                       {isParsingAI ? (
                         <span className="px-2.5 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-label-mono text-[11px] font-semibold flex items-center gap-1.5 shadow-xs animate-pulse">
                           <span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>
-                          <span>AI 正在重构排版...</span>
+                          <span>{parseEngineMode === 'local' ? '本地引擎正在规整...' : `AI (${modelConfig?.modelName || '模型'}) 正在解析...`}</span>
                         </span>
+                      ) : parsedExam ? (
+                        parsedExam.parseMode === 'local' ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-800 dark:text-amber-300 font-label-mono text-[11px] font-semibold flex items-center gap-1 border border-amber-500/20">
+                            <span className="material-symbols-outlined text-[13px] text-amber-600">offline_bolt</span>
+                            <span>纯本地规则解析 · 未调用模型</span>
+                          </span>
+                        ) : parsedExam.parseMode === 'fallback' ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-800 dark:text-amber-300 font-label-mono text-[11px] font-semibold flex items-center gap-1 border border-amber-500/20" title="大模型调用超时或中断，已由本地规则引擎自动兜底解析">
+                            <span className="material-symbols-outlined text-[13px] text-amber-600">warning</span>
+                            <span>本地规则兜底解析（模型未响应/超时）</span>
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full bg-primary/10 text-primary font-label-mono text-[11px] font-semibold flex items-center gap-1 border border-primary/20">
+                            <span className="material-symbols-outlined text-[13px] text-primary">neurology</span>
+                            <span>已调用大模型: {parsedExam.modelName || modelConfig?.modelName || 'deepseek-flash'}</span>
+                          </span>
+                        )
                       ) : markdownText.trim() && parsedMarkdownSource !== markdownText ? (
                         <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-label-mono text-code-sm font-semibold flex items-center gap-1">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
                           <span>题稿有改动，待解析</span>
                         </span>
-                      ) : parsedMarkdownSource ? (
-                        <span className="px-2 py-0.5 rounded bg-secondary/15 text-secondary font-label-mono text-code-sm font-semibold flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
-                          <span>已解析当前题稿</span>
-                        </span>
-                      ) : <span className="text-[11px] text-on-surface-variant">等待题稿解析</span>
-                      }
+                      ) : (
+                        <span className="text-[11px] text-on-surface-variant">等待题稿解析</span>
+                      )}
                     </div>
                   </div>
 
@@ -1225,8 +1447,31 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                         />
                       </div>
 
-                      {/* Score, Duration and Recalculate Controls */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {/* Subject, Score, Duration and Recalculate Controls */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {/* Subject Control */}
+                        <div className="p-2 rounded-lg bg-surface-container-lowest flex items-center justify-between border border-outline-variant/20">
+                          <div className="w-full">
+                            <span className="text-[11px] text-on-surface-variant block font-label-mono">科目归类</span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="material-symbols-outlined text-[16px] text-primary">school</span>
+                              <input
+                                type="text"
+                                list="subject-presets-list"
+                                value={parsedExam.subject || inferPaperSubject(parsedExam)}
+                                onChange={(e) => setParsedExam(prev => ({ ...prev, subject: e.target.value }))}
+                                className="w-full font-sans font-bold text-on-surface text-[14px] bg-transparent border-b border-primary/40 focus:outline-none"
+                                placeholder="选择或输入科目..."
+                              />
+                              <datalist id="subject-presets-list">
+                                {Array.from(new Set([...DEFAULT_SUBJECTS, ...getCustomSubjects()])).map(s => (
+                                  <option key={s} value={s} />
+                                ))}
+                              </datalist>
+                            </div>
+                          </div>
+                        </div>
+
                         {/* Score Control */}
                         <div className="p-2 rounded-lg bg-surface-container-lowest flex items-center justify-between border border-outline-variant/20">
                           <div>
@@ -1308,7 +1553,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between text-[11px] font-label-mono text-on-surface-variant pt-0.5">
+                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] font-label-mono text-on-surface-variant pt-0.5">
                         <span className="text-secondary font-semibold">
                           总计: {parsedExam.questions?.length || parsedExam.questionCount} 道试题
                         </span>
@@ -1320,7 +1565,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                   {/* Progressive Chunk Parsing Progress Strip */}
                   {isParsingAI && chunkProgress.total > 0 && (
                     <div className="p-3 rounded-xl bg-secondary-container/25 border border-secondary/30 space-y-1.5 animate-in fade-in">
-                      <div className="flex items-center justify-between text-[12px] font-semibold text-secondary">
+                      <div className="flex flex-wrap items-center justify-between gap-1 text-[12px] font-semibold text-secondary">
                         <span className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
                           <span>篇章切片解析中: {chunkProgress.summary}</span>
@@ -1343,7 +1588,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                   )}
 
                   {/* Questions Stream / AI Loading Container */}
-                  <div className="h-[490px] overflow-y-auto space-y-space-md pr-1.5 relative">
+                  <div className="min-w-0 h-[55vh] min-h-[340px] max-h-[65vh] lg:h-[490px] lg:max-h-none overflow-y-auto space-y-space-md pr-1.5 relative">
                     {/* Seamless Loading Overlay when Parsing */}
                     {isParsingAI && (!parsedExam || !parsedExam.questions || parsedExam.questions.length === 0) ? (
                       <div className="py-16 flex flex-col items-center justify-center space-y-4 text-center">
@@ -1373,7 +1618,8 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                         </div>
                       </div>
                     ) : parsedExam && parsedExam.questions && parsedExam.questions.length > 0 ? (
-                      parsedExam.questions.map((q, idx) => {
+                      parsedExam.questions.map((rawQ, idx) => {
+                        const q = healQuestionOptions(rawQ);
                         const isAnalysisExpanded = expandedAnalysis[q.id || idx];
                         const isPassageExpanded = expandedPassages[q.id || idx];
                         const isEditingThis = editingQId === q.id;
@@ -1405,6 +1651,24 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
                               {/* Question Action Buttons */}
                               <div className="flex items-center gap-1.5">
+                                {/* AI Inspect & Fix Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleCheckAndFixQuestion(q)}
+                                  disabled={checkingQId === q.id || isParsingAI || isBatchInspecting}
+                                  className={`px-2.5 py-1 rounded-lg font-label-sm text-[12px] font-semibold transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                                    checkingQId === q.id
+                                      ? 'bg-primary text-on-primary animate-pulse'
+                                      : 'bg-primary/10 hover:bg-primary hover:text-on-primary text-primary'
+                                  }`}
+                                  title="调用大模型检查本题选项是否合并、公式是否规范，发现问题自动修复"
+                                >
+                                  <span className={`material-symbols-outlined text-[14px] ${checkingQId === q.id ? 'animate-spin' : ''}`}>
+                                    {checkingQId === q.id ? 'progress_activity' : 'verified'}
+                                  </span>
+                                  <span>{checkingQId === q.id ? '质检修正中…' : 'AI 质检修正'}</span>
+                                </button>
+
                                 {/* AI Assist Button */}
                                 <button
                                   type="button"
@@ -1581,7 +1845,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                                 </div>
 
                                 {/* Preset Action Pills */}
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-4 gap-1.5">
                                   <button
                                     type="button"
                                     disabled={aiAssistLoading}
@@ -1770,7 +2034,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                 </div>
 
                 {/* Action CTA: Save Paper & Enter Exam Room */}
-                <div className="pt-3 border-t border-surface-container flex flex-col sm:flex-row items-center gap-3">
+                <div className="pt-3 border-t border-surface-container flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                   <button
                     type="button"
                     onClick={() => handleSaveMarkdownExam(false)}
@@ -1799,7 +2063,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
         {/* Recent Workspace Papers & Artifacts Row */}
         <section className="space-y-space-md pt-space-md">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between items-start gap-2">
             <div className="flex items-center gap-space-sm">
               <span className="material-symbols-outlined text-primary text-[20px]">history_edu</span>
               <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">近期生成的试卷快速入口</h3>
@@ -1875,26 +2139,169 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
       {/* Toast Notification for Saved Paper */}
       {saveToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-inverse-surface text-inverse-on-surface px-4 py-3 rounded-xl shadow-xl border border-outline-variant/30 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+        <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-3 right-3 sm:bottom-6 sm:left-auto sm:right-6 z-50 min-w-0 bg-inverse-surface text-inverse-on-surface px-3 sm:px-4 py-3 rounded-xl shadow-xl border border-outline-variant/30 flex items-center gap-2 sm:gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
           <span className="material-symbols-outlined text-secondary text-[22px]">check_circle</span>
-          <div className="text-body-sm">
+          <div className="min-w-0 flex-1 text-body-sm">
             <span className="font-semibold block max-w-xs truncate">{saveToast.title}</span>
             <span className="text-[12px] opacity-80">已成功保存至试卷库！</span>
           </div>
           <button
             type="button"
             onClick={() => onNavigate('paper-library')}
-            className="ml-2 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:bg-primary-container cursor-pointer transition-colors shadow-xs"
+            className="shrink-0 ml-1 sm:ml-2 px-2 sm:px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] sm:text-[12px] font-semibold hover:bg-primary-container cursor-pointer transition-colors shadow-xs"
           >
             去试卷库查看
           </button>
           <button
             type="button"
             onClick={() => setSaveToast(null)}
-            className="text-on-surface-variant hover:text-on-surface cursor-pointer p-0.5 ml-1"
+            className="shrink-0 text-on-surface-variant hover:text-on-surface cursor-pointer p-0.5 ml-0.5"
           >
             <span className="material-symbols-outlined text-[16px]">close</span>
           </button>
+        </div>
+      )}
+
+      {/* App Toast Notification */}
+      {appToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[80] max-w-md w-[calc(100%-2rem)] animate-in fade-in slide-in-from-top-4 duration-200">
+          <div className={`p-3.5 rounded-xl shadow-2xl border flex items-start gap-3 backdrop-blur-md ${
+            appToast.type === 'error'
+              ? 'bg-error-container text-on-error-container border-error/30'
+              : appToast.type === 'warning'
+              ? 'bg-amber-500/15 text-amber-900 dark:text-amber-200 border-amber-500/30'
+              : appToast.type === 'success'
+              ? 'bg-emerald-500/15 text-emerald-900 dark:text-emerald-200 border-emerald-500/30'
+              : 'bg-surface-container-highest text-on-surface border-outline-variant/40'
+          }`}>
+            <span className="material-symbols-outlined text-[20px] shrink-0 mt-0.5">
+              {appToast.type === 'error' ? 'error' : appToast.type === 'warning' ? 'warning' : appToast.type === 'success' ? 'check_circle' : 'info'}
+            </span>
+            <div className="min-w-0 flex-1 text-xs">
+              <div className="font-semibold text-sm leading-tight">{appToast.title}</div>
+              {appToast.message && <div className="mt-1 leading-relaxed opacity-90">{appToast.message}</div>}
+            </div>
+            <button
+              type="button"
+              onClick={() => setAppToast(null)}
+              className="shrink-0 text-current opacity-60 hover:opacity-100 p-0.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modern High-Aesthetic Confirmation & Batch Modal */}
+      {confirmModal && (
+        <div
+          className="fixed inset-0 z-[70] bg-on-background/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !confirmModal.preventBackdropClose) {
+              confirmModal.onCancel ? confirmModal.onCancel() : setConfirmModal(null);
+            }
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            className="bg-surface-container-lowest text-on-surface rounded-2xl max-w-xl w-full max-h-[90dvh] overflow-y-auto p-4 sm:p-6 shadow-2xl border border-outline-variant/40 space-y-4 animate-in zoom-in-95 duration-200"
+          >
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 ${
+                confirmModal.iconBg || (confirmModal.confirmVariant === 'error' ? 'bg-error/10 text-error' : 'bg-primary/10 text-primary')
+              }`}>
+                <span className="material-symbols-outlined text-[22px] sm:text-[24px]">
+                  {confirmModal.icon || 'help'}
+                </span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-headline-sm text-[17px] sm:text-headline-sm font-semibold text-on-surface">
+                    {confirmModal.title}
+                  </h3>
+                  {confirmModal.badge && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-surface-container-high text-on-surface-variant font-label-mono">
+                      {confirmModal.badge}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1.5 text-[13px] sm:text-body-sm text-on-surface-variant leading-relaxed">
+                  {confirmModal.description}
+                </p>
+              </div>
+            </div>
+
+            {confirmModal.modelUsage && (
+              <div className={`flex items-start gap-3 rounded-xl border p-3.5 sm:p-4 ${
+                confirmModal.modelUsage.mode === 'ai'
+                  ? 'border-primary/20 bg-primary/[0.045]'
+                  : 'border-secondary/25 bg-secondary/[0.06]'
+              }`}>
+                <span className={`material-symbols-outlined mt-0.5 text-[20px] ${confirmModal.modelUsage.mode === 'ai' ? 'text-primary' : 'text-secondary'}`}>
+                  {confirmModal.modelUsage.mode === 'ai' ? 'smart_toy' : 'offline_bolt'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-on-surface">{confirmModal.modelUsage.title}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${confirmModal.modelUsage.mode === 'ai' ? 'bg-primary/10 text-primary' : 'bg-secondary/15 text-secondary'}`}>
+                      {confirmModal.modelUsage.mode === 'ai' ? 'AI 解析' : '本地解析'}
+                    </span>
+                  </div>
+                  <p className="mt-1 break-words text-xs leading-relaxed text-on-surface-variant">{confirmModal.modelUsage.detail}</p>
+                </div>
+              </div>
+            )}
+
+            {confirmModal.details && confirmModal.details.length > 0 && (
+              <div className={`grid grid-cols-2 ${confirmModal.details.length > 2 ? 'sm:grid-cols-3' : ''} gap-2`}>
+                {confirmModal.details.map((d, i) => (
+                  <div key={i} className="min-w-0 rounded-xl border border-outline-variant/20 bg-surface-container-low/70 p-3">
+                    <div className="text-[11px] text-on-surface-variant">{d.label}</div>
+                    <div className="mt-1 break-words text-[13px] font-semibold leading-snug text-on-surface">{d.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {confirmModal.tip && (
+              <div className={`flex items-start gap-2 p-3 rounded-xl text-xs leading-relaxed border ${confirmModal.tipTone === 'info' ? 'bg-surface-container-low text-on-surface-variant border-outline-variant/30' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20'}`}>
+                <span className="material-symbols-outlined text-[16px] shrink-0 mt-0.5">{confirmModal.tipTone === 'info' ? 'pause_circle' : 'info'}</span>
+                <span>{confirmModal.tip}</span>
+              </div>
+            )}
+
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-3 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirmModal.onCancel) confirmModal.onCancel();
+                  setConfirmModal(null);
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer transition-colors"
+              >
+                {confirmModal.cancelText || '取消'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const cb = confirmModal.onConfirm;
+                  setConfirmModal(null);
+                  if (cb) cb();
+                }}
+                className={`w-full sm:w-auto justify-center px-4 py-2.5 sm:py-2 rounded-xl font-label-md font-semibold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 ${
+                  confirmModal.confirmVariant === 'error'
+                    ? 'bg-error text-on-error hover:bg-error/90'
+                    : 'bg-primary text-on-primary hover:bg-primary/90'
+                }`}
+              >
+                {confirmModal.confirmIcon && (
+                  <span className="material-symbols-outlined text-[16px]">{confirmModal.confirmIcon}</span>
+                )}
+                <span>{confirmModal.confirmText || '确定'}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
