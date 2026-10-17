@@ -43,8 +43,13 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.js ./server.js
 COPY --from=builder /app/api-router.js ./api-router.js
 
-# 若存在默认配置文件则复制，如无则运行时通过环境变量或挂载读取
-COPY examcraft-config.json* ./
+# 标注 OCI 镜像元数据，自动绑定 GitHub 仓库与 Packages
+LABEL org.opencontainers.image.source="https://github.com/civilization-os/ExamCraft"
+LABEL org.opencontainers.image.description="ExamCraft AI Workbench - Multimodal Exam Generator, Online Exam Room & Diagnostic Analytics"
+LABEL org.opencontainers.image.licenses="MIT"
+
+# 提供安全的默认模板配置文件，运行时可通过环境变量注入或宿主机挂载
+COPY examcraft-config.example.json* ./
 
 # 暴露服务端口
 EXPOSE 3000

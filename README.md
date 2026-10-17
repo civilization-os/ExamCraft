@@ -1,320 +1,172 @@
-# ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
+# ExamCraft AI Workbench
 
-> **ExamCraft AI Workbench** 是基于 **Google Stitch** 原型设计规范与底层统一大模型调用核心 **`@civilization/model-core`** 打造的现代化 Web 智能组卷与在线考练工作台。基于 **Node.js + React + Tailwind CSS** 架构，提供高还原度、全交互沉浸式的命题与考练一体化体验。
+<p align="center">
+  <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Publish CI"></a>
+  <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub Container Registry"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Node.js-20+-339933?logo=node.js&logoColor=white" alt="Node.js 20+">
+  <img src="https://img.shields.io/badge/React-18.3-61DAFB?logo=react&logoColor=black" alt="React 18">
+  <img src="https://img.shields.io/badge/Vite-5.4-646CFF?logo=vite&logoColor=white" alt="Vite 5">
+  <img src="https://img.shields.io/badge/KaTeX-0.19-38B2AC" alt="KaTeX Math">
+  <a href="https://github.com/civilization-os/ExamCraft/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+</p>
 
----
-
-## 🌟 核心功能特色
-
-### 1. 三入口多模态智能组卷工作台 (Triple-Engine Generator)
-- **入口一：完整真题 PDF 1:1 原样精确克隆**
-  - 支持直接拖曳上传历年期末考试试卷或考研统考真题（`.pdf` / `.docx` / `.tex` / `.md`）。
-  - 自适应多模态视觉模型，原位提炼考卷标题、排版规范、分值规则与数学公式，OCR 解析度达 99.8%。
-  - 全真还原双栏排版、分值结构（单选、填空、综合解答题占比平衡）与答题卡规范。
-- **入口二：自由规格智能生成 (Parameterized Blueprint)**
-  - 无需原题模板，自主设定试卷总分（50-150分）、考试时限、题量分布与分值权重。
-  - 试题难度梯度三档可调：基础稳固 / 进阶拓展 / 考研冲刺。
-  - 直连 `model_core`，一键根据所填参数实时由 AI 生成定制考题大纲并直通考场。
-- **入口三：Markdown 题稿即时转卷 (Markdown to Exam)** 🆕
-  - **分屏即时编辑与渲染**：左侧 Markdown 源码编辑区（带行号、语法小贴士、字符统计），右侧 KaTeX 高保真交互式试卷卡片即时排版渲染。
-  - **海量字符长文本与篇章级切片 (Client-side Passage-Aware Chunking)** 🚀：
-    - **彻底根治 `413 Request Entity Too Large`**：解除 Express 默认 100KB 限制升级至 100MB，并彻底摒弃了前端将几万甚至十几万字符整份文件一次性丢过去的落后做法。
-    - **客户端篇章级轻量切分**：前端秒级提取卷面元数据，并将长篇英语阅读（Text 1~4、完形填空、新题型）或超长数学试卷切分成若干轻量任务块（每批仅 3~5 题）。
-    - **分批渐进式流式解析**：前端以极轻的单次 Payload（仅几 KB）向后端 `/api/model/parse-chunk` 发送切片，右侧 KaTeX 高保真预览区**实时按篇章流式浮现题目**，并带有高精度分批进度指示条。
-    - **彻底消除大模型 Token 截断溢出**：大模型每次仅需处理和输出几百字对应题目，彻底杜绝单次生成超出 4096 tokens 被截断或报错的痛点。
-  - **全模式总分与时长自由调节**：无论是自由生成、Markdown 转卷还是真题克隆，用户均可自由编辑试卷标题、设定总分（步进器/直接输入/自动累计求和）与建议测试时限。
-  - **单题内容编辑与单题 AI 辅助微调**：
-    - **✏️ 手动编辑本题**：支持就地修改分值、题型、题干、选项列表、标准答案与分步解析。
-    - **✨ 单题 AI 辅助微调**：内置「规范 LaTeX」、「同考点变式题」、「扩充分步解析踩分点」、「调节难度」及自定义自然语言修改指令，单题定向调用大模型智能重构。
-  - **本地 Markdown 题稿一键导入**：支持直接拖拽或导入本地 `.md`、`.txt` 文件，大模型自动分批解析。
-  - **支持「保存试卷到试卷库」与「即时开考」双通道** 🆕：
-    - **📦 保存试卷到试卷库**：组卷、克隆或编辑完成后，无需强制立即进入考场，一键持久化保存至试卷库进行归档、收藏与管理；
-    - **🚀 确认此试卷并进入全真考场**：直接以最新编辑后的分值与题集开启全功能在线实战测试！
-
-### 2. 底层大模型核心 `model_core` 深度集成
-- **全厂商与多协议统一调度**：
-  - **云端官方直连 (Official)**：支持 Google Gemini（通过 `@google/genai`）、OpenAI、Anthropic Claude。
-  - **协议网关与自部署 (Protocol)**：支持 OpenAI Compatible 协议，兼容 **DeepSeek**、**通义千问**、**智谱 GLM**、**OneAPI**、本地 **Ollama** / **vLLM**。
-- **直观的 API Key 配置中心**：
-  - 在「系统设置」中提供可视化配置面板，支持 API 密钥安全掩码存储、一键预设套用、思考预算（Thinking Budget）与发散度（Temperature）调节。
-  - 提供 **「测试模型连接」** 按钮，实时测试网络连通性与往返延迟（Latency）。
-  - 顶部导航栏动态感知模型连接状态（未配置时高亮提示，已接入时展示当前使用的模型名）。
-
-### 3. 专注模式在线答题考场 (Focus Mode Online Exam Room)
-- **极简顶栏状态监考**：
-  - 防作弊闭卷监考模式状态指示。
-  - 高精度实时答题倒计时（支持格式化显示）。
-  - 全局答题卡填涂进度条实时跟踪。
-  - 侧边抽屉式「便签草稿纸」随时记录演算过程。
-  - 一键全屏专注模式。
-- **题目交互展示**：
-  - 题号导航与答题卡矩阵，题型切换与答题状态联动。
-  - 支持 LaTeX 高等数学公式排版渲染与考纲分类标签。
-- **双模态作答交付（互斥二选一）**：
-  - **模式 A · 拍照扫码识图录入**：手机端微信/浏览器扫码拍照草稿纸极速回传，或本地图片拖拽上传。
-  - **模式 B · AI 规范代笔排版 (model_core 驱动)**：考生自拟速记推导草稿，点击「⚡ 调用 model_core 规范转录」，AI 实时规整转录为 LaTeX 标准数学分步卷面，并自动核对分步赋分标签（+3分、+3分、+4分步骤预估自核）。
-- **智能评测与报告结算**：交卷后自动计算得分、正确率与典型错因，一键将失分题目沉淀到错题本。
-
-### 4. 我的题集与错题本复盘 (Mistake Notebook & Question Bank)
-- **题库分类体系**：全部题目、错题本重点复盘、高频收藏、AI 举一反三推荐、草稿与手写收录。
-- **自定义题集文件夹**：支持分类管理（如《高等数学期末易错集》、《考研数学核心压轴》等），支持一键新建文件夹。
-- **错因深度解剖**：
-  - 典型错因自核（长除法符号分配律错误、等价无穷小滥用导致逻辑谬误等）。
-  - 考生错解与标准答案双栏同构比对。
-  - AI 阅卷名师深度归因解析与针对性提分建议。
-  - **AI 举一反三变式题**：调用 `model_core` 根据真实错题实时生成同考点不同数字/换元形式的变式练习。
-  - 一键「导出 PDF (含解析)」与「智能组卷并开考」。
-
-### 5. 全真 AI 智能判卷与结果全景复盘报告 (ExamResultReportView) 🆕
-- **客观题/主观题全自动判分**：
-  - 交卷瞬间启动多模态判题模型，单选、多选、填空题自动进行标准化去噪比对核验，主观解答与证明题依据关键演算步骤估算得分。
-  - **顶部全景考情仪表盘**：
-    - 精确显示卷面得分、试卷满分、全卷正确率、答题耗时、预估击败全国同考考生百分比。
-    - 做对题目数、错题待攻坚数、未作答数一览无余。
-  - **AI 命题组名师·深度诊断评语**：
-    - 针对全卷完成度给出严谨专业、富有针对性的名师寄语。
-    - **攻防透视标签**：自动提炼考生本次作答的「优势考点与解题长板」及「典型失分点与薄弱环节」。
-    - **提分突破口指南**：给出后续具体提分行动与同构变式复练建议。
-  - **试题答题卡矩阵快览 (Mini-Map)**：
-    - 题号迷你方块按对错实时着色（翡翠绿代表正确、珊瑚红代表错误、浅灰代表未答），支持点击瞬间平滑滚动定位高亮对应题目。
-  - **原位比对与试题对比卡片**：
-    - 题目状态清晰标明：`✅ 回答正确 (+X分)` 或 `❌ 回答错误 (0/X分)`。
-    - **选择题原位高亮比对**：选项卡片直接高亮展示标准答案（绿色）与考生错选（红色）。
-    - **考生作答 vs 标准答案双栏并列**：清晰对比考场实操与官方标准结果。
-    - **折叠式官方完整解析与 AI 错因归因**：一键展开/收起官方分步推导演算与 AI 名师考点点拨。
-    - 药丸过滤器支持：`全部试题` / `仅看错题` / `仅看对题` / `未作答` 一键筛选。
-
-### 6. 试卷库多次作答历史可追溯回看 (History Submissions Traceability) 🆕
-- **多次提交版本完整归档**：
-  - 无论是首次模考、二刷冲刺还是专项重测，系统自动在本地持久化归档同一试卷的多次提交记录。
-  - 试卷库卡片实时显示「已作答 X 次 | 最高得分 Y 分」，并提供「回看历次记录」快捷入口。
-- **作答历史回溯中心弹窗**：
-  - 按时间倒序展示历次作答时间轴（提交时间、答题用时、得分、正确率、做对/做错题数、名师总评摘录）。
-  - 点击任意一次记录的 **「👁 查看该次 AI 判卷复盘」** 按钮，即可瞬间以该次快照重新打开完整报告页进行复盘！
-  - 试卷卡片底部提供 **「AI 判卷复盘 (最新得分)」** 按钮，一键直达最近一次答卷复盘。
-
-### 7. 结果自由组合「对题 + 错题」沉淀转题集 (Flexible Question Archiving) 🆕
-- **打破传统错题本局限**：
-  - 在复盘报告页点击「📥 结果转题集 (自由组合)」或题目卡片上的快捷收录按钮。
-  - **极速预设勾选**：
-    - `[一键勾选所有错题]`：快速攻坚失分项。
-    - `[一键勾选所有做对题]`：将考场上做对的经典题、巧妙构思好题予以沉淀。
-    - `[全卷全选]` 与 `[清空已选]`。
-  - **逐题自由复选列表**：
-    - 列表中列出全卷所有试题（题号、题型、✅做对 / ❌做错标牌、题干摘要），考生可按需勾选任意对题与错题的组合。
-  - **目标题集自由选择**：
-    - 支持「存入已有题集」（如《高等数学期末易错集》、《考研数学核心压轴》）；
-    - 支持「新建专项题集」（如预填《2026考研英语二 · 典题与错题精选》）。
-  - **一键归档与持久化**：
-    - 数据自动同步至错题本系统（`examcraft_notebook_data`），在错题本中对做对的题目赋予「✅ 典题收录」标识与采分点说明，对错题赋予「❌ 错题攻坚」标识，支持在题集库中随时重练或举一反三生成变式题！
-
-### 8. 全站 KaTeX 数学矢量公式排版 (Math & Formula Rendering)
-- **全场景数学排版支持**：
-  - 在 **Markdown 组卷大厅**、**在线考场答题界面**、**AI 规范代笔区域**、**判卷复盘报告页**、**错题本复盘与变式题** 全面集成 KaTeX 数学渲染引擎。
-  - **行内与块级公式**：完美渲染 `$f'(x)$`、`\lim_{x \to 0}`、`\int_0^1`、希腊字母 `\boldsymbol{\alpha}` 等。
-  - **高级矩阵与线性代数**：支持 `\begin{pmatrix}`、`\begin{bmatrix}`、`\begin{vmatrix}`、行变换相似符号 `\sim` 等高等数学与考研真题矩阵。
-  - **解析折叠与深度精讲**：支持 `**答案: **`、`**解析**` 原位分离，支持折叠/展开分步推导，支持 `::: info` 高亮重点讲解卡片。
-
+<p align="center">
+  <b>English</b> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
 
 ---
 
-## 🛠 技术栈与架构设计
-
-| 层次 | 技术选型 | 说明 |
-| :--- | :--- | :--- |
-| **模型调度核心** | `@civilization/model-core` | 统一抽象、两进两出双向翻译、指数退避重试、支持 Gemini/OpenAI/Claude/DeepSeek 等 |
-| **前端框架** | React 18 + Vite 5 | 极致响应速度、组件化与热更新开发体验 |
-| **数学公式渲染** | KaTeX 0.16 + MathMarkdown | 纯前端毫秒级高质量矢量数学公式渲染，支持矩阵、微积分、分步解析 |
-| **样式与设计系统** | Tailwind CSS 3 | 严格对齐 Stitch 设计系统（Geist、JetBrains Mono、Material Symbols） |
-| **后端运行环境** | Node.js + Express | 具备独立 API 接口与静态资源生产服务能力 |
-| **设计源稿** | Google Stitch (Project 4688949870103698689) | 包含 4 大核心界面的 HTML 与视觉规范 |
+> **ExamCraft AI Workbench** is a modern, full-lifecycle Web AI platform for multimodal exam paper authoring, real-time Markdown conversion, interactive focus exam testing, anti-cheating scratchpad derivation, and diagnostic grade analytics.
+>
+> Built with **React 18 + Vite 5 + Tailwind CSS + Node.js Express**, it delivers an immersive, high-fidelity experience for students, educators, and assessment creators.
 
 ---
 
-## 🚀 快速启动指南
+## 🌟 Key Features
 
-### 1. 环境准备
-确保电脑已安装 Node.js（推荐 v18+ 或 v22+）与 pnpm / npm。
+### 1. Triple-Engine Exam Paper Generator
+- **Engine 1 · 1:1 Precision Exam Cloning (PDF / Docx / TeX / Markdown)**
+  - Direct drag-and-drop of past university exams or standardized tests.
+  - Multimodal vision AI extracts structure, formulas, scoring rubrics, and answer keys with up to 99.8% fidelity.
+- **Engine 2 · Parameterized Custom Assembly (Blueprint)**
+  - Configure total scores (50–150), test duration, question distribution, and difficulty gradients (Foundational / Advanced / Master).
+  - One-click synthesis of bespoke exam papers ready for immediate testing.
+- **Engine 3 · Real-Time Markdown-to-Exam (Split-Screen & Progressive Streaming)**
+  - **Client-Side Passage-Aware Chunking**: Solves HTTP 413 `Payload Too Large` and LLM token truncation overflows by breaking long English reading comprehensions or calculus exams into lightweight 3–5 question batches.
+  - **Live Streaming KaTeX Preview**: Progressive cards materialize in real time with high-precision batch indicators.
+  - **In-Place Question Editing & AI Reconstruction**: Local fine-tuning of points, question types, or invoking AI commands like "Standardize LaTeX", "Generate Isomorphic Variations", or "Expand Step Rubrics".
 
-### 2. 安装依赖
-```powershell
-pnpm install
+### 2. Interactive Anti-Cheating Scratchpad Workbench 🆕
+- **Dual-Zone Physical Isolation**:
+  - **Zone 1 (Left) · Drawing & Plots**: Hand-drawn geometry, Cartesian axes, function curves ($y = x^2$, $\sin x$), circles with radius $r$.
+  - **Zone 2 (Right) · Math Formulas & Scribe**: Structured step derivations and board scribe, completely eliminating visual overlap.
+- **Free Window Dragging & Viewport Boundary Guard**:
+  - Drag the modal anywhere on screen by grabbing the top header or drag handle.
+  - Double-click to toggle fullscreen maximization / restore.
+  - One-click **Reset Position** button to return smoothly to the bottom-right dock.
+- **Stepless See-Through Opacity (30% – 100%)**:
+  - Frosted glass translucent backdrop allows students to see through the scratchpad directly to the underlying exam question text and figures for seamless overlay derivation.
+  - Quick-preset cycling (`100%` $\to$ `75%` $\to$ `50%`) with persistent local storage of user preferences.
+- **Strict Anti-Cheating Guardrail**:
+  - Quick-input formula chips are 100% restricted to formulas and parameters explicitly printed in the question text.
+  - Prohibits external theorem leaks, unsolicited Taylor expansions, or equivalent infinitesimal shortcuts.
+- **Per-Question Persistent Storage**:
+  - Every problem possesses its own independent Canvas ink archive, automatically saved and restored when switching questions or reviewing submissions.
+
+### 3. Focus-Mode Proctored Online Exam Room
+- **Minimalist Proctored Status Header**:
+  - High-precision countdown timer with **Pause / Seal State** support (simulating tournament adjournment).
+  - Global answer sheet matrix tracking completion progress.
+- **Dual Modality Submission**:
+  - **Modality A · Photo / QR Code Upload**: Mobile camera snapshot upload for handwritten work.
+  - **Modality B · AI Mathematical Transcription**: Scribes quick shorthand drafts into publication-grade KaTeX mathematical steps with automated step score previews (+3, +3, +4 points).
+
+### 4. AI Automated Grading & Diagnostic Review Reports
+- **Instant Objective & Step-by-Step Subjective Grading**:
+  - Instant submission evaluation with total score, percentage, elapsed time, and simulated national percentile.
+  - **Teacher Insights & Defense Analysis**: Automatic extraction of candidate strengths vs. typical cognitive misconceptions.
+  - **Answer Sheet Mini-Map**: Color-coded matrix (Emerald Green = Correct, Coral Red = Incorrect, Slate = Skipped) with smooth scroll navigation.
+  - **Selective Question Archiving**: Archive chosen correct or incorrect problems directly into personal mistake notebooks with variant question generation.
+
+### 5. Universal Vector Math Typography (KaTeX)
+- Deep integration of KaTeX 0.19 across all views: matrices (`pmatrix`, `bmatrix`, `vmatrix`), limits, integrals, summations, and multiline proofs.
+
+---
+
+## 🚀 Quick Start
+
+### Option A · GitHub Packages (GHCR) Docker Container (Recommended)
+
+ExamCraft is automatically built and published to the **[GitHub Container Registry](https://github.com/users/civilization-os/packages?repo_name=ExamCraft)** via GitHub Actions:
+
+```bash
+# 1. Pull the container image from GitHub Packages
+docker pull ghcr.io/civilization-os/examcraft:latest
+
+# 2. Run the container (listening on port 3000)
+docker run -d \
+  --name examcraft \
+  -p 3000:3000 \
+  -v $(pwd)/examcraft-config.json:/app/examcraft-config.json \
+  --restart unless-stopped \
+  ghcr.io/civilization-os/examcraft:latest
+
+# 3. Open in your browser
+# Navigate to http://localhost:3000
 ```
 
-### 3. 启动本地开发服务器
-```powershell
-pnpm run dev
-```
-启动后在浏览器打开：`http://localhost:3000`
-
-### 4. 配置您的 API Key
-1. 打开网页右上角或点击导航中的 **「系统设置」**。
-2. 选择提供商：
-   - 使用 **Google Gemini**：选择官方厂商 Google Gemini，输入您的 Gemini API Key。
-   - 使用 **DeepSeek**：点击「DeepSeek 协议直连」预设，粘贴您的 DeepSeek API Key（Base URL 默认为 `https://api.deepseek.com/v1`）。
-   - 使用 **本地模型**：点击「本地 Ollama / vLLM」预设即可无 Key 运行。
-3. 点击 **「测试模型连接」** 验证通讯正常后，点击 **「保存配置生效」**。
+> **Tip**: If you do not yet have an `examcraft-config.json` locally, initialize one with the provided template:
+> `cp examcraft-config.example.json examcraft-config.json`
 
 ---
 
-## 📝 Markdown 组卷语法规范示例
+### Option B · Docker Compose
 
-用户可在组卷大厅第三入口中编写或导入如下标准考研/期末试题 Markdown 文本：
+```bash
+# Start all services in the background
+docker compose up -d
 
-```markdown
-# 《2026年全国硕士研究生入学统一考试（数学二）真题与解析》
-- 建议时限: 180分钟
-- 设定总分: 150分
-
-## 一、选择题：1～10小题，每小题5分，共50分。
-
-### 1
-当 $x \to 0$ 时，若 $ax^2 + bx + \arcsin x$ 与 $\sqrt[3]{1+x^2} - 1$ 是等价无穷小，则
-(A) $a=1, b=0$
-(B) $a=\frac{1}{3}, b=-1$
-(C) $a=-\frac{1}{3}, b=1$
-(D) $a=0, b=1$
-
-**答案: ** B
-
-**解析**
-当 $x \to 0$ 时，
-$$
-\sqrt[3]{1+x^2} - 1 \sim \frac{1}{3} x^2, \qquad \arcsin x = x + o(x^2).
-$$
-故选 **B**。
-
-::: info :bulb:深度讲解
-等价无穷小代换的核心是高阶展开阶数保持一致。
-:::
-
-## 二、解答证明题
-
-### 17
-求矩阵 $\boldsymbol{H}$ 使得 $\boldsymbol{A} = \boldsymbol{G} \boldsymbol{H}$。
-$$
-\boldsymbol{A} = \begin{pmatrix} 1 & 0 & 0 \\ 0 & -1 & -1 \\ -1 & 0 & 1 \end{pmatrix}
-$$
-```
-
----
-
-## 🐳 Docker 容器化与生产环境部署指导
-
-ExamCraft 提供了多阶段极致轻量的标准 Docker 容器化镜像，打包了前端 Vite 生产构建资源与 Node.js Express 后端服务，并且自包含 `@civilization/model-core` 模型调度引擎，支持零外部依赖、开箱即用。
-
-### 1. Docker Compose 一键启动（推荐）
-
-项目根目录已预置 `docker-compose.yml` 编排文件，支持一键拉起与持久化挂载配置。
-
-在 Windows PowerShell 或终端中执行：
-
-```powershell
-# 1. 一键构建并后台启动容器
-docker compose up -d --build
-
-# 2. 查看容器运行状态与健康检查
-docker compose ps
-
-# 3. 实时跟踪查看容器日志
+# View logs
 docker compose logs -f
 
-# 4. 停止并释放容器
+# Stop services
 docker compose down
 ```
 
-启动完成后，打开浏览器访问 **`http://localhost:3000`** 即可立即使用。
-
-> [!TIP]
-> **配置持久化与热更新**：
-> `docker-compose.yml` 默认将 `./examcraft-config.json` 挂载至容器内部 `/app/examcraft-config.json`。在网页界面的「系统设置」中修改任何 API Key 或模型参数，均会直接持久化写入宿主机文件，重启容器配置不丢失！
-
 ---
 
-### 2. Docker 命令行独立构建与运行
+### Option C · Local Development
 
-如果您不使用 Compose，可以直接通过原生 Docker 命令进行镜像构建与启动。
+Prerequisites: **Node.js 20+** and **pnpm**
 
-#### 步骤一：构建 Docker 镜像
-```powershell
-docker build -t examcraft:latest .
-```
+```bash
+# 1. Clone the repository
+git clone https://github.com/civilization-os/ExamCraft.git
+cd ExamCraft
 
-#### 步骤二：启动容器
-
-**方式 A：通过环境变量直接注入模型 API Key**
-```powershell
-docker run -d \
-  -p 3000:3000 \
-  --name examcraft-workbench \
-  --restart unless-stopped \
-  -e MODEL_API_KEY="sk-your-deepseek-api-key" \
-  -e MODEL_NAME="deepseek-chat" \
-  -e MODEL_BASE_URL="https://api.deepseek.com/v1" \
-  examcraft:latest
-```
-
-**方式 B：通过宿主机配置文件挂载运行**
-```powershell
-# 在 Windows PowerShell 中：
-docker run -d `
-  -p 3000:3000 `
-  --name examcraft-workbench `
-  --restart unless-stopped `
-  -v ${PWD}/examcraft-config.json:/app/examcraft-config.json `
-  examcraft:latest
-```
-
----
-
-### 3. Node.js 原生生产部署（支持 PM2 进程守护）
-
-如需直接在 Windows / Linux 服务器上裸机部署：
-
-```powershell
-# 1. 确保已安装项目生产依赖
+# 2. Install dependencies
 pnpm install
 
-# 2. 编译打包前端 Vite 静态产物到 dist 目录
+# 3. Create your configuration from the template (optional)
+cp examcraft-config.example.json examcraft-config.json
+
+# 4. Start the local dev server (with Hot Module Replacement)
+pnpm run dev
+# The workbench is now running at http://localhost:3000
+
+# 5. Production build and launch
 pnpm run build
-
-# 3. 方式一：直接以生产模式启动 Express 服务
 pnpm run start
-# 或直接执行：node server.js
-```
-
-#### 使用 PM2 进行生产级后台保活与常驻：
-```powershell
-# 全局安装 PM2
-npm install -g pm2
-
-# 启动并命名应用
-pm2 start server.js --name "examcraft-workbench"
-
-# 设置开机自启并保存状态
-pm2 save
 ```
 
 ---
 
-### 4. 环境变量与模型接入参数全览表
+## ⚙️ Model Providers & Security Safeguards
 
-容器与 Node.js 生产环境均全面支持通过环境变量灵活覆盖系统设置，便于云原生与 CI/CD 自动化集成：
+ExamCraft allows switching LLM providers directly in the **Settings** view:
 
-| 环境变量名 | 说明 | 示例 / 默认值 |
+| Provider | Supported Models | Configuration |
 | :--- | :--- | :--- |
-| `PORT` | Web 服务与 API 监听端口 | `3000` |
-| `NODE_ENV` | 运行环境模式 | `production` |
-| `MODEL_API_KEY` | 大模型 API 密钥（通用） | `sk-xxxxxx` |
-| `OPENAI_API_KEY` | OpenAI 密钥（若未提供通用 Key 则自动 Fallback） | `sk-xxxxxx` |
-| `DEEPSEEK_API_KEY`| DeepSeek 专用密钥 | `sk-xxxxxx` |
-| `GEMINI_API_KEY` | Google Gemini 官方 API Key | `AIzaSyxxxxxx` |
-| `MODEL_NAME` | 默认调用的模型代号 | `deepseek-chat` / `gemini-2.5-flash` / `gpt-4o` |
-| `MODEL_BASE_URL` | 模型接口基地址（适用 OpenAI 兼容网关） | `https://api.deepseek.com/v1` |
-| `MODEL_CATEGORY` | 模型类别（官方直连 / 兼容协议） | `protocol` 或 `official` |
-| `MODEL_PROTOCOL` | 协议类型 | `openai-compatible` |
+| **DeepSeek Official** | DeepSeek-V3 / DeepSeek-R1 / DeepSeek-Flash | Enter `apiKey`, default endpoint `https://api.deepseek.com` |
+| **Google Gemini** | Gemini 2.5 Pro / Flash | Enter Google AI Studio API Key |
+| **OpenAI-Compatible** | Qwen / GLM / OneAPI / Ollama / vLLM | Custom `baseURL`, `modelName`, and `apiKey` |
+
+### 🔒 Security & Credential Isolation
+- **Physical Git Untracking**: `examcraft-config.json` and usage statistics are strictly ignored by `.gitignore` and `.dockerignore`. Your credentials remain 100% on your local machine and are never uploaded to GitHub or baked into Docker images.
+- **Environment Variable Fallback**: Can also run in stateless cloud environments using `MODEL_API_KEY`, `DEEPSEEK_API_KEY`, or `OPENAI_API_KEY`.
 
 ---
 
-## 📄 开源许可
-MIT License.
+## 🛠️ Tech Stack
+
+- **Frontend**: React 18, Vite 5, Tailwind CSS
+- **Typography & Math**: KaTeX 0.19, Marked
+- **Backend & Middleware**: Node.js, Express, `@civilization/model-core`
+- **CI/CD & Container Registry**: GitHub Actions, GitHub Packages (GHCR), Docker, Docker Compose
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
