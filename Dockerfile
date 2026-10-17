@@ -9,7 +9,7 @@ WORKDIR /app
 RUN npm install -g pnpm
 
 # 先复制依赖配置文件与本地自包含包，利用 Docker 层缓存加速构建
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml* ./
 COPY packages/ ./packages/
 
 # 安装所有依赖（包含 devDependencies 以供构建前端）
