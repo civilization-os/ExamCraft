@@ -479,7 +479,7 @@ export default function ExamResultReportView({
             答题卡快览:
           </span>
           <div className="flex items-center gap-1.5 flex-wrap">
-            {questions.map((q) => {
+            {questions.map((q, idx) => {
               const isAns = q.userAnswer && q.userAnswer.trim().length > 0;
               let bgClass = 'bg-surface-container text-on-surface-variant';
               if (q.isCorrect) {
@@ -492,7 +492,7 @@ export default function ExamResultReportView({
 
               return (
                 <button
-                  key={q.id}
+                  key={`res_p_${q.id ?? 'item'}_${idx}`}
                   type="button"
                   onClick={() => scrollToQuestion(q.id)}
                   title={`第 ${q.num} 题 (${q.type}) - ${q.isCorrect ? '正确' : (isAns ? '错误' : '未作答')}`}
@@ -513,13 +513,13 @@ export default function ExamResultReportView({
               <p className="text-body-md font-medium">当前筛选条件下暂无试题。</p>
             </div>
           ) : (
-            filteredQuestions.map((q) => {
+            filteredQuestions.map((q, idx) => {
               const isExpanded = expandedMap[q.id] ?? false;
               const isAnswered = q.userAnswer && q.userAnswer.trim().length > 0;
 
               return (
                 <article
-                  key={q.id}
+                  key={`res_card_${q.id ?? 'item'}_${idx}`}
                   id={`q-card-${q.id}`}
                   className={`bg-surface-container-lowest rounded-2xl shadow-sm border transition-all p-space-lg sm:p-space-xl flex flex-col space-y-space-md ${
                     q.isCorrect
@@ -886,11 +886,11 @@ export default function ExamResultReportView({
 
             {/* Scrollable Questions Checkbox List */}
             <div className="flex-1 overflow-y-auto min-h-[220px] max-h-[300px] border border-outline-variant/30 rounded-xl p-space-sm space-y-1.5 bg-surface-container-low/30">
-              {questions.map((q) => {
+              {questions.map((q, idx) => {
                 const isSelected = selectedQIds.includes(q.id);
                 return (
                   <div
-                    key={q.id}
+                    key={`modal_q_${q.id ?? 'item'}_${idx}`}
                     onClick={() => toggleSelectQuestion(q.id)}
                     className={`flex items-center space-x-3 p-2 rounded-lg transition-colors cursor-pointer border ${
                       isSelected

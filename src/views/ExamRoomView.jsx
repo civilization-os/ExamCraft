@@ -706,7 +706,7 @@ export default function ExamRoomView({
               const isGroupEnd = (idx + 1) % 5 === 0 && idx !== questionList.length - 1;
               return (
                 <button
-                  key={q.id}
+                  key={`q_pill_${q.id ?? 'item'}_${idx}`}
                   type="button"
                   onClick={() => setCurrentQIndex(idx)}
                   className={`w-8 h-8 min-w-[32px] rounded-lg text-[12px] font-mono transition-all duration-150 flex items-center justify-center cursor-pointer select-none ${
@@ -829,11 +829,11 @@ export default function ExamRoomView({
           <section className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 space-y-space-md">
             <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">单选题候选项选择：</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
-              {currentQ.options.map((opt) => {
+              {currentQ.options.map((opt, optIdx) => {
                 const isSelected = currentQ.userAnswer === opt.key;
                 return (
                   <button
-                    key={opt.key}
+                    key={`opt_${opt.key || 'k'}_${optIdx}`}
                     type="button"
                     onClick={() => handleUpdateAnswer(opt.key)}
                     className={`flex items-center gap-space-md p-space-md rounded-xl border text-left transition-all cursor-pointer ${
