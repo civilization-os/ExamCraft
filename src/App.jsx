@@ -7,6 +7,20 @@ import ExamRoomView from './views/ExamRoomView';
 import ExamResultReportView from './views/ExamResultReportView';
 import MistakeNotebookView from './views/MistakeNotebookView';
 import SettingsView from './views/SettingsView';
+import AuthModal from './components/AuthModal';
+import {
+  getToken,
+  clearToken,
+  getStoredUser,
+  apiGetCurrentUser,
+  apiSyncUserData,
+  apiSavePaper,
+  apiDeletePaper,
+  apiSaveSubmission,
+  apiSaveNotebook,
+  apiSaveSubjects,
+  apiMigrateLocalData
+} from './utils/auth';
 import { deduplicateQuestions } from './utils/questionTypes';
 import { inferPaperSubject } from './utils/paperSubject';
 
@@ -78,6 +92,12 @@ purgeLegacyMockData();
 
 export default function App() {
   const [currentPath, setCurrentPathState] = useState(getPathFromLocation);
+  const [currentUser, setCurrentUser] = useState(getStoredUser);
+  const [isGuestMode, setIsGuestMode] = useState(() => localStorage.getItem('examcraft_guest_mode') === 'true');
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => !getStoredUser() && !localStorage.getItem('examcraft_guest_mode'));
+  const [migrationNotice, setMigrationNotice] = useState(null);
+  const [isMigrating, setIsMigrating] = useState(false);
+
   const [papers, setPapers] = useState(() => {
     try {
       const raw = localStorage.getItem('examcraft_papers');
@@ -111,6 +131,83 @@ export default function App() {
   });
   const [questions, setQuestions] = useState(() => (activePaper?.questions || []));
   const [activeSubmission, setActiveSubmission] = useState(() => readStoredObject('examcraft_active_submission'));
+
+  // Initialize session and sync cloud data on load
+  useEffect(() => {
+    let isMounted = true;
+    const initSession = async () => {
+      const token = getToken();
+      if (!token) return;
+      try {
+        const user = await apiGetCurrentUser();
+        if (!isMounted) return;
+        if (user) {
+          setCurrentUser(user);
+          const cloudData = await apiSyncUserData();
+          if (!isMounted) return;
+          if (cloudData && Array.isArray(cloudData.papers)) {
+            const cleanPapers = cloudData.papers.map((p) => {
+              const clean = Array.isArray(p.questions) ? deduplicateQuestions(p.questions, p.title) : [];
+              return {
+                ...p,
+                subject: p.subject || inferPaperSubject(p),
+                questions: clean,
+                questionCount: clean.length
+              };
+            });
+            setPapers(cleanPapers);
+            localStorage.setItem('examcraft_papers', JSON.stringify(cleanPapers));
+            if (Array.isArray(cloudData.submissions)) {
+              localStorage.setItem('examcraft_submissions', JSON.stringify(cloudData.submissions));
+            }
+            if (cloudData.notebook) {
+              localStorage.setItem('examcraft_notebook_data', JSON.stringify(cloudData.notebook));
+            }
+            if (Array.isArray(cloudData.subjects)) {
+              localStorage.setItem('examcraft_custom_subjects', JSON.stringify(cloudData.subjects));
+            }
+
+            // Check if there are local unmigrated papers from guest sessions
+            const serverPaperIds = new Set(cleanPapers.map((p) => p.id));
+            const rawBackup = localStorage.getItem('examcraft_local_backup_papers');
+            if (rawBackup) {
+              const localBackup = JSON.parse(rawBackup);
+              const unmigrated = (Array.isArray(localBackup) ? localBackup : []).filter((p) => !serverPaperIds.has(p.id));
+              if (unmigrated.length > 0) {
+                setMigrationNotice({ count: unmigrated.length });
+              }
+            }
+          }
+        } else {
+          setCurrentUser(null);
+        }
+      } catch (err) {
+        console.warn('[App] Session init warning:', err);
+      }
+    };
+
+    initSession();
+
+    // Listen for external updates (e.g. from notebook view or subject classification)
+    const onNotebookUpdated = (e) => {
+      if (currentUser && e.detail) {
+        apiSaveNotebook(e.detail).catch(() => {});
+      }
+    };
+    const onSubjectsUpdated = (e) => {
+      if (currentUser && e.detail) {
+        apiSaveSubjects(e.detail).catch(() => {});
+      }
+    };
+    window.addEventListener('examcraft-notebook-updated', onNotebookUpdated);
+    window.addEventListener('examcraft-subjects-updated', onSubjectsUpdated);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('examcraft-notebook-updated', onNotebookUpdated);
+      window.removeEventListener('examcraft-subjects-updated', onSubjectsUpdated);
+    };
+  }, [currentUser?.id]);
 
   const setCurrentPath = useCallback((path) => {
     const nextPath = APP_PATHS.has(path) ? path : 'exam-generator';
@@ -156,6 +253,101 @@ export default function App() {
     } catch {}
   }, [activeSubmission]);
 
+  const handleAuthSuccess = async (user) => {
+    setCurrentUser(user);
+    setIsAuthModalOpen(false);
+    setIsGuestMode(false);
+    localStorage.removeItem('examcraft_guest_mode');
+
+    try {
+      const cloudData = await apiSyncUserData();
+      const cleanPapers = (Array.isArray(cloudData.papers) ? cloudData.papers : []).map((p) => {
+        const clean = Array.isArray(p.questions) ? deduplicateQuestions(p.questions, p.title) : [];
+        return {
+          ...p,
+          subject: p.subject || inferPaperSubject(p),
+          questions: clean,
+          questionCount: clean.length
+        };
+      });
+      setPapers(cleanPapers);
+      localStorage.setItem('examcraft_papers', JSON.stringify(cleanPapers));
+      if (Array.isArray(cloudData.submissions)) {
+        localStorage.setItem('examcraft_submissions', JSON.stringify(cloudData.submissions));
+      }
+      if (cloudData.notebook) {
+        localStorage.setItem('examcraft_notebook_data', JSON.stringify(cloudData.notebook));
+      }
+      if (Array.isArray(cloudData.subjects)) {
+        localStorage.setItem('examcraft_custom_subjects', JSON.stringify(cloudData.subjects));
+      }
+
+      // Check for local backup papers to offer migration
+      const serverPaperIds = new Set(cleanPapers.map((p) => p.id));
+      const rawBackup = localStorage.getItem('examcraft_local_backup_papers') || localStorage.getItem('examcraft_papers');
+      if (rawBackup) {
+        const localBackup = JSON.parse(rawBackup);
+        const unmigrated = (Array.isArray(localBackup) ? localBackup : []).filter((p) => !serverPaperIds.has(p.id));
+        if (unmigrated.length > 0) {
+          setMigrationNotice({ count: unmigrated.length });
+        }
+      }
+    } catch (err) {
+      console.warn('Sync after auth failed:', err);
+    }
+  };
+
+  const handleGuestMode = () => {
+    setIsGuestMode(true);
+    localStorage.setItem('examcraft_guest_mode', 'true');
+    setIsAuthModalOpen(false);
+  };
+
+  const handleLogout = () => {
+    clearToken();
+    setCurrentUser(null);
+    setIsGuestMode(false);
+    localStorage.removeItem('examcraft_guest_mode');
+    setIsAuthModalOpen(true);
+  };
+
+  const handleMigrateLocal = async () => {
+    if (!currentUser) return;
+    setIsMigrating(true);
+    try {
+      const localPapers = JSON.parse(localStorage.getItem('examcraft_papers') || '[]');
+      const localSubs = JSON.parse(localStorage.getItem('examcraft_submissions') || '[]');
+      const localNotebook = JSON.parse(localStorage.getItem('examcraft_notebook_data') || '{"items":[]}');
+      const localSubjects = JSON.parse(localStorage.getItem('examcraft_custom_subjects') || '[]');
+
+      await apiMigrateLocalData({
+        papers: localPapers,
+        submissions: localSubs,
+        notebook: localNotebook,
+        subjects: localSubjects
+      });
+
+      localStorage.removeItem('examcraft_local_backup_papers');
+      setMigrationNotice(null);
+
+      const refreshed = await apiSyncUserData();
+      if (refreshed && Array.isArray(refreshed.papers)) {
+        const clean = refreshed.papers.map((p) => ({
+          ...p,
+          subject: p.subject || inferPaperSubject(p),
+          questions: deduplicateQuestions(p.questions || [], p.title),
+          questionCount: (p.questions || []).length
+        }));
+        setPapers(clean);
+        localStorage.setItem('examcraft_papers', JSON.stringify(clean));
+      }
+    } catch (err) {
+      alert(`数据迁移失败: ${err.message || '请重试'}`);
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
   const handleSavePaper = (paper, navigateToLibrary = false) => {
     if (!paper) return;
     const cleanQuestions = Array.isArray(paper.questions)
@@ -178,9 +370,17 @@ export default function App() {
       }
       try {
         localStorage.setItem('examcraft_papers', JSON.stringify(next));
+        if (!currentUser) {
+          localStorage.setItem('examcraft_local_backup_papers', JSON.stringify(next));
+        }
       } catch {}
       return next;
     });
+
+    if (currentUser) {
+      apiSavePaper(normalizedPaper).catch((err) => console.warn('Cloud save error:', err));
+    }
+
     if (navigateToLibrary) {
       setCurrentPath('paper-library');
     }
@@ -203,6 +403,10 @@ export default function App() {
         });
       });
     } catch {}
+
+    if (currentUser) {
+      apiDeletePaper(paper.id).catch((err) => console.warn('Cloud delete error:', err));
+    }
 
     const isLinkedSubmission = (submission) =>
       submission.paperId === paper.id || (!submission.paperId && submission.paperTitle === paper.title);
@@ -246,6 +450,9 @@ export default function App() {
 
   const handleSubmitExam = (submission) => {
     setActiveSubmission(submission);
+    if (currentUser && submission) {
+      apiSaveSubmission(submission).catch((err) => console.warn('Cloud submission sync failed:', err));
+    }
     setCurrentPath('exam-result');
   };
 
@@ -312,11 +519,46 @@ export default function App() {
           currentPath={currentPath}
           setCurrentPath={setCurrentPath}
           onOpenExam={() => handleStartExam(papers[0])}
+          currentUser={currentUser}
+          onOpenAuth={() => setIsAuthModalOpen(true)}
+          onLogout={handleLogout}
+          onTriggerMigrate={handleMigrateLocal}
         />
       )}
 
+      {/* Cloud Migration Notification Banner */}
+      {!isFullScreenMode && migrationNotice && (
+        <div className="bg-primary-container/20 border-b border-primary/20 px-4 py-2.5 text-xs flex items-center justify-between text-on-surface mt-14 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-primary">cloud_upload</span>
+            <span>
+              检测到本地浏览器有 <strong>{migrationNotice.count}</strong> 套离线试卷尚未同步到云端账号。
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isMigrating}
+              onClick={handleMigrateLocal}
+              className="px-3 py-1 rounded-lg bg-primary text-on-primary font-semibold hover:bg-primary-hover transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1 shadow-xs"
+            >
+              {isMigrating && <span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>}
+              <span>{isMigrating ? '正在同步...' : '立即同步到云端'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMigrationNotice(null)}
+              className="text-on-surface-variant hover:text-on-surface p-1 rounded hover:bg-surface-container transition-colors cursor-pointer"
+              title="稍后提醒"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Container */}
-      <main className={`flex-1 flex flex-col ${!isFullScreenMode ? 'pt-14 pb-16 md:pb-0' : ''}`}>
+      <main className={`flex-1 flex flex-col ${!isFullScreenMode ? (migrationNotice ? 'pb-16 md:pb-0' : 'pt-14 pb-16 md:pb-0') : ''}`}>
         {currentPath === 'dashboard' && (
           <DashboardView
             papers={papers}
@@ -398,6 +640,15 @@ export default function App() {
           })}
         </nav>
       )}
+
+      {/* Login & Register Gate Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={handleAuthSuccess}
+        onGuest={handleGuestMode}
+        allowGuest={true}
+      />
     </div>
   );
 }

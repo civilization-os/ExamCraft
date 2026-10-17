@@ -7,6 +7,8 @@ dist-ssr
 examcraft-config.json
 examcraft-model-usage.json
 examcraft-model-usage-daily.json
+data
+data/*
 .vscode/*
 !.vscode/extensions.json
 .idea

@@ -7,6 +7,8 @@ dist-ssr
 .env*
 examcraft-config.json
 examcraft-model-usage*.json
+data
+data/*
 *.key
 *.token
 .vscode

@@ -1,9 +1,18 @@
 import React, { useState, useEffect } from 'react';
 
-export default function Header({ currentPath, setCurrentPath, onOpenExam }) {
+export default function Header({
+  currentPath,
+  setCurrentPath,
+  onOpenExam,
+  currentUser = null,
+  onOpenAuth,
+  onLogout,
+  onTriggerMigrate
+}) {
   const [modelStatus, setModelStatus] = useState(null);
   const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -156,11 +165,87 @@ export default function Header({ currentPath, setCurrentPath, onOpenExam }) {
             <span className="material-symbols-outlined" aria-hidden="true">{isMobileNavOpen ? 'close' : 'menu'}</span>
           </button>
 
-          {/* User Profile Avatar */}
-          <div className="flex items-center gap-2 pl-1 border-l border-surface-container">
-            <div className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center font-label-mono text-label-md text-primary font-semibold border border-primary-fixed-dim">
-              EC
-            </div>
+          {/* User Authentication & Profile Menu */}
+          <div className="relative flex items-center gap-2 pl-2 border-l border-surface-container">
+            {currentUser ? (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsUserMenuOpen((prev) => !prev)}
+                  className="flex items-center gap-1.5 py-1 px-2 rounded-lg hover:bg-surface-container transition-all cursor-pointer group"
+                  title={`当前账号: ${currentUser.username} (${currentUser.role === 'admin' ? '管理员' : '成员'})`}
+                >
+                  <div className="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center font-bold text-xs uppercase shadow-xs group-hover:scale-105 transition-transform">
+                    {currentUser.username.slice(0, 2)}
+                  </div>
+                  <div className="hidden sm:flex flex-col text-left">
+                    <span className="text-xs font-semibold text-on-surface leading-tight flex items-center gap-1">
+                      {currentUser.username}
+                      {currentUser.role === 'admin' && (
+                        <span className="px-1 py-0.2 bg-primary/10 text-primary text-[10px] rounded font-mono">
+                          管理员
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[10px] text-secondary flex items-center gap-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                      云端同步中
+                    </span>
+                  </div>
+                  <span className="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_drop_down</span>
+                </button>
+
+                {/* Dropdown Menu */}
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-56 rounded-xl bg-surface-container-lowest border border-surface-container shadow-xl py-2 z-50 animate-fade-in">
+                    <div className="px-4 py-2 border-b border-surface-container/60">
+                      <p className="text-xs text-on-surface-variant">已登录账号</p>
+                      <p className="text-sm font-semibold text-on-surface truncate">{currentUser.username}</p>
+                      <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-container text-on-surface-variant">
+                        权限: {currentUser.role === 'admin' ? '平台管理员' : '普通用户'}
+                      </span>
+                    </div>
+
+                    <div className="py-1">
+                      {onTriggerMigrate && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            onTriggerMigrate();
+                          }}
+                          className="w-full text-left px-4 py-2 text-xs text-on-surface hover:bg-surface-container flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[16px] text-primary">cloud_upload</span>
+                          <span>同步本地离线数据到云端</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          if (onLogout) onLogout();
+                        }}
+                        className="w-full text-left px-4 py-2 text-xs text-error hover:bg-error/10 flex items-center gap-2 cursor-pointer transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">logout</span>
+                        <span>退出当前账号</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenAuth}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-on-primary hover:bg-primary-hover shadow-xs transition-all cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">login</span>
+                <span>登录 / 注册</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

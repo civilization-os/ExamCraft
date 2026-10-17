@@ -293,10 +293,12 @@ export default function ExamResultReportView({
       }
       itemsList = [...newItems, ...itemsList];
 
-      localStorage.setItem('examcraft_notebook_data', JSON.stringify({
+      const notebookPayload = {
         collections: collectionsList,
         items: itemsList
-      }));
+      };
+      localStorage.setItem('examcraft_notebook_data', JSON.stringify(notebookPayload));
+      window.dispatchEvent(new CustomEvent('examcraft-notebook-updated', { detail: notebookPayload }));
 
       const correctSelected = selectedQuestions.filter(q => q.isCorrect).length;
       const wrongSelected = selectedQuestions.filter(q => q.isCorrect === false && q.userAnswer?.trim()).length;

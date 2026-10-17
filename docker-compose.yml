@@ -22,3 +22,5 @@ services:
       # 持久化挂载配置文件（在 Web 界面中调整模型配置后可实时落盘持久化）
       # 建议启动前先准备好文件: cp examcraft-config.example.json examcraft-config.json
       - ./examcraft-config.json:/app/examcraft-config.json
+      # 持久化挂载多用户数据目录（账号密码哈希、用户私有试卷库、考试答卷记录与错题本）
+      - ./data:/app/data

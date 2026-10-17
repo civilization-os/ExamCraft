@@ -65,10 +65,9 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
   // Keep localStorage synced when collections or mistakes change
   React.useEffect(() => {
     try {
-      localStorage.setItem('examcraft_notebook_data', JSON.stringify({
-        collections,
-        items: mistakes
-      }));
+      const payload = { collections, items: mistakes };
+      localStorage.setItem('examcraft_notebook_data', JSON.stringify(payload));
+      window.dispatchEvent(new CustomEvent('examcraft-notebook-updated', { detail: payload }));
     } catch (e) {
       console.warn('Notebook sync error:', e);
     }

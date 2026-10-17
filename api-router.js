@@ -5,6 +5,22 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { createChatModel, validateModelConfig } from '@civilization/model-core';
 import { normalizeQuestionType, isPseudoPassage } from './src/utils/questionTypes.js';
+import {
+  registerUser,
+  authenticateUser,
+  findUserById,
+  changePassword,
+  getUserSyncData,
+  saveUserPaper,
+  deleteUserPaper,
+  saveUserSubmission,
+  saveUserNotebook,
+  saveUserSubjects,
+  migrateUserLocalData,
+  requireAuth,
+  verifyToken,
+  getTotalUserCount
+} from './user-storage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1125,6 +1141,204 @@ ${questionsSnippet}
   };
 }
 
+// ==========================================
+// 用户认证与账号管理接口 (Auth Endpoints)
+// ==========================================
+
+// GET /api/auth/status — 获取平台用户状态（是否已有管理员等）
+apiRouter.get('/auth/status', (req, res) => {
+  res.json({
+    success: true,
+    hasUsers: getTotalUserCount() > 0
+  });
+});
+
+// POST /api/auth/register — 注册新用户
+apiRouter.post('/auth/register', (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    const result = registerUser(username, password);
+    res.json({
+      success: true,
+      message: '注册成功',
+      token: result.token,
+      user: result.user
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '注册失败'
+    });
+  }
+});
+
+// POST /api/auth/login — 用户登录
+apiRouter.post('/auth/login', (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    const result = authenticateUser(username, password);
+    res.json({
+      success: true,
+      message: '登录成功',
+      token: result.token,
+      user: result.user
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '登录失败'
+    });
+  }
+});
+
+// GET /api/auth/me — 获取当前登录用户信息
+apiRouter.get('/auth/me', requireAuth, (req, res) => {
+  res.json({
+    success: true,
+    user: req.user
+  });
+});
+
+// POST /api/auth/change-password — 修改密码
+apiRouter.post('/auth/change-password', requireAuth, (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body || {};
+    changePassword(req.user.id, oldPassword, newPassword);
+    res.json({
+      success: true,
+      message: '密码修改成功'
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '修改密码失败'
+    });
+  }
+});
+
+// ==========================================
+// 用户加密隔离数据持久化接口 (User Data Endpoints)
+// ==========================================
+
+// GET /api/user/sync — 登录时一键同步当前用户的全量业务数据
+apiRouter.get('/user/sync', requireAuth, (req, res) => {
+  try {
+    const data = getUserSyncData(req.user.id);
+    res.json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || '数据拉取失败'
+    });
+  }
+});
+
+// POST /api/user/papers — 保存或更新个人试卷
+apiRouter.post('/user/papers', requireAuth, (req, res) => {
+  try {
+    const { paper } = req.body || {};
+    const saved = saveUserPaper(req.user.id, paper);
+    res.json({
+      success: true,
+      paper: saved
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '保存试卷失败'
+    });
+  }
+});
+
+// DELETE /api/user/papers/:id — 删除个人试卷
+apiRouter.delete('/user/papers/:id', requireAuth, (req, res) => {
+  try {
+    const { id } = req.params;
+    deleteUserPaper(req.user.id, id);
+    res.json({
+      success: true,
+      message: '试卷删除成功'
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '删除试卷失败'
+    });
+  }
+});
+
+// POST /api/user/submissions — 保存考试提交记录
+apiRouter.post('/user/submissions', requireAuth, (req, res) => {
+  try {
+    const { submission } = req.body || {};
+    const saved = saveUserSubmission(req.user.id, submission);
+    res.json({
+      success: true,
+      submission: saved
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '保存答卷记录失败'
+    });
+  }
+});
+
+// POST /api/user/notebook — 保存错题本
+apiRouter.post('/user/notebook', requireAuth, (req, res) => {
+  try {
+    const { notebook } = req.body || {};
+    const saved = saveUserNotebook(req.user.id, notebook);
+    res.json({
+      success: true,
+      notebook: saved
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '保存错题本失败'
+    });
+  }
+});
+
+// POST /api/user/subjects — 保存自定义学科分类
+apiRouter.post('/user/subjects', requireAuth, (req, res) => {
+  try {
+    const { subjects } = req.body || {};
+    const saved = saveUserSubjects(req.user.id, subjects);
+    res.json({
+      success: true,
+      subjects: saved
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '保存学科分类失败'
+    });
+  }
+});
+
+// POST /api/user/migrate-local — 首次登录将本地未登录时的 LocalStorage 数据迁移合并到云端
+apiRouter.post('/user/migrate-local', requireAuth, (req, res) => {
+  try {
+    const { papers, submissions, notebook, subjects } = req.body || {};
+    const summary = migrateUserLocalData(req.user.id, { papers, submissions, notebook, subjects });
+    res.json({
+      success: true,
+      message: '本地历史数据已成功同步到云端账号',
+      summary
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '数据迁移失败'
+    });
+  }
+});
+
 // GET /api/model/config
 apiRouter.get('/model/config', (req, res) => {
   res.json({
@@ -1186,6 +1400,19 @@ apiRouter.get('/model/usage', (req, res) => {
 // POST /api/model/config
 apiRouter.post('/model/config', (req, res) => {
   try {
+    // 平台已有注册用户时，严格保护模型密钥，仅允许管理员修改全局模型配置
+    if (getTotalUserCount() > 0) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, error: '修改全局模型配置需先登录管理员账号' });
+      }
+      const token = authHeader.slice(7).trim();
+      const decoded = verifyToken(token);
+      if (!decoded || decoded.role !== 'admin') {
+        return res.status(403).json({ success: false, error: '权限不足：仅管理员账号有权修改平台模型与 API Key' });
+      }
+    }
+
     const newConfig = req.body;
     if (newConfig.apiKey && newConfig.apiKey.includes('••••••••')) {
       newConfig.apiKey = currentConfig.apiKey;

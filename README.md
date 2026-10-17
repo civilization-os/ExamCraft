@@ -84,11 +84,12 @@ ExamCraft is automatically built and published to the **[GitHub Container Regist
 # 1. Pull the container image from GitHub Packages
 docker pull ghcr.io/civilization-os/examcraft:latest
 
-# 2. Run the container (mapping host port 3001 to container port 3000)
+# 2. Run the container (mapping host port 3001, persisting model config and encrypted user data)
 docker run -d \
   --name examcraft \
   -p 3001:3000 \
   -v $(pwd)/examcraft-config.json:/app/examcraft-config.json \
+  -v $(pwd)/data:/app/data \
   --restart unless-stopped \
   ghcr.io/civilization-os/examcraft:latest
 
@@ -96,8 +97,7 @@ docker run -d \
 # Navigate to http://localhost:3001
 ```
 
-> **Tip**: Before mounting, initialize `examcraft-config.json` with the provided template to avoid Docker mounting a new directory:
-> `cp examcraft-config.example.json examcraft-config.json`
+> **Tip**: Initialize `examcraft-config.json` before mounting (`cp examcraft-config.example.json examcraft-config.json`). The very first user to register on the platform automatically receives **Administrator** privileges.
 
 ---
 

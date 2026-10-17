@@ -26,6 +26,7 @@ export function saveCustomSubjects(subjects) {
   try {
     const clean = Array.from(new Set((subjects || []).map(s => String(s).trim()).filter(Boolean)));
     localStorage.setItem('examcraft_custom_subjects', JSON.stringify(clean));
+    window.dispatchEvent(new CustomEvent('examcraft-subjects-updated', { detail: clean }));
     return clean;
   } catch {
     return [];
