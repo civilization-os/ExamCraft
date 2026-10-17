@@ -7,7 +7,7 @@ import ExamRoomView from './views/ExamRoomView';
 import ExamResultReportView from './views/ExamResultReportView';
 import MistakeNotebookView from './views/MistakeNotebookView';
 import SettingsView from './views/SettingsView';
-import AuthModal from './components/AuthModal';
+import AuthView from './views/AuthView';
 import {
   getToken,
   clearToken,
@@ -24,11 +24,15 @@ import {
 import { deduplicateQuestions } from './utils/questionTypes';
 import { inferPaperSubject } from './utils/paperSubject';
 
-const APP_PATHS = new Set(['dashboard', 'exam-generator', 'paper-library', 'question-bank', 'settings', 'exam-room', 'exam-result']);
+const APP_PATHS = new Set(['dashboard', 'exam-generator', 'paper-library', 'question-bank', 'settings', 'exam-room', 'exam-result', 'login']);
 
 function getPathFromLocation() {
   const hashPath = window.location.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
-  return APP_PATHS.has(hashPath) ? hashPath : 'exam-generator';
+  if (APP_PATHS.has(hashPath)) return hashPath;
+  if (!getStoredUser() && localStorage.getItem('examcraft_guest_mode') !== 'true') {
+    return 'login';
+  }
+  return 'exam-generator';
 }
 
 function readStoredObject(key) {
@@ -94,7 +98,6 @@ export default function App() {
   const [currentPath, setCurrentPathState] = useState(getPathFromLocation);
   const [currentUser, setCurrentUser] = useState(getStoredUser);
   const [isGuestMode, setIsGuestMode] = useState(() => localStorage.getItem('examcraft_guest_mode') === 'true');
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => !getStoredUser() && !localStorage.getItem('examcraft_guest_mode'));
   const [migrationNotice, setMigrationNotice] = useState(null);
   const [isMigrating, setIsMigrating] = useState(false);
 
@@ -255,9 +258,9 @@ export default function App() {
 
   const handleAuthSuccess = async (user) => {
     setCurrentUser(user);
-    setIsAuthModalOpen(false);
     setIsGuestMode(false);
     localStorage.removeItem('examcraft_guest_mode');
+    setCurrentPath('dashboard');
 
     try {
       const cloudData = await apiSyncUserData();
@@ -300,7 +303,7 @@ export default function App() {
   const handleGuestMode = () => {
     setIsGuestMode(true);
     localStorage.setItem('examcraft_guest_mode', 'true');
-    setIsAuthModalOpen(false);
+    setCurrentPath('dashboard');
   };
 
   const handleLogout = () => {
@@ -308,7 +311,7 @@ export default function App() {
     setCurrentUser(null);
     setIsGuestMode(false);
     localStorage.removeItem('examcraft_guest_mode');
-    setIsAuthModalOpen(true);
+    setCurrentPath('login');
   };
 
   const handleMigrateLocal = async () => {
@@ -509,18 +512,18 @@ export default function App() {
     setCurrentPath('exam-room');
   };
 
-  const isFullScreenMode = currentPath === 'exam-room' || currentPath === 'exam-result';
+  const isFullScreenMode = currentPath === 'exam-room' || currentPath === 'exam-result' || currentPath === 'login';
 
   return (
     <div className="min-h-screen bg-background text-on-surface flex flex-col font-sans selection:bg-primary-fixed selection:text-primary">
-      {/* Top Header - hidden during full focus exam room or result review mode */}
+      {/* Top Header - hidden during full focus exam room, result review, or login page */}
       {!isFullScreenMode && (
         <Header
           currentPath={currentPath}
           setCurrentPath={setCurrentPath}
           onOpenExam={() => handleStartExam(papers[0])}
           currentUser={currentUser}
-          onOpenAuth={() => setIsAuthModalOpen(true)}
+          onOpenAuth={() => setCurrentPath('login')}
           onLogout={handleLogout}
           onTriggerMigrate={handleMigrateLocal}
         />
@@ -559,6 +562,15 @@ export default function App() {
 
       {/* Main Container */}
       <main className={`flex-1 flex flex-col ${!isFullScreenMode ? (migrationNotice ? 'pb-16 md:pb-0' : 'pt-14 pb-16 md:pb-0') : ''}`}>
+        {currentPath === 'login' && (
+          <AuthView
+            onSuccess={handleAuthSuccess}
+            onGuest={handleGuestMode}
+            onBack={() => setCurrentPath('dashboard')}
+            allowBack={Boolean(currentUser || isGuestMode)}
+          />
+        )}
+
         {currentPath === 'dashboard' && (
           <DashboardView
             papers={papers}
@@ -640,15 +652,6 @@ export default function App() {
           })}
         </nav>
       )}
-
-      {/* Login & Register Gate Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onSuccess={handleAuthSuccess}
-        onGuest={handleGuestMode}
-        allowGuest={true}
-      />
     </div>
   );
 }
