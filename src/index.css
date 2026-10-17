@@ -4,6 +4,16 @@
 @tailwind utilities;
 
 @layer base {
+  button:focus-visible,
+  a:focus-visible,
+  [role='button']:focus-visible {
+    @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+
+  button:disabled {
+    @apply cursor-not-allowed;
+  }
+
   .material-symbols-outlined {
     font-variation-settings:
       'FILL' 0,
@@ -52,6 +62,36 @@
 .math-markdown .katex {
   font-size: 1.05em;
   text-rendering: auto;
+}
+
+/* English reading passages use an editorial serif face and comfortable paragraph rhythm. */
+.exam-english-passage .math-markdown {
+  font-family: Georgia, Cambria, 'Times New Roman', serif;
+  font-size: 1.05rem;
+  line-height: 1.9;
+  letter-spacing: 0.012em;
+  overflow-wrap: anywhere;
+}
+
+.exam-english-passage .math-markdown strong {
+  color: #3825d8;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+/* Keep the exam formula editor focused on entering the answer itself. */
+math-field.exam-math-field::part(virtual-keyboard-toggle),
+math-field.exam-math-field::part(menu-toggle) {
+  display: none !important;
+}
+
+@keyframes exam-submit-progress-sweep {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(290%); }
+}
+
+.exam-submit-progress-sweep {
+  animation: exam-submit-progress-sweep 1.35s ease-in-out infinite;
 }
 
 /* Print Styles */

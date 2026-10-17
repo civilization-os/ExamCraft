@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { INITIAL_SUBMISSIONS } from '../data/mockData';
+import SelectMenu from '../components/SelectMenu';
 import { calculatePaperMetrics } from '../utils/paperMetrics';
+import { getQuestionTypeClass } from '../utils/questionTypes';
 
 // Dynamically compute real question and section breakdown from paper
 function getPaperStructure(paper) {
@@ -103,9 +104,24 @@ function getQuestionPreviewContent(q, idx) {
   return rawText;
 }
 
-export default function PaperLibraryView({ papers, onStartExam, onNavigate, onViewSubmission }) {
+function getPaperSubject(paper) {
+  const explicit = String(paper?.subject || paper?.subjectName || paper?.discipline || '').trim();
+  if (explicit) return explicit;
+
+  const searchable = [paper?.title, ...(Array.isArray(paper?.tags) ? paper.tags : [])]
+    .filter(Boolean)
+    .join(' ');
+  if (/408|计算机统考|计算机学科专业基础/.test(searchable)) return '408';
+  if (/英语\s*[一二12]|英\s*[一二12]|考研英语/.test(searchable)) return '英语';
+  if (/数学\s*[一二12]|数\s*[一二12]|高等数学|线性代数|概率论|考研数学/.test(searchable)) return '数学';
+  if (/政治|思想政治|马克思|毛中特|史纲|思修|考研政治/.test(searchable)) return '政治';
+  return '未分类';
+}
+
+export default function PaperLibraryView({ papers, onSavePaper, onStartExam, onDeletePaper, onNavigate, onViewSubmission }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('全部');
+  const [activeSubject, setActiveSubject] = useState('全部科目');
   const [sortBy, setSortBy] = useState('date-desc');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [paperList, setPaperList] = useState(() => (papers || []));
@@ -129,67 +145,69 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
     return [];
   });
   const [selectedHistoryPaper, setSelectedHistoryPaper] = useState(null);
+  const [submissionToDelete, setSubmissionToDelete] = useState(null);
   const [activeMenuPaperId, setActiveMenuPaperId] = useState(null);
   const [toastMessage, setToastMessage] = useState('');
+  const [paperToDelete, setPaperToDelete] = useState(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
   };
 
+  const confirmDeletePaper = () => {
+    if (!paperToDelete) return;
+    const paper = paperToDelete;
+    const belongsToPaper = (submission) =>
+      submission.paperId === paper.id || (!submission.paperId && submission.paperTitle === paper.title);
+    onDeletePaper?.(paper);
+    setPaperList((prev) => prev.filter((item) => item.id !== paper.id));
+    setSubmissions((prev) => prev.filter((submission) => !belongsToPaper(submission)));
+    setPaperToDelete(null);
+    showToast(`已删除《${paper.title}》及关联作答记录`);
+  };
+
+  const confirmDeleteSubmission = () => {
+    if (!submissionToDelete) return;
+    const target = submissionToDelete;
+    const isTarget = (item) => target.id ? item.id === target.id : item === target;
+    setSubmissions((prev) => {
+      const next = prev.filter((item) => !isTarget(item));
+      try {
+        localStorage.setItem('examcraft_submissions', JSON.stringify(next));
+      } catch (error) {
+        console.warn('Could not save deleted submission history:', error);
+      }
+      return next;
+    });
+    setSelectedHistoryPaper((current) => current ? {
+      ...current,
+      submissions: current.submissions.filter((item) => !isTarget(item)),
+    } : current);
+    setSubmissionToDelete(null);
+    showToast('已删除这条作答记录');
+  };
+
   // Modals
   const [selectedPreviewPaper, setSelectedPreviewPaper] = useState(null);
   const [selectedReportPaper, setSelectedReportPaper] = useState(null);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [noteText, setNoteText] = useState('');
 
-  // AI Import Paper State
-  const [importRawText, setImportRawText] = useState('');
-  const [importFileName, setImportFileName] = useState('');
-  const [isAiImporting, setIsAiImporting] = useState(false);
-  const [importSuccessPaper, setImportSuccessPaper] = useState(null);
-
-  const handleAiImportPaper = async () => {
-    const textToParse = importRawText.trim();
-    if (!textToParse) {
-      alert('请先输入或粘贴试卷文本，或上传本地试卷文件。');
-      return;
-    }
-
-    setIsAiImporting(true);
-    try {
-      const res = await fetch('/api/model/ai-import-paper', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rawContent: textToParse,
-          fileName: importFileName
-        })
-      });
-      const data = await res.json();
-      if (data.success && data.paper) {
-        setPaperList(prev => [data.paper, ...prev]);
-        setImportSuccessPaper(data.paper);
-      } else {
-        alert(data.error || 'AI 导入解析失败，请检查 API Key 配置。');
-      }
-    } catch (err) {
-      alert(`AI 导入异常: ${err.message}`);
-    } finally {
-      setIsAiImporting(false);
-    }
-  };
-
   // Toggle star
   const handleToggleStar = (id) => {
-    setPaperList(prev => prev.map(p => p.id === id ? { ...p, starred: !p.starred } : p));
+    const current = paperList.find((paper) => paper.id === id);
+    if (!current) return;
+    onSavePaper?.({ ...current, starred: !current.starred }, false);
+    setPaperList((prev) => prev.map((paper) => paper.id === id ? { ...paper, starred: !paper.starred } : paper));
   };
 
   // Filter & Search
   const filteredPapers = paperList.filter(p => {
-    const matchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()));
+    const tags = Array.isArray(p.tags) ? p.tags : [];
+    const matchesSearch = `${p.title || ''} ${tags.join(' ')} ${p.subject || p.subjectName || ''}`.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSubject = activeSubject === '全部科目' || getPaperSubject(p) === activeSubject;
+    if (!matchesSubject) return false;
     
     if (activeCategory === '全部') return matchesSearch;
     if (activeCategory === '已星标') return matchesSearch && p.starred;
@@ -212,9 +230,22 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
     { label: '薄弱强化', count: paperList.filter(p => p.category === '薄弱强化').length },
     { label: '已星标', count: paperList.filter(p => p.starred).length, isStar: true }
   ];
+  const subjectCounts = paperList.reduce((counts, paper) => {
+    const subject = getPaperSubject(paper);
+    counts.set(subject, (counts.get(subject) || 0) + 1);
+    return counts;
+  }, new Map());
+  const subjects = [
+    { label: '全部科目', count: paperList.length },
+    ...Array.from(subjectCounts.entries())
+      .sort(([a], [b]) => a === '未分类' ? 1 : b === '未分类' ? -1 : a.localeCompare(b, 'zh-CN'))
+      .map(([label, count]) => ({ label, count }))
+  ];
 
   const handleSaveNote = (id) => {
-    setPaperList(prev => prev.map(p => p.id === id ? { ...p, note: noteText } : p));
+    const current = paperList.find((paper) => paper.id === id);
+    if (current) onSavePaper?.({ ...current, note: noteText }, false);
+    setPaperList((prev) => prev.map((paper) => paper.id === id ? { ...paper, note: noteText } : paper));
     setEditingNoteId(null);
   };
 
@@ -235,29 +266,10 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
               试卷库 (Exam Repository)
             </h1>
             <p className="font-body-md text-body-md text-on-surface-variant leading-relaxed">
-              集中管理历年真题与智能生成的模拟卷，支持多维标注、标签体系与快速入场开考，实时同构评估模型并追踪知识点攻防表现。
+              集中管理导入与生成的试卷，支持搜索、筛选、预览、继续作答和查看交卷记录。
             </p>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-space-sm shrink-0 flex-wrap">
-            <button
-              type="button"
-              onClick={() => setIsImportModalOpen(true)}
-              className="inline-flex items-center gap-space-xs px-3 h-9 rounded bg-surface-container-lowest hover:bg-surface-container-low text-on-surface font-label-md text-label-md shadow-sm transition-all hover:shadow border border-outline-variant/40 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[17px] text-on-surface-variant">upload_file</span>
-              <span>导入新试卷 (PDF/Word)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigate('exam-generator')}
-              className="inline-flex items-center gap-space-xs px-3.5 h-9 rounded bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md shadow-sm transition-all hover:shadow active:scale-[0.99] cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">add_task</span>
-              <span>+ 智能生成新卷</span>
-            </button>
-          </div>
         </section>
 
         {/* 2. Filtering & Workbench Control Strip */}
@@ -286,15 +298,17 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
               <div className="flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded border border-outline-variant/30">
                 <span className="material-symbols-outlined text-on-surface-variant text-[16px]">swap_vert</span>
                 <span className="font-label-sm text-label-sm text-on-surface-variant">排序:</span>
-                <select
+                <SelectMenu
+                  ariaLabel="试卷排序方式"
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="bg-transparent font-label-md text-label-md text-on-surface focus:outline-none cursor-pointer pr-1"
-                >
-                  <option value="date-desc">按导入时间 (由新到旧)</option>
-                  <option value="score-desc">按总分值 (由高到低)</option>
-                  <option value="diff-desc">按试卷难度等级</option>
-                </select>
+                  onChange={setSortBy}
+                  options={[
+                    { value: 'date-desc', label: '按导入时间 (由新到旧)' },
+                    { value: 'score-desc', label: '按总分值 (由高到低)' },
+                    { value: 'diff-desc', label: '按试卷难度等级' }
+                  ]}
+                  buttonClassName="inline-flex items-center gap-1 bg-transparent px-1 py-0.5 text-left font-label-md text-label-md text-on-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded cursor-pointer"
+                />
               </div>
 
               {/* View Mode Toggles */}
@@ -345,6 +359,28 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
               })}
             </div>
           </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto border-t border-outline-variant/20 pt-2 pb-1">
+            <span className="shrink-0 font-label-sm text-label-sm text-on-surface-variant">科目</span>
+            {subjects.map((subject) => {
+              const isActive = activeSubject === subject.label;
+              return (
+                <button
+                  key={subject.label}
+                  type="button"
+                  onClick={() => setActiveSubject(subject.label)}
+                  aria-pressed={isActive}
+                  className={`shrink-0 px-3 py-1 rounded-full font-label-sm text-label-sm transition-colors cursor-pointer ${
+                    isActive
+                      ? 'bg-secondary/15 text-secondary border border-secondary/30 font-semibold'
+                      : 'bg-surface-container-low text-on-surface-variant border border-transparent hover:border-secondary/20 hover:text-secondary'
+                  }`}
+                >
+                  {subject.label} <span className="opacity-75">{subject.count}</span>
+                </button>
+              );
+            })}
+          </div>
         </section>
 
         {/* 3. Exam Card Matrix Grid */}
@@ -356,7 +392,7 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
               </div>
               <h3 className="font-headline-sm font-semibold text-on-surface mb-2">试卷库当前暂无试卷</h3>
               <p className="text-body-sm text-on-surface-variant max-w-md mb-6">
-                所有伪造 Mock 数据已彻底清空。您可通过「智能组卷」大厅快速导入真题 PDF、套用标准 Markdown 题稿或自由规格生成专属考卷。
+                前往「智能组卷」创建并保存一份新试卷。
               </p>
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <button
@@ -366,14 +402,6 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                 >
                   <span className="material-symbols-outlined text-[18px]">add_circle</span>
                   <span>前往智能组卷</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsImportModalOpen(true)}
-                  className="px-5 py-2.5 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md font-semibold flex items-center gap-2 border border-outline-variant/30 transition-all cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px]">upload_file</span>
-                  <span>AI 智能快速导入</span>
                 </button>
               </div>
             </div>
@@ -710,6 +738,18 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                               <span className="material-symbols-outlined text-[16px] text-outline">visibility</span>
                               <span>大试卷排版总览</span>
                             </button>
+                            <div className="my-1 border-t border-outline-variant/30" />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveMenuPaperId(null);
+                                setPaperToDelete(paper);
+                              }}
+                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-error-container/50 text-error transition-colors text-left cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">delete</span>
+                              <span>删除试卷</span>
+                            </button>
                           </div>
                         )}
                       </div>
@@ -810,7 +850,7 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                             {getQuestionPreviewContent(q, idx)}
                           </p>
                         </div>
-                        <span className="text-[11px] text-outline whitespace-nowrap shrink-0 font-label-mono">
+                        <span className={`text-[11px] px-1.5 py-0.5 border rounded whitespace-nowrap shrink-0 font-label-mono ${getQuestionTypeClass(q.type)}`}>
                           {q.type || '试题'} · {q.score ?? 0}分
                         </span>
                       </div>
@@ -825,7 +865,7 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
               )}
 
               <p className="text-body-sm text-outline italic">
-                备注说明：{selectedPreviewPaper.note || '本试卷已通过真实题库导入并校验，格式结构已标准化。'}
+                备注说明：{selectedPreviewPaper.note || '暂无备注。'}
               </p>
             </div>
 
@@ -864,9 +904,13 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
           ? Math.max(...reportSubs.map((s) => Number(s.score) || 0))
           : (selectedReportPaper.highestScore ?? null);
         const attemptsCount = reportSubs.length > 0 ? reportSubs.length : (selectedReportPaper.attempts || 0);
-        const wrongList = latestSub && Array.isArray(latestSub.results)
-          ? latestSub.results.filter((r) => !r.isCorrect)
+        const latestQuestions = latestSub && (Array.isArray(latestSub.questions) ? latestSub.questions : latestSub.results);
+        const wrongList = Array.isArray(latestQuestions)
+          ? latestQuestions.filter((r) => r.isCorrect === false)
           : [];
+        const manualReviewCount = Array.isArray(latestQuestions)
+          ? latestQuestions.filter((r) => r.gradingStatus === 'manual-review').length
+          : 0;
 
         return (
           <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
@@ -874,7 +918,7 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
               <div className="flex items-start justify-between pb-space-xs border-b border-surface-container">
                 <div>
                   <span className="px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container font-label-mono text-label-mono">
-                    AI 知识点攻防诊断报告
+                    作答记录
                   </span>
                   <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mt-1">
                     {selectedReportPaper.title}
@@ -909,7 +953,7 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                 <div className="space-y-2">
                   <h4 className="font-semibold text-on-surface text-label-md flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-primary text-[18px]">psychology</span>
-                    <span>AI 知识点攻防与学情归因：</span>
+                    <span>最近一次作答情况：</span>
                   </h4>
 
                   {attemptsCount === 0 || !latestSub ? (
@@ -917,12 +961,12 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                       <span className="material-symbols-outlined text-[36px] text-outline">history_edu</span>
                       <p className="text-on-surface font-medium text-body-sm">当前试卷尚未产生任何作答提交记录</p>
                       <p className="text-outline text-body-xs max-w-md mx-auto">
-                        进入考场完成作答并交卷后，系统将自动调用 AI 认知分析引擎，逐题比对考点掌握度，并自动生成针对该卷的专属错因攻防雷达。
+                        进入考场完成作答并交卷后，这里会显示实际作答记录与复盘入口。
                       </p>
                     </div>
                   ) : wrongList.length > 0 ? (
                     <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      <p className="text-body-xs text-outline font-label-mono">最近一次作答检测到 {wrongList.length} 道错题，重点攻防建议如下：</p>
+                      <p className="text-body-xs text-outline font-label-mono">最近一次自动核对发现 {wrongList.length} 道错题{manualReviewCount > 0 ? `，另有 ${manualReviewCount} 道主观题待人工复核` : ''}：</p>
                       {wrongList.slice(0, 3).map((w, idx) => (
                         <div key={idx} className="p-space-sm bg-error-container/20 border border-error-container/40 rounded-lg space-y-1">
                           <p className="text-on-error-container font-medium text-body-sm">
@@ -937,10 +981,10 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
                   ) : (
                     <div className="p-space-md bg-primary-fixed/30 border border-primary/20 rounded-xl space-y-1">
                       <p className="text-primary font-medium text-body-sm">
-                        🎉 最近一次测试表现优异，全部作答正确！
+                        最近一次自动核对未发现客观题错答。
                       </p>
                       <p className="text-on-surface-variant text-body-xs">
-                        该试卷涉及考点已全部达成防守指标。可继续挑战更高难度试卷或进入专项模拟冲刺。
+                        {manualReviewCount > 0 ? `另有 ${manualReviewCount} 道主观题待人工复核。` : '可以继续查看完整作答记录或开始下一次练习。'}
                       </p>
                     </div>
                   )}
@@ -987,160 +1031,6 @@ export default function PaperLibraryView({ papers, onStartExam, onNavigate, onVi
           </div>
         );
       })()}
-
-      {/* Modal 3: AI 智能导入试卷 Modal */}
-      {isImportModalOpen && (
-        <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest rounded-2xl max-w-xl w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in zoom-in-95 duration-150">
-            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container">
-              <div>
-                <span className="px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container font-label-mono text-label-mono font-semibold">
-                  model_core 驱动 · AI 格式深度分析
-                </span>
-                <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mt-1">
-                  导入试卷 (PDF / Word / 文本大模型解析)
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsImportModalOpen(false);
-                  setImportSuccessPaper(null);
-                }}
-                className="text-outline hover:text-on-surface p-1 rounded-full hover:bg-surface-container cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
-            </div>
-
-            {importSuccessPaper ? (
-              <div className="p-space-md bg-secondary/10 border border-secondary/30 rounded-xl space-y-space-sm text-body-md animate-in fade-in">
-                <div className="flex items-center gap-2 text-secondary font-semibold font-headline-sm">
-                  <span className="material-symbols-outlined text-[24px]">verified</span>
-                  <span>AI 解析完成！试卷已成功入库</span>
-                </div>
-                <div className="bg-surface-container-lowest p-space-sm rounded-lg space-y-1 text-on-surface">
-                  <p className="font-bold text-headline-sm">{importSuccessPaper.title}</p>
-                  <p className="text-body-sm text-on-surface-variant font-label-mono">
-                    总分: <span className="font-bold text-primary">{importSuccessPaper.totalScore}</span> 分 · 
-                    总题量: <span className="font-bold text-secondary">{importSuccessPaper.questionCount}</span> 题 · 
-                    建议时限: {importSuccessPaper.duration} 分钟
-                  </p>
-                </div>
-                <div className="flex justify-end gap-2 pt-2 border-t border-secondary/20">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsImportModalOpen(false);
-                      setImportSuccessPaper(null);
-                    }}
-                    className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer"
-                  >
-                    留在试卷库
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const p = importSuccessPaper;
-                      setIsImportModalOpen(false);
-                      setImportSuccessPaper(null);
-                      onStartExam(p);
-                    }}
-                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md shadow-sm cursor-pointer"
-                  >
-                    🚀 立即进入该考场开考
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-space-sm">
-                {/* File Dropzone */}
-                <label className="p-space-md border-2 border-dashed border-primary-fixed-dim hover:border-primary rounded-xl text-center bg-surface-container-low transition-colors cursor-pointer block">
-                  <input
-                    type="file"
-                    accept=".pdf,.docx,.tex,.md,.txt"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setImportFileName(file.name);
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          setImportRawText(ev.target.result);
-                        };
-                        try {
-                          reader.readAsText(file);
-                        } catch {}
-                      }
-                    }}
-                    className="hidden"
-                  />
-                  <span className="material-symbols-outlined text-[32px] text-primary">upload_file</span>
-                  <p className="mt-1 font-label-md font-semibold text-on-surface">
-                    点击选择试卷文件或拖拽至此
-                  </p>
-                  <p className="font-label-mono text-[11px] text-on-surface-variant">
-                    已选: {importFileName} (支持 PDF, Word, TXT, Markdown)
-                  </p>
-                </label>
-
-                {/* Direct Paste Raw Textarea */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="font-label-sm text-label-sm text-on-surface-variant font-semibold">
-                      或者直接粘贴试卷题目/整卷文本：
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setImportRawText(`2025届高数期末考试仿真卷
-一、单项选择题
-1. 极限 lim x->0 (sin 3x)/x 等于多少？
-A. 1  B. 3  C. 0  D. 不存在
-答案是B，因为等价无穷小。
-
-二、填空题
-2. 计算定积分 ∫_0^1 (3x^2 + 2x) dx 的值。
-答案是 2。
-
-三、解答题
-3. 求不定积分 ∫ x^2 ln(x+1) dx 的解析通解。`)}
-                      className="text-primary hover:underline font-label-sm text-[12px] cursor-pointer"
-                    >
-                      填入示例考题测试
-                    </button>
-                  </div>
-                  <textarea
-                    value={importRawText}
-                    onChange={(e) => setImportRawText(e.target.value)}
-                    placeholder="可在此粘贴非结构化试卷文本，大模型将自动提取标题、题干、选项、分值与 LaTeX 公式..."
-                    className="w-full h-32 p-space-sm bg-surface-container-low rounded-lg font-mono text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 resize-none leading-relaxed"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
-                  <button
-                    type="button"
-                    onClick={() => setIsImportModalOpen(false)}
-                    className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md cursor-pointer"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isAiImporting}
-                    onClick={handleAiImportPaper}
-                    className="px-5 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    <span className={`material-symbols-outlined text-[18px] ${isAiImporting ? 'animate-spin' : ''}`}>
-                      {isAiImporting ? 'progress_activity' : 'bolt'}
-                    </span>
-                    <span>{isAiImporting ? 'model_core 解析中...' : '⚡ 启动 AI 深度解析并入库'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Modal: 历史作答提交记录回溯抽屉/弹窗 */}
       {selectedHistoryPaper && (
@@ -1221,6 +1111,15 @@ A. 1  B. 3  C. 0  D. 不存在
                           <span className="material-symbols-outlined text-[16px]">visibility</span>
                           <span>查看该次 AI 判卷复盘</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setSubmissionToDelete(sub)}
+                          aria-label={`删除第 ${selectedHistoryPaper.submissions.length - idx} 次提交记录`}
+                          title="删除这条作答记录"
+                          className="inline-flex items-center justify-center p-2 rounded-lg text-error hover:bg-error-container/50 transition-colors cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-[19px]">delete</span>
+                        </button>
                       </div>
                     </div>
                   );
@@ -1249,6 +1148,87 @@ A. 1  B. 3  C. 0  D. 不存在
                 className="px-4 py-2 rounded-lg bg-surface-container-low text-on-surface font-label-md cursor-pointer"
               >
                 关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {submissionToDelete && (
+        <div
+          className="fixed inset-0 z-[60] bg-on-background/45 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSubmissionToDelete(null);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-submission-title"
+            aria-describedby="delete-submission-description"
+            className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md"
+          >
+            <div className="flex items-start gap-3">
+              <span className="material-symbols-outlined text-error text-[24px]">delete</span>
+              <div>
+                <h3 id="delete-submission-title" className="font-headline-sm text-headline-sm font-semibold text-on-surface">删除这条作答记录？</h3>
+                <p id="delete-submission-description" className="mt-1 text-body-sm text-on-surface-variant">删除后将从本地历史记录中移除，无法恢复。</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSubmissionToDelete(null)}
+                className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer"
+              >取消</button>
+              <button
+                type="button"
+                onClick={confirmDeleteSubmission}
+                className="px-4 py-2 rounded-lg bg-error hover:opacity-90 text-on-error font-label-md font-semibold cursor-pointer"
+              >删除记录</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {paperToDelete && (
+        <div
+          className="fixed inset-0 z-[60] bg-on-background/45 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setPaperToDelete(null);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-paper-title"
+            aria-describedby="delete-paper-description"
+            className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md"
+          >
+            <div className="flex items-start gap-3">
+              <span className="material-symbols-outlined text-error text-[24px]">delete_forever</span>
+              <div>
+                <h2 id="delete-paper-title" className="font-headline-sm text-headline-sm font-semibold text-on-surface">删除这份试卷？</h2>
+                <p className="mt-1 text-body-sm font-medium text-on-surface">《{paperToDelete.title}》</p>
+              </div>
+            </div>
+            <p id="delete-paper-description" className="text-body-sm text-on-surface-variant leading-relaxed">
+              删除后，这份试卷、答题草稿和关联的历史交卷记录都会从本地移除，且无法恢复。
+            </p>
+            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => setPaperToDelete(null)}
+                className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md hover:bg-surface-container-high transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeletePaper}
+                className="px-4 py-2 rounded-lg bg-error text-on-error font-label-md hover:bg-error/90 transition-colors cursor-pointer"
+              >
+                删除试卷
               </button>
             </div>
           </div>

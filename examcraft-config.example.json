@@ -1,0 +1,16 @@
+{
+  "modelName": "deepseek-flash",
+  "temperature": 0.7,
+  "maxTokens": 4096,
+  "timeoutMs": 30000,
+  "maxRetries": 0,
+  "category": "protocol",
+  "protocol": "openai-compatible",
+  "baseURL": "https://api.deepseek.com",
+  "apiKey": "",
+  "providerMode": "deepseek-official",
+  "structuredRetryLimit": 3,
+  "customInputPricePerMillion": 0,
+  "customOutputPricePerMillion": 0,
+  "customPricingConfigured": false
+}

@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
+import SelectMenu from '../components/SelectMenu';
+import { getQuestionTypeClass } from '../utils/questionTypes';
 
 export default function ExamResultReportView({
   submission,
+  onUpdateSubmission,
   onBackToLibrary,
   onRetakeExam,
   onOpenNotebook
@@ -27,13 +30,13 @@ export default function ExamResultReportView({
   const {
     id,
     paperId,
-    paperTitle = '模拟冲刺卷',
-    submitTime = '刚刚',
+    paperTitle = '未命名试卷',
+    submitTime = '未记录',
     durationSpent = 0,
     score = 0,
-    totalScore = 100,
     accuracy = 0,
     questions = [],
+    totalScore = questions.reduce((sum, q) => sum + (Number(q.score) || 0), 0),
     aiOverallReview = null
   } = submission;
 
@@ -44,12 +47,15 @@ export default function ExamResultReportView({
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [selectedQIds, setSelectedQIds] = useState(() => {
     // Default: pre-select all wrong questions
-    return questions.filter(q => !q.isCorrect).map(q => q.id);
+    return questions.filter(q => q.isCorrect === false && q.userAnswer?.trim()).map(q => q.id);
   });
   const [targetCollectionMode, setTargetCollectionMode] = useState('new'); // 'new' | 'existing'
   const [existingColId, setExistingColId] = useState('col-2');
   const [newCollectionName, setNewCollectionName] = useState(`${paperTitle} · 错题与精选集`);
   const [exportSuccessMessage, setExportSuccessMessage] = useState('');
+  const [isRetryingDiagnosis, setIsRetryingDiagnosis] = useState(false);
+  const [diagnosisRetryMessage, setDiagnosisRetryMessage] = useState('');
+  const [isActionPlanExpanded, setIsActionPlanExpanded] = useState(false);
 
   // Expand / collapse all analyses toggle
   const [expandedAll, setExpandedAll] = useState(false);
@@ -75,26 +81,124 @@ export default function ExamResultReportView({
     return `${mins}分${secs}秒`;
   };
 
+  const handleRetryDiagnosis = async () => {
+    if (isRetryingDiagnosis || !questions.length) return;
+    setIsRetryingDiagnosis(true);
+    setDiagnosisRetryMessage('正在重新生成作答诊断…');
+    try {
+      const response = await fetch('/api/model/evaluate-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperTitle,
+          score,
+          totalScore,
+          accuracy,
+          durationSpent,
+          questionsSummary: questions.slice(0, 60).map((q, index) => ({
+            index,
+            num: q.num,
+            type: q.type,
+            prompt: String(q.prompt || '').slice(0, 2400),
+            options: Array.isArray(q.options) ? q.options.slice(0, 8).map((option) => ({
+              key: option.key,
+              text: String(option.text || option.content || '').slice(0, 400)
+            })) : [],
+            isCorrect: q.isCorrect ?? null,
+            scoreObtained: q.scoreObtained,
+            maxScore: Number(q.score) || 0,
+            userAnswer: String(q.userAnswer || '').slice(0, 1600),
+            standardAnswer: String(q.standardAnswer || '').slice(0, 1600),
+            analysis: String(q.analysis || '').slice(0, 1000),
+            scratchpad: {
+              text: String(q.scratchpad?.text || '').slice(0, 800),
+              elements: (q.scratchpad?.elements || []).slice(0, 8).map((element) => ({
+                title: String(element.title || '').slice(0, 100),
+                actions: (element.actions || []).slice(0, 8).map((action) => ({
+                  type: action.type,
+                  content: typeof action.content === 'string' ? action.content.slice(0, 500) : undefined,
+                  expr: typeof action.expr === 'string' ? action.expr.slice(0, 180) : undefined,
+                  label: typeof action.label === 'string' ? action.label.slice(0, 120) : undefined,
+                  shapeType: action.shapeType,
+                  plane: action.plane
+                }))
+              }))
+            }
+          }))
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.data || result.fallback) {
+        throw new Error(result.error || result.data?.summary || '诊断服务暂不可用，请稍后重试。');
+      }
+
+      const reviews = new Map((result.data.questionReviews || [])
+        .filter((review) => Number.isInteger(Number(review.index)))
+        .map((review) => [Number(review.index), review]));
+      const updatedQuestions = questions.map((question, index) => {
+        const review = reviews.get(index);
+        if (!review) return question;
+        const hasScore = question.gradingStatus === 'manual-review'
+          && question.userAnswer?.trim()
+          && review.scoreObtained !== null
+          && review.scoreObtained !== undefined
+          && review.scoreObtained !== ''
+          && Number.isFinite(Number(review.scoreObtained));
+        const maxScore = Math.max(0, Number(question.score) || 0);
+        const scoreObtained = hasScore
+          ? Math.min(maxScore, Math.max(0, Number(review.scoreObtained)))
+          : question.scoreObtained;
+        return {
+          ...question,
+          ...(hasScore ? {
+            scoreObtained,
+            isCorrect: scoreObtained >= maxScore && maxScore > 0,
+            gradingStatus: 'ai-graded'
+          } : {}),
+          aiInsight: typeof review.comment === 'string' ? review.comment.slice(0, 1200) : question.aiInsight
+        };
+      });
+      const updatedSubmission = {
+        ...submission,
+        questions: updatedQuestions,
+        score: updatedQuestions.reduce((sum, question) => sum + (Number(question.scoreObtained) || 0), 0),
+        accuracy: updatedQuestions.filter((question) => question.userAnswer?.trim()).length
+          ? Math.round((updatedQuestions.filter((question) => question.userAnswer?.trim() && question.isCorrect === true).length
+            / updatedQuestions.filter((question) => question.userAnswer?.trim()).length) * 100)
+          : 0,
+        aiOverallReview: result.data
+      };
+      onUpdateSubmission?.(updatedSubmission);
+      setDiagnosisRetryMessage('诊断已更新，并已保存到这份交卷记录。');
+    } catch (error) {
+      setDiagnosisRetryMessage(error.message || '重新生成失败，请稍后重试。');
+    } finally {
+      setIsRetryingDiagnosis(false);
+    }
+  };
+
   // Stats calculation
   const totalCount = questions.length;
   const correctCount = questions.filter(q => q.isCorrect).length;
-  const wrongCount = questions.filter(q => !q.isCorrect && q.userAnswer && q.userAnswer.trim().length > 0).length;
+  const wrongCount = questions.filter(q => q.isCorrect === false && q.userAnswer && q.userAnswer.trim().length > 0).length;
   const unansweredCount = questions.filter(q => !q.userAnswer || q.userAnswer.trim().length === 0).length;
+  const answeredCount = totalCount - unansweredCount;
+  const manualReviewCount = questions.filter(q => q.gradingStatus === 'manual-review').length;
+  const diagnosisUnavailable = !aiOverallReview || String(aiOverallReview.summary || '').includes('智能诊断暂不可用');
 
   // Filter questions
   const filteredQuestions = questions.filter(q => {
-    if (filterMode === 'wrong') return !q.isCorrect && q.userAnswer && q.userAnswer.trim().length > 0;
+    if (filterMode === 'wrong') return q.isCorrect === false && q.userAnswer && q.userAnswer.trim().length > 0;
     if (filterMode === 'correct') return q.isCorrect;
     if (filterMode === 'unanswered') return !q.userAnswer || q.userAnswer.trim().length === 0;
     return true;
   });
 
   // Calculate percentile
-  const beatPercentile = Math.min(99.2, Math.max(12.5, Math.round((accuracy * 0.95 + 10) * 10) / 10));
 
   // Selection handlers for Export Modal
   const handleSelectAllWrong = () => {
-    const wrongIds = questions.filter(q => !q.isCorrect).map(q => q.id);
+    const wrongIds = questions.filter(q => q.isCorrect === false && q.userAnswer?.trim()).map(q => q.id);
     setSelectedQIds(wrongIds);
   };
 
@@ -147,7 +251,7 @@ export default function ExamResultReportView({
         count: selectedQuestions.length,
         active: true,
         updated: '刚刚',
-        desc: `收录自试卷《${paperTitle}》的 ${selectedQuestions.length} 道专项精选题（含 ${selectedQuestions.filter(q=>!q.isCorrect).length} 道错题，${selectedQuestions.filter(q=>q.isCorrect).length} 道典题）。`,
+        desc: `收录自试卷《${paperTitle}》的 ${selectedQuestions.length} 道题目。`,
         icon: 'folder_special'
       };
 
@@ -163,15 +267,16 @@ export default function ExamResultReportView({
         fullPrompt: q.prompt,
         options: q.options,
         source: paperTitle,
-        isCorrect: q.isCorrect,
-        myDeduction: q.isCorrect ? '+0分 (已做对)' : `-${q.score || 5}分`,
-        errorReason: q.isCorrect
+        isCorrect: q.userAnswer?.trim() ? q.isCorrect : null,
+        gradingStatus: q.userAnswer?.trim() ? q.gradingStatus : 'unanswered',
+        myDeduction: !q.userAnswer?.trim() ? '未作答' : (q.isCorrect === true ? '+0分 (已做对)' : (q.gradingStatus === 'manual-review' ? '待人工复核' : `-${q.score || 5}分`)),
+        errorReason: q.isCorrect === true
           ? '考生作答完全正确，收录为经典同构保留题'
-          : (q.aiInsight || '步骤演算或概念理解出现偏差'),
-        weakPoint: q.weakPoint || `${q.type} / 综合考点`,
+          : (!q.userAnswer?.trim() ? '本题未作答。' : (q.gradingStatus === 'manual-review' ? '主观题尚未自动判分，请对照标准答案复核。' : (q.aiInsight || '请对照标准答案复核。'))),
+        weakPoint: q.weakPoint || '',
         userWrongAnswer: q.userAnswer || '未填写',
-        standardAnswer: q.standardAnswer || '详见官方解析',
-        aiInsight: q.aiInsight || q.analysis || '建议结合考纲定理重新手推演算，规避粗心失分。',
+        standardAnswer: q.standardAnswer || '',
+        aiInsight: q.aiInsight || q.analysis || '',
         analysis: q.analysis || ''
       }));
 
@@ -193,9 +298,10 @@ export default function ExamResultReportView({
       }));
 
       const correctSelected = selectedQuestions.filter(q => q.isCorrect).length;
-      const wrongSelected = selectedQuestions.filter(q => !q.isCorrect).length;
+      const wrongSelected = selectedQuestions.filter(q => q.isCorrect === false && q.userAnswer?.trim()).length;
+      const manualReviewSelected = selectedQuestions.filter(q => q.gradingStatus === 'manual-review').length;
 
-      setExportSuccessMessage(`🎉 成功收录 ${selectedQuestions.length} 道试题（含 ${wrongSelected} 道错题 + ${correctSelected} 道做对经典题）至题集《${finalFolderName}》！`);
+      setExportSuccessMessage(`已收录 ${selectedQuestions.length} 道题目（${wrongSelected} 道错题、${correctSelected} 道核对正确、${manualReviewSelected} 道待复核）至题集《${finalFolderName}》。`);
       setTimeout(() => {
         setIsExportModalOpen(false);
         setExportSuccessMessage('');
@@ -235,7 +341,7 @@ export default function ExamResultReportView({
             </span>
             <div className="flex flex-col">
               <span className="font-headline-sm text-headline-sm font-semibold text-on-surface truncate max-w-xs md:max-w-md">
-                {paperTitle} · AI 评测复盘报告
+                {paperTitle} · 作答复盘报告
               </span>
               <span className="text-[11px] font-label-mono text-on-surface-variant">
                 提交时间: {submitTime} · 答题用时: {formatDuration(durationSpent)}
@@ -280,9 +386,9 @@ export default function ExamResultReportView({
           <div className="lg:w-80 shrink-0 flex flex-col justify-between p-space-lg bg-surface-container-low rounded-xl border border-outline-variant/30 space-y-space-md">
             <div>
               <div className="flex items-center justify-between text-on-surface-variant font-label-mono text-label-mono mb-1">
-                <span>FINAL ASSESSMENT SCORE</span>
+                  <span>AUTO-CHECKED SCORE</span>
                 <span className="px-2 py-0.5 rounded-full bg-secondary-container/40 text-secondary font-semibold text-[11px]">
-                  全真模拟评测
+                  本次得分
                 </span>
               </div>
               <div className="flex items-baseline space-x-2">
@@ -293,16 +399,17 @@ export default function ExamResultReportView({
                   / {totalScore} 分
                 </span>
               </div>
+              {manualReviewCount > 0 && <p className="text-[11px] text-on-surface-variant mt-1">{manualReviewCount} 道主观题待人工复核，暂未计分</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-space-sm pt-2 border-t border-outline-variant/20">
               <div className="p-2 rounded bg-surface-container-lowest/80 border border-outline-variant/20">
-                <span className="text-[11px] font-label-mono text-on-surface-variant block">全卷正确率</span>
+                <span className="text-[11px] font-label-mono text-on-surface-variant block">客观题正确率</span>
                 <span className="text-headline-sm font-bold font-mono text-primary">{accuracy}%</span>
               </div>
               <div className="p-2 rounded bg-surface-container-lowest/80 border border-outline-variant/20">
-                <span className="text-[11px] font-label-mono text-on-surface-variant block">预计击败同考</span>
-                <span className="text-headline-sm font-bold font-mono text-tertiary">{beatPercentile}%</span>
+                <span className="text-[11px] font-label-mono text-on-surface-variant block">已作答题目</span>
+                <span className="text-headline-sm font-bold font-mono text-tertiary">{answeredCount} <span className="text-[11px] font-normal text-on-surface-variant">题</span></span>
               </div>
               <div className="p-2 rounded bg-surface-container-lowest/80 border border-outline-variant/20">
                 <span className="text-[11px] font-label-mono text-on-surface-variant block">答对题目</span>
@@ -323,15 +430,30 @@ export default function ExamResultReportView({
           {/* Right: AI Master Diagnostic Review */}
           <div className="flex-1 flex flex-col justify-between space-y-space-md">
             <div>
-              <div className="flex items-center space-x-2 text-primary mb-2">
-                <span className="material-symbols-outlined text-[22px] material-symbols-fill">psychology</span>
-                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
-                  AI 命题组名师·全卷考情深度诊断
-                </h3>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="flex items-center space-x-2 text-primary">
+                  <span className="material-symbols-outlined text-[22px] material-symbols-fill">psychology</span>
+                  <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
+                    作答诊断
+                  </h3>
+                </div>
+                {diagnosisUnavailable && (
+                  <button
+                    type="button"
+                    onClick={handleRetryDiagnosis}
+                    disabled={isRetryingDiagnosis}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-on-primary transition hover:bg-primary-container disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <span className={`material-symbols-outlined text-[16px] ${isRetryingDiagnosis ? 'animate-spin' : ''}`}>
+                      {isRetryingDiagnosis ? 'progress_activity' : 'refresh'}
+                    </span>
+                    {isRetryingDiagnosis ? '重新生成中…' : '重试 AI 诊断'}
+                  </button>
+                )}
               </div>
+              {diagnosisRetryMessage && <p className="mb-2 text-xs text-on-surface-variant" role="status">{diagnosisRetryMessage}</p>}
               <p className="text-body-md text-on-surface-variant leading-relaxed bg-surface-container-low/50 p-space-md rounded-xl border border-outline-variant/20">
-                {aiOverallReview?.summary ||
-                  `考生在本次《${paperTitle}》中表现扎实，基础客观题发挥稳定。失分多集中在推导细节与概念辨析临界点。建议重点关注本次判卷识别的典型错题，通过举一反三变式训练完成知识点闭环巩固。`}
+                {aiOverallReview?.summary || '本次智能诊断暂不可用。您仍可根据逐题得分、标准答案与解析进行复盘。'}
               </p>
             </div>
 
@@ -343,11 +465,12 @@ export default function ExamResultReportView({
                   优势考点与解题长板
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {(aiOverallReview?.strengths || ['常规题型作答规范', '时间节奏把控合理', '基础概念辨析清晰']).map((st, i) => (
+                  {(aiOverallReview?.strengths || []).map((st, i) => (
                     <span key={i} className="px-2 py-0.5 rounded bg-surface-container-lowest text-[11px] font-label-mono text-secondary border border-secondary/20">
                       ✓ {st}
                     </span>
                   ))}
+                  {!aiOverallReview?.strengths?.length && <span className="text-[12px] text-on-surface-variant">暂无诊断数据</span>}
                 </div>
               </div>
 
@@ -357,31 +480,57 @@ export default function ExamResultReportView({
                   典型失分点与薄弱环节
                 </span>
                 <div className="flex flex-wrap gap-1.5">
-                  {(aiOverallReview?.weaknesses || ['复杂式子变形符号处理易出现笔误', '临界条件展开阶数需巩固', '综合应用题给分点自核需加强']).map((wt, i) => (
+                  {(aiOverallReview?.weaknesses || []).map((wt, i) => (
                     <span key={i} className="px-2 py-0.5 rounded bg-surface-container-lowest text-[11px] font-label-mono text-error border border-error/20">
                       ⚠ {wt}
                     </span>
                   ))}
+                  {!aiOverallReview?.weaknesses?.length && <span className="text-[12px] text-on-surface-variant">暂无诊断数据</span>}
                 </div>
               </div>
             </div>
 
             {/* Action Plan */}
-            <div className="flex items-center justify-between text-body-sm text-on-surface-variant bg-surface-container-low px-space-md py-2 rounded-lg">
-              <span className="font-semibold text-on-surface flex items-center gap-1">
-                <span className="material-symbols-outlined text-[16px] text-primary">lightbulb</span>
-                提分突破口：
-              </span>
-              <span className="truncate max-w-xl text-[13px]">
-                {aiOverallReview?.actionPlan?.[0] || '建议一键将本次错题与经典题收录至题集，针对失分题型进行举一反三重练。'}
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsExportModalOpen(true)}
-                className="text-primary hover:underline font-label-sm font-semibold shrink-0 cursor-pointer ml-2"
-              >
-                立即转题集 &gt;
-              </button>
+            <div className="overflow-hidden rounded-lg bg-surface-container-low text-body-sm text-on-surface-variant">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-space-md py-2">
+                <span className="font-semibold text-on-surface flex items-center gap-1 shrink-0">
+                  <span className="material-symbols-outlined text-[16px] text-primary">lightbulb</span>
+                  提分突破口：
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[13px]">
+                  {aiOverallReview?.actionPlan?.[0] || '建议一键将本次错题与经典题收录至题集，针对失分题型进行举一反三重练。'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsActionPlanExpanded((expanded) => !expanded)}
+                  aria-expanded={isActionPlanExpanded}
+                  aria-controls="exam-action-plan-details"
+                  className="inline-flex items-center gap-0.5 text-primary hover:underline font-label-sm font-semibold shrink-0 cursor-pointer"
+                >
+                  {isActionPlanExpanded ? '收起' : '展开'}
+                  <span className={`material-symbols-outlined text-[17px] transition-transform ${isActionPlanExpanded ? 'rotate-180' : ''}`}>expand_more</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsExportModalOpen(true)}
+                  className="text-primary hover:underline font-label-sm font-semibold shrink-0 cursor-pointer"
+                >
+                  立即转题集 &gt;
+                </button>
+              </div>
+              {isActionPlanExpanded && (
+                <ol id="exam-action-plan-details" className="space-y-2 border-t border-outline-variant/30 px-space-md py-3 text-[13px] leading-relaxed">
+                  {(aiOverallReview?.actionPlan?.length
+                    ? aiOverallReview.actionPlan
+                    : ['建议一键将本次错题与经典题收录至题集，针对失分题型进行举一反三重练。']
+                  ).map((item, index) => (
+                    <li key={`${index}-${item}`} className="flex gap-2">
+                      <span className="shrink-0 font-semibold text-primary">{index + 1}.</span>
+                      <span className="min-w-0 break-words">{item}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           </div>
         </section>
@@ -484,6 +633,8 @@ export default function ExamResultReportView({
               let bgClass = 'bg-surface-container text-on-surface-variant';
               if (q.isCorrect) {
                 bgClass = 'bg-secondary text-on-secondary font-bold';
+              } else if (q.gradingStatus === 'manual-review') {
+                bgClass = 'bg-tertiary-container text-on-tertiary-container font-bold';
               } else if (isAns) {
                 bgClass = 'bg-error text-on-error font-bold';
               } else {
@@ -495,7 +646,7 @@ export default function ExamResultReportView({
                   key={`res_p_${q.id ?? 'item'}_${idx}`}
                   type="button"
                   onClick={() => scrollToQuestion(q.id)}
-                  title={`第 ${q.num} 题 (${q.type}) - ${q.isCorrect ? '正确' : (isAns ? '错误' : '未作答')}`}
+                  title={`第 ${q.num} 题 (${q.type}) - ${q.isCorrect ? '正确' : (q.gradingStatus === 'manual-review' ? '待人工复核' : (isAns ? '错误' : '未作答'))}`}
                   className={`w-7 h-7 rounded text-[11px] font-mono transition-transform hover:scale-110 active:scale-95 cursor-pointer flex items-center justify-center shadow-2xs ${bgClass}`}
                 >
                   {q.num}
@@ -522,9 +673,9 @@ export default function ExamResultReportView({
                   key={`res_card_${q.id ?? 'item'}_${idx}`}
                   id={`q-card-${q.id}`}
                   className={`bg-surface-container-lowest rounded-2xl shadow-sm border transition-all p-space-lg sm:p-space-xl flex flex-col space-y-space-md ${
-                    q.isCorrect
+                      q.isCorrect
                       ? 'border-secondary/30 hover:border-secondary'
-                      : (isAnswered ? 'border-error/30 hover:border-error' : 'border-outline-variant/40')
+                      : (q.gradingStatus === 'manual-review' ? 'border-tertiary/30 hover:border-tertiary' : (isAnswered ? 'border-error/30 hover:border-error' : 'border-outline-variant/40'))
                   }`}
                 >
                   {/* Top Bar: Question Specs, Status Badge, and Single-Question Action */}
@@ -533,7 +684,7 @@ export default function ExamResultReportView({
                       <span className="px-2 py-0.5 rounded font-label-mono text-label-mono font-bold bg-surface-container text-on-surface">
                         第 {q.num} 题
                       </span>
-                      <span className="px-2 py-0.5 rounded bg-surface-container-low font-label-mono text-[11px] text-on-surface-variant">
+                      <span className={`px-2 py-0.5 rounded border font-label-mono text-[11px] ${getQuestionTypeClass(q.type)}`}>
                         {q.type} · 满分 {q.score} 分
                       </span>
                       {q.section && (
@@ -550,10 +701,20 @@ export default function ExamResultReportView({
                           <span className="material-symbols-outlined text-[15px]">check_circle</span>
                           <span>回答正确 (+{q.score}分)</span>
                         </span>
+                      ) : q.gradingStatus === 'manual-review' ? (
+                        <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-tertiary-container/50 text-on-tertiary-container font-label-mono text-[12px] font-semibold border border-tertiary/30">
+                          <span className="material-symbols-outlined text-[15px]">rate_review</span>
+                          <span>待人工复核</span>
+                        </span>
+                      ) : q.gradingStatus === 'ai-graded' ? (
+                        <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-primary-container/40 text-primary font-label-mono text-[12px] font-semibold border border-primary/30">
+                          <span className="material-symbols-outlined text-[15px]">psychology</span>
+                          <span>AI评分 {q.scoreObtained || 0}/{q.score} 分</span>
+                        </span>
                       ) : isAnswered ? (
                         <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-error-container/40 text-error font-label-mono text-[12px] font-semibold border border-error/30">
                           <span className="material-symbols-outlined text-[15px]">cancel</span>
-                          <span>回答错误 (得分 0/{q.score}分)</span>
+                          <span>回答错误 (得分 {q.scoreObtained || 0}/{q.score}分)</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-surface-container text-outline font-label-mono text-[12px]">
@@ -809,7 +970,7 @@ export default function ExamResultReportView({
                         <div className="p-space-sm rounded-lg bg-surface-container-lowest border border-outline-variant/20 space-y-1">
                           <span className="font-sans text-[11px] text-tertiary font-semibold flex items-center gap-1">
                             <span className="material-symbols-outlined text-[15px]">psychology</span>
-                            AI 名师扣分归因与考点突破点拨:
+                            本题 AI 评语:
                           </span>
                           <p className="text-body-sm text-on-surface-variant pl-2 font-sans">
                             {q.aiInsight}
@@ -854,7 +1015,7 @@ export default function ExamResultReportView({
                   onClick={handleSelectAllWrong}
                   className="px-2.5 py-1 rounded bg-error-container/30 text-error hover:bg-error-container/50 font-label-mono text-[11px] font-semibold transition-colors cursor-pointer"
                 >
-                  一键勾选所有错题 ({questions.filter(q => !q.isCorrect).length})
+                  一键勾选所有错题 ({questions.filter(q => q.isCorrect === false && q.userAnswer?.trim()).length})
                 </button>
                 <button
                   type="button"
@@ -908,7 +1069,7 @@ export default function ExamResultReportView({
                       第 {q.num} 题
                     </span>
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-label-mono bg-surface-container shrink-0">
-                      {q.type}
+                      <span className={`px-2 py-0.5 rounded border text-[11px] font-semibold ${getQuestionTypeClass(q.type)}`}>{q.type}</span>
                     </span>
                     {q.isCorrect ? (
                       <span className="text-secondary font-mono text-[11px] font-semibold shrink-0">
@@ -965,16 +1126,19 @@ export default function ExamResultReportView({
                   className="w-full px-3 py-2 bg-surface-container-low rounded-lg text-body-md border border-outline-variant/40 focus:outline-none focus:border-primary"
                 />
               ) : (
-                <select
+                <SelectMenu
+                  ariaLabel="选择目标题集"
                   value={existingColId}
-                  onChange={(e) => setExistingColId(e.target.value)}
-                  className="w-full px-3 py-2 bg-surface-container-low rounded-lg text-body-md border border-outline-variant/40 focus:outline-none focus:border-primary"
-                >
-                  <option value="col-2">高等数学期末易错集 (35 题)</option>
-                  <option value="col-1">考研数学核心压轴 (28 题)</option>
-                  <option value="col-3">线性代数特征值与矩阵 (19 题)</option>
-                  <option value="col-4">概率论大数定律与极限 (12 题)</option>
-                </select>
+                  onChange={setExistingColId}
+                  options={[
+                    { value: 'col-2', label: '高等数学期末易错集 (35 题)' },
+                    { value: 'col-1', label: '考研数学核心压轴 (28 题)' },
+                    { value: 'col-3', label: '线性代数特征值与矩阵 (19 题)' },
+                    { value: 'col-4', label: '概率论大数定律与极限 (12 题)' }
+                  ]}
+                  className="w-full"
+                  buttonClassName="inline-flex w-full items-center justify-between gap-3 rounded-lg border border-outline-variant/40 bg-surface-container-low px-3 py-2 text-left text-body-md text-on-surface hover:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                />
               )}
             </div>
 

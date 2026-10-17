@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
-import { MISTAKE_COLLECTIONS, MISTAKE_ITEMS } from '../data/mockData';
+
+const DEFAULT_COLLECTIONS = [{
+  id: 'col-default',
+  title: '默认错题集',
+  active: true,
+  code: 'COL-DEFAULT',
+  updated: '',
+  priority: '通用复习',
+  desc: '收录您复盘时保存的错题与精选题。',
+  icon: 'folder_open'
+}];
 
 export default function MistakeNotebookView({ onStartExamWithMistakes }) {
   const [collections, setCollections] = useState(() => {
@@ -13,7 +23,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
         }
       }
     } catch {}
-    return MISTAKE_COLLECTIONS;
+    return DEFAULT_COLLECTIONS;
   });
 
   const [activeColId, setActiveColId] = useState(() => {
@@ -26,7 +36,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
         }
       }
     } catch {}
-    return MISTAKE_COLLECTIONS[0]?.id || 'col-default';
+    return DEFAULT_COLLECTIONS[0].id;
   });
 
   const [activeCategory, setActiveCategory] = useState('all');
@@ -38,7 +48,9 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed.items)) {
           // Strictly purge legacy mock mistake items
-          return parsed.items.filter((i) => i && i.id !== 'm-1' && i.id !== 'm-2' && i.id !== 'm-3');
+          return parsed.items
+            .filter((i) => i && i.id !== 'm-1' && i.id !== 'm-2' && i.id !== 'm-3')
+            .map((item) => item.isCorrect == null && !item.gradingStatus ? { ...item, isCorrect: false } : item);
         }
       }
     } catch {}
@@ -98,7 +110,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
       });
       const data = await res.json();
       if (data.success && data.mistake) {
-        setMistakes((prev) => [data.mistake, ...prev]);
+        setMistakes((prev) => [{ ...data.mistake, isCorrect: false }, ...prev]);
         setCollections((prev) =>
           prev.map((c) =>
             c.id === activeColId ? { ...c, count: (c.count || 0) + 1 } : c
@@ -241,7 +253,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   错题本 (重点复盘)
                 </span>
                 <span className="font-label-mono text-label-mono px-1.5 py-0.5 rounded bg-tertiary/10 text-tertiary font-bold">
-                  {mistakes.filter((m) => !m.isCorrect).length}
+                  {mistakes.filter((m) => m.isCorrect === false).length}
                 </span>
               </button>
 
@@ -414,19 +426,16 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => alert('已开启错题批量标签与难度筛选整理模式。')}
-                  className="h-8.5 px-space-md rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-label-md text-label-md flex items-center gap-space-xs transition-colors shadow-xs border border-outline-variant/30 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[16px]">checklist_rtl</span>
-                  批量整理
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onStartExamWithMistakes(activeCol?.title || '专项题集')}
-                  className="h-8.5 px-space-md rounded-lg bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md flex items-center gap-space-xs transition-all shadow-sm active:scale-95 cursor-pointer"
+                  disabled={getCollectionCount(activeColId) === 0}
+                  onClick={() => onStartExamWithMistakes(
+                    activeCol?.title || '专项题集',
+                    mistakes.filter((item) => item.collectionId === activeColId || (!item.collectionId && activeColId === 'col-2'))
+                  )}
+                  className="h-8.5 px-space-md rounded-lg bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md flex items-center gap-space-xs transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={getCollectionCount(activeColId) === 0 ? '当前题集还没有可复练题目' : '使用当前题集已收录的题目开始复练'}
                 >
                   <span className="material-symbols-outlined text-[16px]">bolt</span>
-                  一键智能组卷并开考
+                  用本集题目开始复练
                 </button>
               </div>
             </div>
@@ -436,7 +445,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
           <div className="flex flex-col gap-space-md">
             {(() => {
               const displayItems = mistakes.filter((m) => {
-                if (activeCategory === 'mistakes') return !m.isCorrect;
+                if (activeCategory === 'mistakes') return m.isCorrect === false;
                 if (activeCategory === 'fav') return !!m.starred;
                 if (activeCategory === 'ai') return !!m.isVariant;
                 if (activeCategory === 'draft') return !!(m.hasHandwriting || (m.userWrongAnswer && m.userWrongAnswer.length > 0));
@@ -454,20 +463,25 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 );
               }
 
-              return displayItems.map((item) => (
+              return displayItems.map((item) => {
+                const isManualReview = item.gradingStatus === 'manual-review';
+                const isUnanswered = item.gradingStatus === 'unanswered';
+                const isCorrect = item.isCorrect === true;
+                const statusColor = isCorrect ? 'text-secondary' : (isManualReview ? 'text-primary' : 'text-tertiary');
+                return (
                 <article
                   key={item.id}
                   className={`bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border transition-all flex flex-col gap-space-md hover:shadow-md ${
-                    item.isCorrect ? 'border-secondary/40' : 'border-outline-variant/30'
+                    isCorrect ? 'border-secondary/40' : (isManualReview ? 'border-primary/30' : 'border-outline-variant/30')
                   }`}
                 >
                   {/* Header Row */}
                   <div className="flex items-center justify-between pb-2 border-b border-surface-container">
                     <div className="flex items-center gap-space-sm flex-wrap">
                       <span className={`px-2 py-0.5 rounded font-label-mono text-label-mono font-semibold ${
-                        item.isCorrect
+                        isCorrect
                           ? 'bg-secondary-container text-secondary'
-                          : 'bg-error-container text-on-error-container'
+                          : (isManualReview ? 'bg-primary-fixed text-primary' : 'bg-error-container text-on-error-container')
                       }`}>
                         {item.num}
                       </span>
@@ -476,9 +490,9 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                       </span>
                       <span className="text-outline-variant">/</span>
                       <span className={`font-label-mono font-bold text-label-md ${
-                        item.isCorrect ? 'text-secondary' : 'text-tertiary'
+                        statusColor
                       }`}>
-                        {item.isCorrect ? '状态: ✅ 做对保留' : `失分: ${item.myDeduction}`}
+                        {isCorrect ? '状态: ✅ 做对保留' : (isManualReview ? '待人工复核' : (isUnanswered ? '未作答' : `失分: ${item.myDeduction}`))}
                       </span>
                     </div>
                     <span className="font-label-mono text-code-sm text-on-surface-variant">
@@ -525,11 +539,11 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 <div className="p-space-md bg-surface-container-low rounded-xl space-y-space-xs text-code-sm border border-outline-variant/30">
                   <div className="flex items-start gap-2">
                     <span className={`px-1.5 py-0.5 rounded font-sans text-label-sm font-bold shrink-0 ${
-                      item.isCorrect
+                      isCorrect
                         ? 'bg-secondary-container/60 text-secondary'
-                        : 'bg-error-container text-on-error-container'
+                        : (isManualReview ? 'bg-primary-fixed text-primary' : 'bg-error-container text-on-error-container')
                     }`}>
-                      {item.isCorrect ? '考生作答 (达成)' : '考生错解'}
+                      {isCorrect ? '考生作答 (达成)' : (isManualReview ? '待人工复核' : (isUnanswered ? '未作答' : '考生错解'))}
                     </span>
                     <MathMarkdown content={item.userWrongAnswer} className="text-on-surface font-mono text-code-sm" />
                   </div>
@@ -562,7 +576,7 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => alert(`已将「${item.num}」加入当前待练试卷！`)}
+                    onClick={() => onStartExamWithMistakes(`${activeCol?.title || '错题集'} · 单题复练`, [item])}
                     className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md text-label-md shadow-xs transition-colors cursor-pointer"
                   >
                     <span className="material-symbols-outlined text-[16px]">replay</span>
@@ -570,7 +584,8 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                   </button>
                 </div>
               </article>
-            ));
+                );
+              });
           })()}
           </div>
         </section>
@@ -680,13 +695,6 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                 <label className="block text-label-sm font-label-sm text-on-surface-variant font-semibold">
                   错题草稿 / 题目原题 / 错因说明：
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setMistakeRawText(`在求不定积分 ∫ x^2 ln(x+1) dx 时，我直接算成了 (x^3/3) ln(x+1) + C，完全漏掉了分部积分后半部分的积分项 -∫ (x^3/3) * (1/(x+1)) dx，最终结果相差多个项。`)}
-                  className="text-primary hover:underline font-label-sm text-[12px] cursor-pointer"
-                >
-                  填入经典错题示例
-                </button>
               </div>
 
               <textarea

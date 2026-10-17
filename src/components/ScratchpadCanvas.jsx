@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import MathMarkdown from './MathMarkdown';
+import SelectMenu from './SelectMenu';
 
 /**
  * 数学公式 Unicode 转换与上下标符号美化映射器
@@ -30,6 +30,8 @@ const subMap = {
   'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ',
   'v': 'ᵥ', 'x': 'ₓ'
 };
+
+const SCRATCHPAD_PROBLEM_SOLVING_PATTERN = /(?:泰勒|麦克劳林).{0,12}(?:展开|多项式|级数)|(?:求导|求积分|求极限|解方程|证明(?:一下|过程|该)?|推导(?:一下|过程)?)/i;
 
 /**
  * 数学公式 Unicode 转换与上下标符号美化映射器
@@ -149,6 +151,75 @@ const formatMathExpression = (str) => {
   return s;
 };
 
+const parseMathContentSegments = (rawMath) => {
+  const segments = [];
+  const matrixPattern = /\\begin\{(pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix)\}([\s\S]*?)\\end\{\1\}/g;
+  let lastIndex = 0;
+  let match;
+  let hasMatrix = false;
+
+  while ((match = matrixPattern.exec(rawMath)) !== null) {
+    hasMatrix = true;
+    const before = rawMath.slice(lastIndex, match.index);
+    if (before.trim()) segments.push(...parseMathContentSegments(before));
+    const rows = match[2]
+      .replace(/\\hline/g, '')
+      .split(/\\\\/)
+      .map((row) => row.split('&').map((cell) => formatMathExpression(cell.trim())));
+    segments.push({ type: 'matrix', environment: match[1], rows });
+    lastIndex = matrixPattern.lastIndex;
+  }
+
+  if (hasMatrix) {
+    const trailing = rawMath.slice(lastIndex);
+    if (trailing.trim()) segments.push(...parseMathContentSegments(trailing));
+    return segments;
+  }
+
+  const readGroup = (source, openIndex) => {
+    if (source[openIndex] !== '{') return null;
+    let depth = 0;
+    for (let index = openIndex; index < source.length; index += 1) {
+      if (source[index] === '{') depth += 1;
+      else if (source[index] === '}') {
+        depth -= 1;
+        if (depth === 0) return { value: source.slice(openIndex + 1, index), end: index + 1 };
+      }
+    }
+    return null;
+  };
+
+  const fractionSegments = [];
+  let plainStart = 0;
+  const fractionCommand = /\\(?:dfrac|tfrac|frac)\s*\{/g;
+  while ((match = fractionCommand.exec(rawMath)) !== null) {
+    const numerator = readGroup(rawMath, fractionCommand.lastIndex - 1);
+    if (!numerator) continue;
+    let denominatorStart = numerator.end;
+    while (/\s/.test(rawMath[denominatorStart] || '')) denominatorStart += 1;
+    const denominator = readGroup(rawMath, denominatorStart);
+    if (!denominator) continue;
+
+    if (match.index > plainStart) {
+      fractionSegments.push({ isMath: true, text: formatMathExpression(rawMath.slice(plainStart, match.index)) });
+    }
+    fractionSegments.push({
+      type: 'fraction',
+      numerator: parseMathContentSegments(numerator.value),
+      denominator: parseMathContentSegments(denominator.value)
+    });
+    plainStart = denominator.end;
+    fractionCommand.lastIndex = denominator.end;
+  }
+
+  if (fractionSegments.length) {
+    if (plainStart < rawMath.length) fractionSegments.push({ isMath: true, text: formatMathExpression(rawMath.slice(plainStart)) });
+    return fractionSegments;
+  }
+
+  return [{ isMath: true, text: formatMathExpression(rawMath) }];
+};
+
 // 分割混合普通文本与 $数学公式$ 的段落
 const parseMixedTextSegments = (rawLine) => {
   let line = String(rawLine || '').trim();
@@ -179,17 +250,14 @@ const parseMixedTextSegments = (rawLine) => {
         segments.push({ isMath: false, text: normalPart });
       }
     }
-    const mathContent = formatMathExpression(match[1]);
-    if (mathContent) {
-      segments.push({ isMath: true, text: mathContent });
-    }
+    segments.push(...parseMathContentSegments(match[1]));
     lastIndex = regex.lastIndex;
   }
 
   if (lastIndex < line.length) {
     const remaining = line.substring(lastIndex);
     if (/[a-zA-Z]\^[0-9a-zA-Z]|[a-zA-Z]_[0-9a-zA-Z]|\\|√|∫|∑|±|≤|≥/.test(remaining)) {
-      segments.push({ isMath: true, text: formatMathExpression(remaining) });
+      segments.push(...parseMathContentSegments(remaining));
     } else {
       segments.push({ isMath: false, text: remaining });
     }
@@ -197,7 +265,7 @@ const parseMixedTextSegments = (rawLine) => {
 
   if (segments.length === 0) {
     if (/[a-zA-Z]\^[0-9a-zA-Z]|[a-zA-Z]_[0-9a-zA-Z]|\\|√|∫|∑|±|≤|≥|=|\+|-|\*|\//.test(line)) {
-      segments.push({ isMath: true, text: formatMathExpression(line) });
+      segments.push(...parseMathContentSegments(line));
     } else {
       segments.push({ isMath: false, text: line });
     }
@@ -317,8 +385,8 @@ export const isElementFormula = (elem) => {
   if (elem.zone === 'draw') return false;
   if (!elem.actions || elem.actions.length === 0) return false;
   const hasPlot = elem.actions.some((a) => a.type === 'plot');
-  const hasAxes = elem.actions.some((a) => a.type === 'axes');
-  const hasShape = elem.actions.some((a) => a.type === 'shape' || a.type === 'circle');
+  const hasAxes = elem.actions.some((a) => a.type === 'axes' || a.type === 'axes3d');
+  const hasShape = elem.actions.some((a) => a.type === 'shape' || a.type === 'shape3d' || a.type === 'circle');
   const hasWrite = elem.actions.some((a) => a.type === 'write');
   if (hasWrite && !hasPlot && !hasAxes && !hasShape) return true;
   return false;
@@ -335,7 +403,7 @@ function DraggableCanvasElement({
   drawActions
 }) {
   const canvasRef = useRef(null);
-  const dragStartRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
+  const dragStartRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0, currentX: 0, currentY: 0, moved: false });
   const [isDragging, setIsDragging] = useState(false);
   const isMoveTool = tool === 'select';
   const isEraserTool = tool === 'eraser';
@@ -349,6 +417,8 @@ function DraggableCanvasElement({
   const handlePointerDown = (e) => {
     // 橡皮擦模式下完全穿透，不拦截事件
     if (isEraserTool) return;
+    // 工具按钮需要保留自己的完整 pointer/click 生命周期，不能被图元拖动层捕获。
+    if (e.target.closest('button, [data-no-drag="true"]')) return;
 
     const isHandle = e.target.closest('[data-drag-handle="true"]');
     if (!isHandle && !isMoveTool) return;
@@ -362,7 +432,10 @@ function DraggableCanvasElement({
       startX: e.clientX,
       startY: e.clientY,
       initialX: element.x,
-      initialY: element.y
+      initialY: element.y,
+      currentX: element.x,
+      currentY: element.y,
+      moved: false
     };
     setIsDragging(true);
   };
@@ -376,8 +449,10 @@ function DraggableCanvasElement({
 
     const newX = Math.max(10, dragStartRef.current.initialX + dx);
     const newY = Math.max(10, dragStartRef.current.initialY + dy);
-
-    onUpdatePosition(element.id, newX, newY);
+    dragStartRef.current.currentX = newX;
+    dragStartRef.current.currentY = newY;
+    dragStartRef.current.moved = true;
+    e.currentTarget.style.transform = `translate3d(${newX}px, ${newY}px, 0)`;
   };
 
   const handlePointerUp = (e) => {
@@ -386,6 +461,9 @@ function DraggableCanvasElement({
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {}
+    if (dragStartRef.current.moved) {
+      onUpdatePosition(element.id, dragStartRef.current.currentX, dragStartRef.current.currentY);
+    }
     setIsDragging(false);
   };
 
@@ -402,14 +480,14 @@ function DraggableCanvasElement({
         height: `${element.height}px`,
         touchAction: 'none'
       }}
-      className={`group select-none transition-all duration-150 ${
+      className={`group select-none transition-[box-shadow,border-color,background-color] duration-150 ${
         isEraserTool
           ? 'pointer-events-none' // 橡皮擦模式完全穿透，绝不挡住擦除
           : isMoveTool
-          ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-primary/50 bg-primary/5 rounded-xl shadow-xs'
-          : 'hover:border hover:border-dashed hover:border-primary/40 rounded-xl'
+          ? 'cursor-grab active:cursor-grabbing'
+          : ''
       } ${
-        isDragging ? 'shadow-lg border-2 border-primary bg-primary/10 z-40' : 'z-20'
+        isDragging ? 'shadow-md ring-1 ring-primary/25 z-40' : 'z-20'
       }`}
     >
       {/* 顶部轻量浮动操作手柄（平时完全透明无框，仅在 hover 或移动模式下显示） */}
@@ -430,6 +508,8 @@ function DraggableCanvasElement({
             <span className="text-[10px] text-outline hidden sm:inline pointer-events-none">可拖拽</span>
             <button
               type="button"
+              data-no-drag="true"
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(element.id);
@@ -457,10 +537,16 @@ function DraggableCanvasElement({
  */
 export default function ScratchpadCanvas({
   storageKey = 'examcraft_scratchpad_canvas',
-  textStorageKey = 'examcraft_scratchpad_text',
   contextProblem = '',
   questionNum = null,
   questionData = null,
+  questionIndex = 0,
+  questionCount = 0,
+  questionNums = [],
+  questionDraftFlags = [],
+  modelStatus = null,
+  onNavigateQuestion = null,
+  onDraftChange = null,
   isMaximized = false,
   onToggleMaximize = null,
   onClose = null,
@@ -473,12 +559,19 @@ export default function ScratchpadCanvas({
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const prevStorageKeyRef = useRef(storageKey);
+  const todayModelTokens = Number(modelStatus?.today?.tokens || 0);
+  const todayModelCostKnown = Number(modelStatus?.today?.pricedCalls || 0) > 0;
+  const todayModelCost = Number(modelStatus?.today?.estimatedCostCny || 0);
+  const modelWallet = modelStatus?.balance?.balances?.find((item) => item.currency === 'CNY')
+    || modelStatus?.balance?.balances?.[0];
+  const isOfficialDeepSeek = modelStatus?.model?.providerMode === 'deepseek-official';
 
   // ==================== 快捷公式胶囊 (本题专属提取 + AI 智能提取) ====================
   const [mathChips, setMathChips] = useState(() => {
     return extractFormulasFromProblem(questionData, contextProblem);
   });
   const [isExtractingChips, setIsExtractingChips] = useState(false);
+  const chipRequestInFlightRef = useRef(false);
   const [chipFilter, setChipFilter] = useState('all'); // 'all' | 'core' | 'option'
 
   // 当切换题目或上下文变更时，实时重新本地提取本题的公式胶囊
@@ -494,9 +587,22 @@ export default function ScratchpadCanvas({
 
   // ==================== 画板手绘状态 ====================
   const [tool, setTool] = useState('brush'); // 'brush' | 'eraser' | 'select'
+  const temporaryToolRef = useRef(null);
   const [brushColor, setBrushColor] = useState('#0f172a'); // 墨黑
   const [brushSize, setBrushSize] = useState(3); // 2 | 4 | 7
   const [paperPattern, setPaperPattern] = useState('grid'); // 'grid' | 'lined' | 'blank'
+  const paperOpacity = Math.max(0.3, Math.min(1, opacity / 100));
+  const [isFocusMode, setIsFocusMode] = useState(false);
+  const [canRecover, setCanRecover] = useState(() => {
+    try { return Boolean(localStorage.getItem(`${storageKey}_recovery`)); } catch { return false; }
+  });
+  const recoverySnapshotRef = useRef(null);
+  const [saveError, setSaveError] = useState(false);
+  const saveErrorsRef = useRef({});
+  const updateSaveStatus = (slot, hasError) => {
+    saveErrorsRef.current[slot] = hasError;
+    setSaveError(Object.values(saveErrorsRef.current).some(Boolean));
+  };
 
   const isDrawingRef = useRef(false);
   const lastPointRef = useRef({ x: 0, y: 0 });
@@ -526,26 +632,84 @@ export default function ScratchpadCanvas({
   useEffect(() => {
     try {
       localStorage.setItem(`${storageKey}_elements`, JSON.stringify(elements));
+      updateSaveStatus('elements', false);
+      if (elements.length) onDraftChange?.();
     } catch (e) {
+      updateSaveStatus('elements', true);
       console.warn('Elements save error:', e);
     }
   }, [elements, storageKey]);
 
-  // ==================== 文本与板书笔记状态 ====================
-  const [boardText, setBoardText] = useState(() => {
-    try {
-      return localStorage.getItem(textStorageKey) || '';
-    } catch {
-      return '';
-    }
-  });
-  const [isNotesCollapsed, setIsNotesCollapsed] = useState(false); // 在小窗时可折叠右侧板书栏
+  // 旧版本把“先画坐标系、再画曲线”存成两个图元；本题只有一个坐标系时自动合并回同一张图。
+  useEffect(() => {
+    if (elements.length < 2) return;
+    const axesElements = elements.filter((element) => (element.actions || []).some((action) => action.type === 'axes' || action.type === 'axes3d'));
+    if (axesElements.length !== 1) return;
+    const axesElement = axesElements[0];
+    const plotElements = elements.filter((element) => element.id !== axesElement.id && !element.detachedFromAxes && (element.actions || []).length > 0 && element.actions.every((action) => action.type === 'plot'));
+    if (!plotElements.length) return;
+
+    setElements((previous) => {
+      const currentAxes = previous.filter((element) => (element.actions || []).some((action) => action.type === 'axes' || action.type === 'axes3d'));
+      if (currentAxes.length !== 1) return previous;
+      const target = currentAxes[0];
+      const currentPlots = previous.filter((element) => element.id !== target.id && !element.detachedFromAxes && (element.actions || []).length > 0 && element.actions.every((action) => action.type === 'plot'));
+      if (!currentPlots.length) return previous;
+      const plotActions = currentPlots.flatMap((element) => element.actions || []);
+      const lastPlot = plotActions[plotActions.length - 1];
+      return previous
+        .filter((element) => !currentPlots.some((plotElement) => plotElement.id === element.id))
+        .map((element) => element.id === target.id
+          ? {
+              ...element,
+              title: lastPlot?.label ? `📈 坐标系 · ${formatMathExpression(lastPlot.label)}` : '📈 坐标系与函数图像',
+              actions: [...(element.actions || []), ...plotActions],
+              updatedAt: Date.now()
+            }
+          : element);
+    });
+  }, [elements]);
 
   // ==================== Agent Loop 状态 ====================
+  const [isAssistantCollapsed, setIsAssistantCollapsed] = useState(false);
   const [spokenInput, setSpokenInput] = useState('');
+  const [showFormulaReference, setShowFormulaReference] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const agentRequestInFlightRef = useRef(false);
   const [agentLoopStage, setAgentLoopStage] = useState('');
-  const [agentMessage, setAgentMessage] = useState('');
+  const agentChatStorageKey = `${storageKey}_agent_chat_v1`;
+  const agentChatScrollRef = useRef(null);
+  const [agentChatRevision, setAgentChatRevision] = useState(0);
+  const agentChatMessages = useMemo(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(agentChatStorageKey) || '[]');
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  }, [agentChatStorageKey, agentChatRevision]);
+  const appendAgentChatMessage = useCallback((message) => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(agentChatStorageKey) || '[]');
+      const messages = Array.isArray(stored) ? stored : [];
+      localStorage.setItem(agentChatStorageKey, JSON.stringify([
+        ...messages,
+        { id: `agent-chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), ...message }
+      ].slice(-40)));
+    } catch (error) {
+      console.warn('Agent chat history could not be saved:', error);
+    }
+    setAgentChatRevision((revision) => revision + 1);
+  }, [agentChatStorageKey]);
+  const clearAgentChat = useCallback(() => {
+    try { localStorage.removeItem(agentChatStorageKey); } catch {}
+    setAgentChatRevision((revision) => revision + 1);
+  }, [agentChatStorageKey]);
+
+  useEffect(() => {
+    const chat = agentChatScrollRef.current;
+    if (chat) chat.scrollTop = chat.scrollHeight;
+  }, [agentChatMessages.length, isAgentRunning, agentLoopStage]);
 
   // ==================== 统一 UI 弹窗与 Toast 状态 ====================
   const [confirmDialog, setConfirmDialog] = useState({
@@ -569,25 +733,6 @@ export default function ScratchpadCanvas({
       setToast((prev) => ({ ...prev, show: false }));
     }, 3500);
   }, []);
-
-  // 保存文本到 localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(textStorageKey, boardText);
-    } catch (e) {
-      console.warn('Text save error:', e);
-    }
-  }, [boardText, textStorageKey]);
-
-  // 当 textStorageKey 变更时，更新当前题目的专属板书草稿
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(textStorageKey) || '';
-      setBoardText(saved);
-    } catch {
-      setBoardText('');
-    }
-  }, [textStorageKey]);
 
   // ==================== 画板尺寸自适应与高分辨率适配 ====================
   const resizeCanvas = useCallback(() => {
@@ -697,7 +842,9 @@ export default function ScratchpadCanvas({
 
     try {
       localStorage.setItem(storageKey, dataUrl);
+      updateSaveStatus('canvas', false);
     } catch (e) {
+      updateSaveStatus('canvas', true);
       console.warn('Canvas save error:', e);
     }
   }, [historyStep, storageKey]);
@@ -727,6 +874,21 @@ export default function ScratchpadCanvas({
     img.src = dataUrl;
   };
 
+  const handleRecoverClear = () => {
+    let snapshot = recoverySnapshotRef.current;
+    if (!snapshot) {
+      try { snapshot = JSON.parse(localStorage.getItem(`${storageKey}_recovery`) || 'null'); } catch {}
+    }
+    if (!snapshot) return;
+    setElements(snapshot.elements || []);
+    if (snapshot.canvasDataUrl) restoreFromDataUrl(snapshot.canvasDataUrl);
+    recoverySnapshotRef.current = null;
+    try { localStorage.removeItem(`${storageKey}_recovery`); } catch {}
+    setCanRecover(false);
+    showToast('已恢复清空前的草稿', 'success');
+    onDraftChange?.();
+  };
+
   // 撤销
   const handleUndo = () => {
     if (historyStep > 0) {
@@ -745,6 +907,55 @@ export default function ScratchpadCanvas({
     }
   };
 
+  const undoActionRef = useRef(handleUndo);
+  const redoActionRef = useRef(handleRedo);
+  undoActionRef.current = handleUndo;
+  redoActionRef.current = handleRedo;
+
+  useEffect(() => {
+    const isTextEntry = (target) => target instanceof HTMLElement && (
+      target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+    );
+    const onKeyDown = (event) => {
+      if (isTextEntry(event.target)) return;
+      const command = event.ctrlKey || event.metaKey;
+      if (command && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redoActionRef.current();
+        else undoActionRef.current();
+        return;
+      }
+      if (command && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        redoActionRef.current();
+        return;
+      }
+      if (command || event.altKey) return;
+      if (event.key.toLowerCase() === 'x' && !event.repeat) {
+        setTool((currentTool) => currentTool === 'eraser' ? 'brush' : 'eraser');
+      } else if (event.key.toLowerCase() === 'e' && !event.repeat) {
+        temporaryToolRef.current = tool;
+        setTool('eraser');
+      } else if (event.key.toLowerCase() === 'b') {
+        setTool('brush');
+      } else if (event.key === 'Escape' && isFocusMode) {
+        setIsFocusMode(false);
+      }
+    };
+    const onKeyUp = (event) => {
+      if (event.key.toLowerCase() === 'e' && temporaryToolRef.current) {
+        setTool(temporaryToolRef.current);
+        temporaryToolRef.current = null;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [tool, isFocusMode]);
+
   // 清空手绘与画入图元（统一内嵌 UI）
   const handleClearCanvasClick = () => {
     setConfirmDialog({
@@ -757,6 +968,19 @@ export default function ScratchpadCanvas({
       confirmType: 'danger',
       onConfirm: () => {
         const canvas = canvasRef.current;
+        const snapshot = {
+          canvasDataUrl: canvas?.toDataURL('image/png') || null,
+          elements
+        };
+        recoverySnapshotRef.current = snapshot;
+        try {
+          localStorage.setItem(`${storageKey}_recovery`, JSON.stringify(snapshot));
+        } catch (e) {
+          console.warn('Scratchpad recovery save error:', e);
+          showToast('无法创建恢复备份，草稿未清空。请检查浏览器存储空间后重试。', 'warn');
+          return;
+        }
+        setCanRecover(true);
         if (canvas) {
           const ctx = canvas.getContext('2d');
           ctx.save();
@@ -767,21 +991,7 @@ export default function ScratchpadCanvas({
         }
         setElements([]);
         showToast('画板笔迹与画入图元已全部清空', 'info');
-      }
-    });
-  };
-
-  // 清空板书（统一内嵌 UI）
-  const handleClearNotesClick = () => {
-    setConfirmDialog({
-      isOpen: true,
-      title: '清空公式笔记',
-      message: '确定要清空右侧的文本与公式草稿内容吗？',
-      confirmText: '清空笔记',
-      confirmType: 'danger',
-      onConfirm: () => {
-        setBoardText('');
-        showToast('公式草稿笔记已清空', 'info');
+        onDraftChange?.();
       }
     });
   };
@@ -905,6 +1115,7 @@ export default function ScratchpadCanvas({
       // ignore
     }
     saveToHistory();
+    onDraftChange?.();
   };
 
   // ==================== 智能 Canvas 绘图与矢量渲染核心 ====================
@@ -943,9 +1154,89 @@ export default function ScratchpadCanvas({
 
           const segments = parseMixedTextSegments(line);
           let startX = 16;
+          let lineHeight = 28;
           const maxWidth = width - 24;
 
+          const fractionPartText = (parts) => parts.map((part) => {
+            if (part.type === 'fraction') {
+              return `(${fractionPartText(part.numerator)})/(${fractionPartText(part.denominator)})`;
+            }
+            return part.text || '';
+          }).join('');
+
           segments.forEach((seg) => {
+            if (seg.type === 'fraction') {
+              ctx.font = 'italic 700 16px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
+              ctx.fillStyle = '#1d4ed8';
+              const numerator = fractionPartText(seg.numerator);
+              const denominator = fractionPartText(seg.denominator);
+              const fractionWidth = Math.max(24, ctx.measureText(numerator).width, ctx.measureText(denominator).width) + 12;
+              if (startX + fractionWidth > maxWidth && startX > 16) {
+                startX = 16;
+                textCursorY += lineHeight;
+                lineHeight = 28;
+              }
+              ctx.textAlign = 'center';
+              ctx.fillText(numerator, startX + fractionWidth / 2, textCursorY - 9);
+              ctx.beginPath();
+              ctx.lineWidth = 1.25;
+              ctx.strokeStyle = '#1d4ed8';
+              ctx.moveTo(startX + 3, textCursorY - 2);
+              ctx.lineTo(startX + fractionWidth - 3, textCursorY - 2);
+              ctx.stroke();
+              ctx.fillText(denominator, startX + fractionWidth / 2, textCursorY + 15);
+              ctx.textAlign = 'left';
+              startX += fractionWidth + 5;
+              lineHeight = Math.max(lineHeight, 37);
+              return;
+            }
+
+            if (seg.type === 'matrix') {
+              ctx.font = 'italic 700 16px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
+              ctx.fillStyle = '#1d4ed8';
+              const rows = seg.rows.filter((row) => row.some((cell) => cell));
+              const columnCount = Math.max(1, ...rows.map((row) => row.length));
+              const columnWidths = Array.from({ length: columnCount }, (_, column) => Math.max(
+                28,
+                ...rows.map((row) => ctx.measureText(row[column] || '').width + 12)
+              ));
+              const matrixBodyWidth = columnWidths.reduce((sum, cellWidth) => sum + cellWidth, 0);
+              const fence = ({ pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'], vmatrix: ['|', '|'], Vmatrix: ['‖', '‖'], matrix: ['', ''] })[seg.environment] || ['', ''];
+              const fenceWidth = fence[0] ? 20 : 0;
+              const matrixWidth = matrixBodyWidth + fenceWidth;
+              if (startX + matrixWidth > maxWidth && startX > 16) {
+                startX = 16;
+                textCursorY += lineHeight;
+                lineHeight = 28;
+              }
+
+              const top = textCursorY - 18;
+              const matrixHeight = Math.max(24, rows.length * 24);
+              let columnX = startX + (fence[0] ? fenceWidth / 2 : 0);
+              rows.forEach((row, rowIndex) => {
+                let cellX = columnX;
+                row.forEach((cell, columnIndex) => {
+                  const cellWidth = columnWidths[columnIndex] || 28;
+                  ctx.fillText(cell, cellX + (cellWidth - ctx.measureText(cell).width) / 2, textCursorY + rowIndex * 24);
+                  cellX += cellWidth;
+                });
+              });
+
+              const drawFence = (character, x) => {
+                if (!character) return;
+                ctx.save();
+                ctx.translate(x, top);
+                ctx.scale(1, matrixHeight / 20);
+                ctx.fillText(character, 0, 16);
+                ctx.restore();
+              };
+              drawFence(fence[0], startX);
+              drawFence(fence[1], startX + matrixWidth - 10);
+              startX += matrixWidth + 8;
+              lineHeight = Math.max(lineHeight, rows.length * 24 + 4);
+              return;
+            }
+
             if (seg.isMath) {
               ctx.font = 'italic 700 16px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
               ctx.fillStyle = '#1d4ed8';
@@ -971,9 +1262,48 @@ export default function ScratchpadCanvas({
             startX += seg.isMath ? 4 : 2;
           });
 
-          textCursorY += 28;
+          textCursorY += lineHeight;
         });
         textCursorY += 8;
+
+      } else if (act.type === 'axes3d') {
+        // 三维直角坐标系：x、y 轴斜向展开，z 轴竖直向上。
+        ctx.strokeStyle = act.color || '#334155';
+        ctx.fillStyle = act.color || '#334155';
+        ctx.lineWidth = 1.9;
+        ctx.lineCap = 'round';
+        ctx.font = 'italic bold 15px "KaTeX_Math", serif';
+
+        const length = Math.min(width * 0.27, height * 0.27, 76);
+        const originX = cx;
+        const originY = cy + 10;
+        const axes3d = [
+          { dx: length * 0.9, dy: length * 0.48, label: act.xLabel || 'x', lx: 7, ly: 13 },
+          { dx: -length * 0.9, dy: length * 0.48, label: act.yLabel || 'y', lx: -16, ly: 13 },
+          { dx: 0, dy: -length, label: act.zLabel || 'z', lx: -4, ly: -9 }
+        ];
+
+        axes3d.forEach(({ dx, dy, label, lx, ly }) => {
+          const endpointX = originX + dx;
+          const endpointY = originY + dy;
+          ctx.beginPath();
+          ctx.moveTo(originX - dx * 0.62, originY - dy * 0.62);
+          ctx.lineTo(endpointX, endpointY);
+          ctx.stroke();
+          const angle = Math.atan2(dy, dx);
+          const headLength = 8;
+          const spread = Math.PI / 7;
+          ctx.beginPath();
+          ctx.moveTo(endpointX, endpointY);
+          ctx.lineTo(endpointX - headLength * Math.cos(angle - spread), endpointY - headLength * Math.sin(angle - spread));
+          ctx.moveTo(endpointX, endpointY);
+          ctx.lineTo(endpointX - headLength * Math.cos(angle + spread), endpointY - headLength * Math.sin(angle + spread));
+          ctx.stroke();
+          ctx.fillText(label, endpointX + lx, endpointY + ly);
+        });
+
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText('O', originX - 15, originY + 17);
 
       } else if (act.type === 'axes') {
         // 2. 绘制直角坐标系
@@ -1067,9 +1397,57 @@ export default function ScratchpadCanvas({
           const formattedLabel = formatMathExpression(act.label);
           ctx.fillStyle = act.color || '#1d4ed8';
           ctx.font = 'italic 700 15px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
-          ctx.fillText(formattedLabel, cx + 45, cy - 60);
+          ctx.fillText(formattedLabel, Math.max(12, cx - axisLen + 10), Math.max(20, cy - axisLen + 20));
         }
 
+      } else if (act.type === 'shape3d') {
+        // 在等轴测投影中绘制三维平面圆（椭圆投影）或正方形（平行四边形投影）。
+        const planeBases = {
+          xy: [[0.9, 0.48], [-0.9, 0.48]],
+          xz: [[0.9, 0.48], [0, -1]],
+          yz: [[-0.9, 0.48], [0, -1]]
+        };
+        const [uBasis, vBasis] = planeBases[act.plane] || planeBases.xy;
+        const size = Math.min(width, height) * 0.2;
+        const ux = uBasis[0] * size;
+        const uy = uBasis[1] * size;
+        const vx = vBasis[0] * size;
+        const vy = vBasis[1] * size;
+        ctx.strokeStyle = act.color || '#1d4ed8';
+        ctx.fillStyle = act.color || '#1d4ed8';
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (act.shapeType === 'circle') {
+          ctx.beginPath();
+          for (let index = 0; index <= 96; index += 1) {
+            const angle = (index / 96) * Math.PI * 2;
+            const px = cx + ux * Math.cos(angle) + vx * Math.sin(angle);
+            const py = cy + uy * Math.cos(angle) + vy * Math.sin(angle);
+            if (index === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'italic bold 15px "KaTeX_Math", "Times New Roman", serif';
+          ctx.fillText(act.labels?.[0] || 'O', cx - 16, cy + 16);
+        } else if (act.shapeType === 'square') {
+          const points = [
+            [cx - (ux + vx) / 2, cy - (uy + vy) / 2],
+            [cx + (ux - vx) / 2, cy + (uy - vy) / 2],
+            [cx + (ux + vx) / 2, cy + (uy + vy) / 2],
+            [cx + (-ux + vx) / 2, cy + (-uy + vy) / 2]
+          ];
+          ctx.beginPath();
+          ctx.moveTo(points[0][0], points[0][1]);
+          points.slice(1).forEach(([x, y]) => ctx.lineTo(x, y));
+          ctx.closePath();
+          ctx.stroke();
+        }
       } else if (
         act.type === 'circle' ||
         (act.type === 'shape' && (
@@ -1293,6 +1671,8 @@ export default function ScratchpadCanvas({
 
   // AI 智能提取当前试题核心公式与展开通式
   const handleAiExtractChips = async () => {
+    if (chipRequestInFlightRef.current) return;
+    chipRequestInFlightRef.current = true;
     setIsExtractingChips(true);
     showToast('AI 正在深度解析本题题干与数学结构...', 'info');
     try {
@@ -1320,6 +1700,7 @@ export default function ScratchpadCanvas({
     } catch (err) {
       showToast(`AI 提取失败: ${err.message}`, 'warn');
     } finally {
+      chipRequestInFlightRef.current = false;
       setIsExtractingChips(false);
     }
   };
@@ -1350,8 +1731,6 @@ export default function ScratchpadCanvas({
 
     setElements((prev) => [...prev, newElem]);
 
-    // 同步追加到右侧板书笔记
-    setBoardText((prev) => (prev ? `${prev}\n\n${cleanText}` : cleanText));
     showToast(`已将「${labelText || cleanText}」抄入【2. 写公式区】！`, 'success');
   }, [brushColor, findNextAvailablePosition, showToast]);
 
@@ -1369,51 +1748,202 @@ export default function ScratchpadCanvas({
 
   // ==================== 核心 Agent Loop 执行逻辑 ====================
   const handleTriggerAgentLoop = async (customPrompt = '') => {
+    if (agentRequestInFlightRef.current) return;
     const textToRun = (customPrompt || spokenInput).trim();
     if (!textToRun) {
       showToast('请先输入或点击快捷指令选择要画的图或写的字', 'warn');
       return;
     }
 
+    // Take the history snapshot before appending this turn. The current request
+    // is sent separately so the model cannot mistake it for a previous message.
+    let priorConversation = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem(agentChatStorageKey) || '[]');
+      if (Array.isArray(stored)) {
+        priorConversation = stored
+          .filter((message) => ['user', 'assistant'].includes(message?.role) && typeof message?.content === 'string')
+          .slice(-6)
+          .map(({ role, content }) => ({ role, content }));
+      }
+    } catch {}
+
+    appendAgentChatMessage({ role: 'user', content: textToRun });
+    setSpokenInput('');
+
+    if (SCRATCHPAD_PROBLEM_SOLVING_PATTERN.test(textToRun)) {
+      const blockedMessage = '抱歉，我不能帮助解题，也不能提供答案、步骤或提示。';
+      appendAgentChatMessage({ role: 'assistant', status: 'blocked', content: blockedMessage });
+      showToast('这属于解题推导请求，已拦截，未调用模型。', 'warn');
+      return;
+    }
+
+    agentRequestInFlightRef.current = true;
     setIsAgentRunning(true);
-    setAgentLoopStage('Loop 1 · 诚信纪律审计中...');
-    setAgentMessage('');
+    setAgentLoopStage('THINK · 正在处理你的消息…');
 
     try {
-      await new Promise((r) => setTimeout(r, 200));
-      setAgentLoopStage('Loop 2 · 编译 Canvas 绘图与手写指令...');
-
       const res = await fetch('/api/model/scratchpad-agent-loop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           spokenText: textToRun,
           contextProblem: contextProblem,
-          currentBoardContent: boardText
+          currentBoardContent: elements.flatMap((element) => (element.actions || []).map((action) => action.content || action.label || '')).filter(Boolean).join('\n').slice(-2000),
+          recentConversation: priorConversation,
+          assistantTone: (() => {
+            try { return localStorage.getItem('examcraft_scratchpad_agent_tone') || 'supportive'; }
+            catch { return 'supportive'; }
+          })()
         })
       });
 
       const data = await res.json();
       if (!data.success) {
-        showToast(data.error || 'Agent Loop 执行失败', 'warn');
+        const errorMessage = data.error || 'Agent Loop 执行失败，请检查模型配置后重试。';
+        appendAgentChatMessage({ role: 'assistant', status: 'error', content: errorMessage });
+        showToast(errorMessage, 'warn');
         return;
       }
 
-      setAgentLoopStage('Loop 3 · 正在画板上执行画图与书写...');
       const agentData = data.agentData;
 
+      if (!agentData?.audit) {
+        throw new Error('模型返回结果不完整，请重试。');
+      }
+
       if (!agentData.audit.passed) {
-        setAgentMessage(`⚠️ ${agentData.audit.reason}：只能帮画/帮写您说出的内容，严禁代算代答！`);
-        showToast('检测到计算诱导，已触碰考场防作弊纪律红线', 'warn');
+        const blockedMessage = agentData.chatResponse || '抱歉，我不能帮助解题，也不能提供答案、步骤或提示。';
+        appendAgentChatMessage({ role: 'assistant', status: 'blocked', content: blockedMessage });
+        showToast('此请求无法处理。', 'warn');
+      } else if (agentData.intent === 'chat') {
+        appendAgentChatMessage({ role: 'assistant', status: 'success', content: agentData.chatResponse || '你好呀。' });
       } else {
-        // 1. 将 AI 画入内容编译为一个独立、可自由拖拽、自动防重叠的草稿图元！
+        setAgentLoopStage('THINK · 正在同步画板…');
+        const incomingActions = agentData.canvasActions || [];
+        const onlyPlotActions = incomingActions.length > 0 && incomingActions.every((action) => action.type === 'plot');
+        const incomingHasPlot = incomingActions.some((action) => action.type === 'plot');
+        const incomingHas3DAxes = incomingActions.some((action) => action.type === 'axes3d');
+        const incomingIsOnlyPlotOrAxes = incomingActions.every((action) => action.type === 'plot' || action.type === 'axes' || action.type === 'axes3d');
+        const refersToExistingDrawing = /在(?:这个|该|当前|已有|上面|刚才的?)?(?:坐标系|图|曲线)(?:上|中|内)?|在(?:其|它)上|接着画|继续画/i.test(textToRun);
+        const requestsSeparateDrawing = /单独|独立|分开|另画|另起|不要叠加|不要画在/i.test(textToRun);
+        const requestsDetachDrawing = /移出|拆出|拆分|从.{0,8}(?:图|坐标系|曲线).{0,5}分开|单独移动出来/i.test(textToRun);
+        let detachedExistingPlot = false;
+        let upgradedExistingAxes = false;
+        let existingAxesIndex = -1;
+        for (let index = elements.length - 1; index >= 0; index -= 1) {
+          if ((elements[index].actions || []).some((action) => action.type === 'axes' || action.type === 'axes3d')) {
+            existingAxesIndex = index;
+            break;
+          }
+        }
+        const existingAxesId = existingAxesIndex >= 0 ? elements[existingAxesIndex].id : null;
+        const replacesExistingAxes = incomingHas3DAxes && existingAxesIndex >= 0 && !requestsSeparateDrawing;
+        const attachToExistingAxes = incomingHasPlot && existingAxesIndex >= 0 && (
+          !requestsSeparateDrawing && (onlyPlotActions || (incomingIsOnlyPlotOrAxes && refersToExistingDrawing))
+        );
+
+        // 1. 将 AI 绘图动作写入草稿图元；后续函数图像优先叠加到已有坐标系。
         if (agentData.canvasActions && agentData.canvasActions.length > 0) {
           const acts = agentData.canvasActions;
+
+          if (replacesExistingAxes) {
+            upgradedExistingAxes = true;
+            const axisOnlyElementIds = new Set(elements
+              .filter((element) => element.id !== existingAxesId
+                && (element.actions || []).length > 0
+                && element.actions.every((action) => action.type === 'axes' || action.type === 'axes3d'))
+              .map((element) => element.id));
+            setElements((previous) => previous
+              .filter((element) => !axisOnlyElementIds.has(element.id))
+              .map((element) => element.id === existingAxesId
+                ? {
+                    ...element,
+                    title: '📐 三维坐标系',
+                    actions: [
+                      ...(element.actions || []).filter((action) => action.type !== 'axes' && action.type !== 'axes3d'),
+                      ...acts.filter((action) => action.type === 'axes3d'),
+                      ...acts.filter((action) => action.type !== 'axes' && action.type !== 'axes3d')
+                    ],
+                    updatedAt: Date.now()
+                  }
+                : element));
+          } else if (requestsDetachDrawing && incomingHasPlot && existingAxesIndex >= 0) {
+            const plotActions = acts.filter((action) => action.type === 'plot');
+            const normalizeExpr = (value) => String(value || '').toLowerCase()
+              .replace(/\\(?:left|right)\s*/g, '')
+              .replace(/\s+/g, '')
+              .replace(/^y=/, '')
+              .replace(/[{}$]/g, '');
+            const sourceAxes = elements[existingAxesIndex];
+            const sourcePlots = (sourceAxes.actions || []).filter((action) => action.type === 'plot');
+            const requestedExprs = new Set(plotActions.map((action) => normalizeExpr(action.expr || action.label)));
+            let plotsToDetach = sourcePlots.filter((action) => requestedExprs.has(normalizeExpr(action.expr || action.label)));
+            if (!plotsToDetach.length && sourcePlots.length === 1) plotsToDetach = sourcePlots;
+
+            if (plotsToDetach.length) {
+              detachedExistingPlot = true;
+              const detachedElementWidth = 310;
+              const detachedElementHeight = 270;
+              const position = findNextAvailablePosition(detachedElementWidth, detachedElementHeight, 'draw');
+              const detachedElement = {
+                id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                title: `📈 独立函数图像: ${formatMathExpression(plotActions[0]?.label || plotActions[0]?.expr || '')}`,
+                x: position.x,
+                y: position.y,
+                width: detachedElementWidth,
+                height: detachedElementHeight,
+                actions: plotActions,
+                zone: 'draw',
+                detachedFromAxes: true,
+                createdAt: Date.now()
+              };
+              setElements((previous) => [
+                  ...previous.map((element) => element.id === existingAxesId
+                  ? {
+                      ...element,
+                      title: '📈 直角坐标系',
+                      actions: (element.actions || []).filter((action) => !plotsToDetach.includes(action)),
+                      updatedAt: Date.now()
+                    }
+                  : element),
+                detachedElement
+              ]);
+            } else {
+              showToast('没有在已有坐标系中找到可拆分的对应曲线，已为你单独新建图像。', 'info');
+              const detachedElementWidth = 310;
+              const detachedElementHeight = 270;
+              const position = findNextAvailablePosition(detachedElementWidth, detachedElementHeight, 'draw');
+              setElements((previous) => [...previous, {
+                id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                title: `📈 独立函数图像: ${formatMathExpression(plotActions[0]?.label || plotActions[0]?.expr || '')}`,
+                x: position.x,
+                y: position.y,
+                width: detachedElementWidth,
+                height: detachedElementHeight,
+                actions: plotActions,
+                zone: 'draw',
+                detachedFromAxes: true,
+                createdAt: Date.now()
+              }]);
+            }
+          } else if (attachToExistingAxes) {
+            const plotLabel = acts.find((action) => action.type === 'plot')?.label;
+            setElements((previous) => previous.map((element) => element.id === existingAxesId
+              ? {
+                  ...element,
+                  title: plotLabel ? `📈 坐标系 · ${formatMathExpression(plotLabel)}` : '📈 坐标系与函数图像',
+                  actions: [...(element.actions || []), ...acts.filter((action) => action.type !== 'axes')],
+                  updatedAt: Date.now()
+                }
+              : element));
+          } else {
           let elemTitle = '草稿演算图元';
 
           const hasPlot = acts.some(a => a.type === 'plot');
-          const hasAxes = acts.some(a => a.type === 'axes');
-          const hasShape = acts.some(a => a.type === 'shape');
+          const hasAxes = acts.some(a => a.type === 'axes' || a.type === 'axes3d');
+          const has3DAxes = acts.some(a => a.type === 'axes3d');
+            const hasShape = acts.some(a => a.type === 'shape' || a.type === 'shape3d');
           const hasWrite = acts.some(a => a.type === 'write');
           const isCircleAct = acts.some(
             (a) =>
@@ -1445,6 +1975,10 @@ export default function ScratchpadCanvas({
             elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
             elemWidth = Math.min(310, maxZoneW);
             elemHeight = 270;
+          } else if (has3DAxes) {
+            elemTitle = '📐 三维坐标系';
+            elemWidth = Math.min(320, maxZoneW);
+            elemHeight = 290;
           } else if (hasAxes) {
             elemTitle = '📈 直角坐标系';
             elemWidth = Math.min(300, maxZoneW);
@@ -1479,32 +2013,32 @@ export default function ScratchpadCanvas({
             height: elemHeight,
             actions: acts,
             zone: targetZone,
+            detachedFromAxes: requestsSeparateDrawing,
             createdAt: Date.now()
           };
 
           setElements((prev) => [...prev, newElem]);
+          }
         }
 
-        // 2. 同步追加到右侧规范板书笔记（过滤闲聊元话语，只留纯正板书）
-        const cleanScribe = (agentData.scribeResult || '')
-          .replace(/^(?:口述|考生)?(?:需求|指令|输入)[：:]\s*.*?\n+/gi, '')
-          .replace(/^(?:规范|正式)?(?:草稿|板书)(?:记录)?[：:]\s*/gi, '')
-          .trim();
-
-        if (cleanScribe) {
-          const newBoardText = boardText
-            ? `${boardText}\n\n${cleanScribe}`
-            : cleanScribe;
-          setBoardText(newBoardText);
-        }
-
-        setSpokenInput('');
-        setAgentMessage('✨ AI 已在画板上完成画图与手写板书（未作多余代算）');
+        const actionTypes = new Set((agentData.canvasActions || []).map((action) => action.type));
+        const details = [];
+        if (actionTypes.has('write')) details.push('已誊写到草稿纸');
+        if (actionTypes.has('axes3d')) details.push(upgradedExistingAxes ? '已将现有坐标系更新为三维' : '已绘制三维坐标系');
+        else if (actionTypes.has('axes') && !attachToExistingAxes) details.push('已添加坐标系');
+        if (actionTypes.has('plot')) details.push(detachedExistingPlot ? '已将函数图像从原坐标系拆出' : attachToExistingAxes ? '已叠加到现有坐标系' : requestsSeparateDrawing ? '已单独绘制函数图像' : '已绘制函数图像');
+        if (actionTypes.has('shape') || actionTypes.has('circle')) details.push('已绘制几何图形');
+        const completionMessage = details.length
+          ? `已按指令完成：${[...new Set(details)].join('；')}。`
+          : '已处理这条指令；没有生成需要写入草稿纸的内容。';
+        appendAgentChatMessage({ role: 'assistant', status: 'success', content: completionMessage, details: [...new Set(details)] });
         showToast('AI 已在草稿板上为您完成画图与写字！', 'success');
       }
     } catch (err) {
+      appendAgentChatMessage({ role: 'assistant', status: 'error', content: err.message || '执行失败，请重试。' });
       showToast(`Agent Loop 异常: ${err.message}`, 'warn');
     } finally {
+      agentRequestInFlightRef.current = false;
       setIsAgentRunning(false);
       setAgentLoopStage('');
     }
@@ -1598,9 +2132,25 @@ export default function ScratchpadCanvas({
             </span>
           </div>
 
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-sans font-medium" data-no-drag>
-            <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
-            <span>题卷独立持久化</span>
+          {questionCount > 1 && (
+            <SelectMenu
+              ariaLabel="切换草稿题目"
+              value={questionIndex}
+              onChange={(index) => onNavigateQuestion?.(Number(index))}
+              options={questionNums.map((number, index) => ({
+                value: index,
+                label: `第 ${number} 题${questionDraftFlags[index] ? ' · 有草稿' : ''}`
+              }))}
+              className="max-w-[150px]"
+              dataNoDrag
+              buttonClassName="inline-flex max-w-[150px] items-center justify-between gap-1 rounded-md border border-outline-variant/40 bg-surface-container-lowest px-1.5 py-1 text-left text-[11px] text-on-surface hover:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              menuClassName="left-0 right-auto"
+            />
+          )}
+
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-sans font-medium ${saveError ? 'bg-error/10 text-error border-error/20' : 'bg-primary/10 text-primary border-primary/20'}`} data-no-drag role="status" aria-live="polite">
+            <span className={`w-1.5 h-1.5 rounded-full ${saveError ? 'bg-error' : 'bg-primary'}`}></span>
+            <span>{saveError ? '保存失败，请检查浏览器空间' : '已自动保存到本机'}</span>
           </span>
 
           <div className="hidden xl:flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/30 border border-secondary/20 text-secondary text-[11px] font-medium font-sans" data-no-drag>
@@ -1616,6 +2166,7 @@ export default function ScratchpadCanvas({
             <button
               type="button"
               onClick={() => setTool('brush')}
+              aria-pressed={tool === 'brush'}
               className={`flex items-center gap-1 px-2 py-0.5 rounded font-medium transition cursor-pointer ${
                 tool === 'brush' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
               }`}
@@ -1627,6 +2178,7 @@ export default function ScratchpadCanvas({
             <button
               type="button"
               onClick={() => setTool('eraser')}
+              aria-pressed={tool === 'eraser'}
               className={`flex items-center gap-1 px-2 py-0.5 rounded font-medium transition cursor-pointer ${
                 tool === 'eraser' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
               }`}
@@ -1638,6 +2190,7 @@ export default function ScratchpadCanvas({
             <button
               type="button"
               onClick={() => setTool('select')}
+              aria-pressed={tool === 'select'}
               className={`flex items-center gap-1 px-2 py-0.5 rounded font-medium transition cursor-pointer ${
                 tool === 'select' ? 'bg-primary text-on-primary shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
               }`}
@@ -1685,6 +2238,8 @@ export default function ScratchpadCanvas({
                   key={c.color}
                   type="button"
                   onClick={() => setBrushColor(c.color)}
+                  aria-label={`画笔颜色：${c.name}`}
+                  aria-pressed={brushColor === c.color}
                   className={`w-3.5 h-3.5 rounded-full transition cursor-pointer ${
                     brushColor === c.color ? 'ring-2 ring-primary ring-offset-1 scale-110' : 'opacity-75 hover:opacity-100'
                   }`}
@@ -1706,6 +2261,7 @@ export default function ScratchpadCanvas({
                 key={p.id}
                 type="button"
                 onClick={() => setPaperPattern(p.id)}
+                aria-pressed={paperPattern === p.id}
                 className={`px-1.5 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
                   paperPattern === p.id ? 'bg-surface-container-high text-primary font-semibold' : 'text-on-surface-variant'
                 }`}
@@ -1715,12 +2271,26 @@ export default function ScratchpadCanvas({
             ))}
           </div>
 
+          {canRecover && (
+            <button
+              type="button"
+              onClick={handleRecoverClear}
+              className="px-2 py-1 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/15 text-[11px] font-medium"
+              data-no-drag
+            >
+              恢复清空前草稿
+            </button>
+          )}
+
           {/* 撤销 / 重做 / 导出 / 清空手绘 */}
-          <div className="flex items-center gap-0.5">
+          <details className="relative" data-no-drag onDoubleClick={(e) => e.stopPropagation()}>
+            <summary className="list-none px-2 py-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest text-on-surface-variant hover:text-primary cursor-pointer text-[11px] font-medium">更多</summary>
+            <div className="absolute right-0 top-full z-30 mt-1 flex items-center gap-1 rounded-lg border border-outline-variant/50 bg-surface-container-lowest p-1.5 shadow-xl">
             <button
               type="button"
               onClick={handleUndo}
               disabled={historyStep <= 0}
+              aria-label="撤销上一步笔迹"
               className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition cursor-pointer disabled:opacity-30"
               title="撤销上一步笔迹"
             >
@@ -1730,6 +2300,7 @@ export default function ScratchpadCanvas({
               type="button"
               onClick={handleRedo}
               disabled={historyStep >= history.length - 1}
+              aria-label="重做下一步笔迹"
               className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition cursor-pointer disabled:opacity-30"
               title="重做下一步笔迹"
             >
@@ -1743,11 +2314,12 @@ export default function ScratchpadCanvas({
               title="一键将草稿图元智能规整为：左侧画图，右侧写公式，彻底消除重叠"
             >
               <span className="material-symbols-outlined text-[14px] text-primary">auto_fix_normal</span>
-              <span className="hidden sm:inline">一键规整防重叠</span>
+              <span>规整</span>
             </button>
             <button
               type="button"
               onClick={handleDownload}
+              aria-label="导出草稿纸图片"
               className="p-1 rounded text-on-surface-variant hover:text-primary hover:bg-surface-container transition cursor-pointer"
               title="导出手绘草稿为图片"
             >
@@ -1756,12 +2328,14 @@ export default function ScratchpadCanvas({
             <button
               type="button"
               onClick={handleClearCanvasClick}
+              aria-label="清空草稿纸画布"
               className="p-1 rounded text-outline hover:text-error hover:bg-surface-container transition cursor-pointer"
               title="清空当前手绘笔迹"
             >
               <span className="material-symbols-outlined text-[16px]">delete_sweep</span>
             </button>
-          </div>
+            </div>
+          </details>
         </div>
 
         {/* 右区：侧栏收放、透明度调节、复位、全屏与关闭控制 */}
@@ -1774,6 +2348,7 @@ export default function ScratchpadCanvas({
             <button
               type="button"
               onClick={() => onOpacityChange && onOpacityChange(opacity === 100 ? 75 : opacity <= 50 ? 100 : 50)}
+              aria-label="切换常用纸面透明度"
               className="p-0.5 hover:text-primary transition cursor-pointer flex items-center"
               title="点击快速切换常用透明度预设 (100% / 75% / 50%)"
             >
@@ -1781,21 +2356,19 @@ export default function ScratchpadCanvas({
                 opacity
               </span>
             </button>
-            <span className="text-[10px] text-on-surface-variant font-medium hidden sm:inline">透明度</span>
+            <label htmlFor="scratchpad-opacity" className="text-[10px] text-on-surface-variant font-medium hidden sm:inline">纸面透明度</label>
             <input
+              id="scratchpad-opacity"
               type="range"
               min="30"
               max="100"
               step="5"
               value={opacity}
               onChange={(e) => onOpacityChange && onOpacityChange(Number(e.target.value))}
+              aria-label="纸面透明度"
               className="w-12 sm:w-16 h-1.5 accent-primary cursor-pointer"
             />
-            <span
-              onClick={() => onOpacityChange && onOpacityChange(100)}
-              className="font-mono text-[10px] font-bold text-primary w-7 text-right cursor-pointer hover:underline"
-              title="点击恢复 100% 不透明"
-            >
+            <span className="font-mono text-[10px] font-bold text-primary w-7 text-right" aria-live="polite">
               {opacity}%
             </span>
           </div>
@@ -1805,6 +2378,7 @@ export default function ScratchpadCanvas({
             <button
               type="button"
               onClick={onResetPosition}
+              aria-label="恢复草稿纸默认位置"
               className="p-1 rounded text-on-surface-variant hover:text-primary hover:bg-surface-container transition cursor-pointer flex items-center"
               title="复位草稿纸到右下角默认位置"
             >
@@ -1814,24 +2388,35 @@ export default function ScratchpadCanvas({
 
           <button
             type="button"
-            onClick={() => setIsNotesCollapsed(!isNotesCollapsed)}
+            onClick={() => setIsAssistantCollapsed(!isAssistantCollapsed)}
             className={`px-2 py-0.5 rounded text-[11px] font-medium transition flex items-center gap-1 cursor-pointer border ${
-              !isNotesCollapsed
+              !isAssistantCollapsed
                 ? 'bg-primary-fixed text-on-primary-fixed border-primary-fixed-dim'
                 : 'bg-surface-container hover:bg-surface-container-high text-on-surface border-outline-variant/30'
             }`}
-            title={isNotesCollapsed ? '展开右侧公式与 Agent 帮写板书' : '收起右侧板书栏以扩充手绘区域'}
+            title={isAssistantCollapsed ? '展开草稿纸聊天助手' : '收起草稿纸聊天助手以扩充手绘区域'}
           >
             <span className="material-symbols-outlined text-[14px]">
-              {isNotesCollapsed ? 'splitscreen_left' : 'splitscreen'}
+              {isAssistantCollapsed ? 'splitscreen_left' : 'splitscreen'}
             </span>
-            <span className="hidden md:inline">{isNotesCollapsed ? '展开板书' : '收起板书'}</span>
+            <span className="hidden md:inline">{isAssistantCollapsed ? '展开助手' : '收起助手'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsFocusMode((value) => !value)}
+            aria-pressed={isFocusMode}
+            className={`px-2 py-0.5 rounded text-[11px] font-medium transition border ${isFocusMode ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30'}`}
+            title={isFocusMode ? '退出专注模式（Esc）' : '隐藏聊天助手，专注手写'}
+          >
+            {isFocusMode ? '退出专注' : '专注书写'}
           </button>
 
           {onToggleMaximize && (
             <button
               type="button"
               onClick={onToggleMaximize}
+              aria-label={isMaximized ? '还原草稿纸窗口' : '最大化草稿纸窗口'}
               className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition cursor-pointer"
               title={isMaximized ? '还原为便签窗口' : '放大为全屏大工作台'}
             >
@@ -1845,6 +2430,7 @@ export default function ScratchpadCanvas({
             <button
               type="button"
               onClick={onClose}
+              aria-label="收起草稿纸"
               className="p-1 rounded text-outline hover:text-on-surface hover:bg-surface-container transition cursor-pointer"
               title="收起草稿纸"
             >
@@ -1855,51 +2441,26 @@ export default function ScratchpadCanvas({
       </div>
 
       {/* 主体工作区：手绘画布 与 公式板书 一体同屏并存 */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row w-full h-full p-2 gap-2">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row w-full h-full p-2 gap-2 overflow-y-auto lg:overflow-hidden">
         {/* 左侧：手绘涂鸦主画板 */}
         <div
           ref={containerRef}
-          className={`relative h-full rounded-xl border border-outline-variant/40 overflow-hidden touch-none shadow-inner transition-all duration-200 ${
+          className={`relative h-[min(58vh,460px)] min-h-[280px] lg:h-full rounded-[3px] border border-[#e8e2d4] overflow-hidden touch-none shadow-sm transition-all duration-200 ${
             tool === 'select' ? 'cursor-grab' : 'cursor-crosshair'
           } ${
-            isNotesCollapsed ? 'w-full' : 'flex-1 min-w-[320px]'
+            isAssistantCollapsed ? 'w-full' : 'flex-1 min-w-[320px]'
           }`}
           style={{
-            backgroundColor: '#fafaf9',
+            backgroundColor: `rgba(255, 254, 248, ${paperOpacity})`,
             backgroundImage:
               paperPattern === 'grid'
-                ? 'linear-gradient(to right, rgba(148, 163, 184, 0.22) 1px, transparent 1px), linear-gradient(to bottom, rgba(148, 163, 184, 0.22) 1px, transparent 1px)'
+                ? `linear-gradient(to right, rgba(125, 145, 166, ${0.11 * paperOpacity}) 1px, transparent 1px), linear-gradient(to bottom, rgba(125, 145, 166, ${0.11 * paperOpacity}) 1px, transparent 1px), radial-gradient(ellipse at 18% 12%, rgba(190, 166, 119, 0.045), transparent 70%)`
                 : paperPattern === 'lined'
-                ? 'linear-gradient(to bottom, transparent calc(28px - 1px), rgba(148, 163, 184, 0.28) calc(28px - 1px))'
-                : 'none',
-            backgroundSize: paperPattern === 'grid' ? '24px 24px' : paperPattern === 'lined' ? '100% 28px' : 'auto'
+                ? `linear-gradient(to bottom, transparent 27px, rgba(125, 145, 166, ${0.17 * paperOpacity}) 28px), linear-gradient(to right, transparent 47px, rgba(196, 112, 102, ${0.16 * paperOpacity}) 48px, transparent 49px), radial-gradient(ellipse at 18% 12%, rgba(190, 166, 119, 0.045), transparent 70%)`
+                : 'radial-gradient(ellipse at 18% 12%, rgba(190, 166, 119, 0.045), transparent 70%)',
+            backgroundSize: paperPattern === 'grid' ? '28px 28px, 28px 28px, 100% 100%' : paperPattern === 'lined' ? '100% 28px, 100% 100%, 100% 100%' : '100% 100%'
           }}
         >
-          {/* 草稿纸两大部分视觉分区标识：1是画图区，2是写公式区（彻底解决重叠） */}
-          <div className="absolute inset-0 pointer-events-none flex select-none z-10">
-            {/* 左半部分：1. 画图区 */}
-            <div className="w-1/2 h-full border-r-2 border-dashed border-primary/25 dark:border-primary/20 flex flex-col justify-between p-2.5">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-container-highest/85 backdrop-blur-xs text-[11px] font-bold text-primary w-fit border border-primary/20 shadow-2xs">
-                <span className="material-symbols-outlined text-[15px]">draw</span>
-                <span>1. 画图区 (手绘涂鸦 · 几何图形 · 函数曲线)</span>
-              </div>
-              <div className="text-[10px] text-outline/60 pl-1 font-mono">
-                📐 坐标系与几何图形自动归位于此
-              </div>
-            </div>
-
-            {/* 右半部分：2. 写公式区 */}
-            <div className="w-1/2 h-full flex flex-col justify-between p-2.5">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-container-highest/85 backdrop-blur-xs text-[11px] font-bold text-secondary w-fit border border-secondary/20 shadow-2xs">
-                <span className="material-symbols-outlined text-[15px]">functions</span>
-                <span>2. 写公式区 (核心公式 · 展开通式 · 步骤板书)</span>
-              </div>
-              <div className="text-[10px] text-outline/60 pl-1 font-mono">
-                📝 公式板书自动排布在此，绝不与图形重叠
-              </div>
-            </div>
-          </div>
-
           {/* 底层手绘涂鸦 Canvas */}
           <canvas
             ref={canvasRef}
@@ -1932,7 +2493,7 @@ export default function ScratchpadCanvas({
           )}
 
           {elements.length > 0 && (
-            <div className="absolute bottom-2.5 right-3 pointer-events-none text-[11px] bg-surface-container-lowest/85 backdrop-blur-xs px-2.5 py-1 rounded-full border border-outline-variant/30 text-on-surface-variant flex items-center gap-1.5 shadow-xs">
+            <div className="absolute bottom-2.5 right-3 pointer-events-none text-[10px] text-stone-600/75 flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[14px] text-primary">drag_pan</span>
               <span>按住图元顶部手柄或使用【拖动】工具，可任意挪动画入内容</span>
             </div>
@@ -1940,21 +2501,59 @@ export default function ScratchpadCanvas({
         </div>
 
         {/* 右侧：一体化公式板书与 Agent Loop 帮画/帮写协作区 */}
-        {!isNotesCollapsed && (
-          <div className="w-full lg:w-[420px] xl:w-[460px] h-full flex flex-col gap-2 shrink-0 animate-in fade-in duration-150">
+        {!isAssistantCollapsed && !isFocusMode && (
+          <div className="w-full lg:w-[420px] xl:w-[460px] h-[min(48vh,360px)] min-h-[260px] lg:h-full flex flex-col gap-2 shrink-0 min-h-0 animate-in fade-in duration-150">
             {/* 模块 1：Agent Loop 口述帮画 & 帮写工作区 */}
-            <div className="bg-surface-container-low rounded-xl p-2.5 border border-outline-variant/30 flex flex-col gap-2 shrink-0">
-              <div className="flex items-center justify-between text-[12px] font-medium text-on-surface">
-                <div className="flex items-center gap-1 text-primary">
-                  <span className="material-symbols-outlined text-[16px]">smart_toy</span>
-                  <span>AI 帮画图 & 帮写板书 (Agent Loop)</span>
+            <div className="flex flex-col gap-2 flex-1 min-h-0 overflow-hidden px-1">
+              <div className="flex items-center justify-between gap-3 pb-2 border-b border-outline-variant/15">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/10">
+                    <span className="material-symbols-outlined text-[18px]">edit_note</span>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold leading-tight tracking-wide text-on-surface">草稿纸助手</div>
+                    <div className="mt-0.5 truncate text-[10px] leading-tight text-on-surface-variant">只按你的指令画写，不推导答案</div>
+                  </div>
                 </div>
-                <span className="text-[10px] text-outline">
-                  只能帮画/写您说的 · 严禁帮算
-                </span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {modelStatus?.success && (
+                    <div
+                      className="hidden sm:inline-flex h-7 items-center gap-1 rounded-lg border border-outline-variant/25 bg-surface-container-low px-1.5 font-label-mono text-[9px] text-on-surface-variant"
+                      title={`本机今日用量：${todayModelTokens.toLocaleString()} tokens；费用估算 ${todayModelCostKnown ? `¥${todayModelCost.toFixed(4)}` : '暂无单价'}${isOfficialDeepSeek ? `；DeepSeek 钱包 ${modelWallet ? `${modelWallet.currency === 'CNY' ? '¥' : '$'}${modelWallet.totalBalance.toFixed(2)}` : '暂不可用'}` : ''}`}
+                      aria-label={`AI 今日 ${todayModelTokens.toLocaleString()} tokens，费用估算 ${todayModelCostKnown ? `¥${todayModelCost.toFixed(4)}` : '暂无单价'}`}
+                    >
+                      <span className="material-symbols-outlined text-[12px] text-primary">token</span>
+                      <span>{todayModelTokens.toLocaleString()}</span>
+                      <span className="text-outline-variant">·</span>
+                      <span>{todayModelCostKnown ? `¥${todayModelCost.toFixed(4)}` : '¥—'}</span>
+                      {isOfficialDeepSeek && (
+                        <>
+                          <span className="text-outline-variant">·</span>
+                          <span className="material-symbols-outlined text-[12px] text-secondary">account_balance_wallet</span>
+                          <span>{modelWallet ? `${modelWallet.currency === 'CNY' ? '¥' : '$'}${modelWallet.totalBalance.toFixed(2)}` : '—'}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {isAgentRunning && <span className="inline-flex items-center gap-1 text-[10px] text-primary"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />处理中</span>}
+                  <button type="button" onClick={clearAgentChat} disabled={!agentChatMessages.length || isAgentRunning} className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[10px] text-on-surface-variant/75 transition hover:bg-error/5 hover:text-error disabled:opacity-35" title="清空本题对话记录；不会清除草稿纸上的笔迹和图形">
+                    <span className="material-symbols-outlined text-[14px]">delete_sweep</span><span>清空</span>
+                  </button>
+                </div>
               </div>
 
-              {/* 模块 1.1：本题专属公式快捷提取与快捷胶囊栏 */}
+              <button
+                type="button"
+                onClick={() => setShowFormulaReference((visible) => !visible)}
+                aria-expanded={showFormulaReference}
+                className="w-full flex items-center justify-between border-b border-outline-variant/20 px-1 py-1.5 text-left text-[11px] text-on-surface-variant/75 hover:text-primary transition"
+              >
+                <span className="flex items-center gap-1.5"><span className="material-symbols-outlined text-[14px]">functions</span>题目公式参考 <span className="rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">{mathChips.length}</span></span>
+                <span className="material-symbols-outlined text-[15px]">{showFormulaReference ? 'expand_less' : 'expand_more'}</span>
+              </button>
+
+              {/* 公式参考按需展开，避免压缩聊天区域 */}
+              {showFormulaReference && <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-surface-container-lowest/80 border border-outline-variant/30 max-h-[180px] overflow-hidden">
               <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-surface-container-lowest/80 border border-outline-variant/30">
                 <div className="flex items-center justify-between gap-1 flex-wrap">
                   <div className="flex items-center gap-1.5 text-[11px] font-semibold text-on-surface">
@@ -2074,40 +2673,56 @@ export default function ScratchpadCanvas({
                     })
                   )}
                 </div>
-              </div>
+              </div></div>}
 
-              {/* 常用几何画图快捷指令胶囊 */}
-              <div className="flex items-center gap-1 flex-wrap">
-                <span className="text-[10px] text-outline font-medium">常用图形:</span>
-                {[
-                  { label: '📈 坐标系', prompt: '帮我画一个标准的直角坐标系' },
-                  { label: '抛物线 y=x²', prompt: '画一个直角坐标系并绘制二次函数 y=x^2 抛物线' },
-                  { label: '正弦 y=sin(x)', prompt: '画一个直角坐标系并绘制正弦波 y=sin(x)' },
-                  { label: '📐 直角三角形', prompt: '画一个直角三角形 ABC，角 C 为直角' },
-                  { label: '⭕ 圆与半径', prompt: '画一个圆并标出圆心 O 和半径 r' }
-                ].map((item) => (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => {
-                      setSpokenInput(item.prompt);
-                      handleTriggerAgentLoop(item.prompt);
-                    }}
-                    disabled={isAgentRunning}
-                    className="px-2 py-0.5 rounded-md bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface text-[10px] font-medium border border-outline-variant/30 transition cursor-pointer disabled:opacity-40"
-                    title={`点击快捷执行：${item.prompt}`}
-                  >
-                    {item.label}
-                  </button>
+              <div ref={agentChatScrollRef} role="log" aria-live="polite" aria-label="草稿纸助手对话" className="flex-1 min-h-[72px] overflow-y-auto px-1 py-2 space-y-3">
+                {agentChatMessages.length === 0 ? (
+                  <div className="h-full min-h-[100px] flex flex-col items-center justify-center gap-2 text-center px-2">
+                    <div className="w-9 h-9 rounded-2xl bg-primary/10 text-primary flex items-center justify-center"><span className="material-symbols-outlined text-[20px]">draw</span></div>
+                    <div><div className="text-[12px] font-semibold text-on-surface">草稿纸助手已就绪</div><div className="mt-1 text-[10px] leading-relaxed text-on-surface-variant">可以简单聊聊，也可以告诉我画什么或誊写什么。</div></div>
+                    <div className="flex flex-wrap justify-center gap-1.5 mt-1">
+                      {[
+                        { label: '画坐标系', prompt: '帮我画一个标准的直角坐标系' },
+                        { label: '画抛物线', prompt: '画一个直角坐标系并绘制二次函数 y=x^2 抛物线' },
+                        { label: '写下公式', prompt: '帮我把公式写到草稿纸上：' }
+                      ].map((suggestion) => <button key={suggestion.label} type="button" onClick={() => setSpokenInput(suggestion.prompt)} disabled={isAgentRunning} className="rounded-full border border-primary/15 bg-surface-container-lowest/80 px-2.5 py-1 text-[10px] text-primary hover:bg-primary/10 transition disabled:opacity-40">{suggestion.label}</button>)}
+                    </div>
+                    <span className="text-[9px] text-outline mt-1">只按指令画写 · 不推导、不代答</span>
+                  </div>
+                ) : agentChatMessages.map((message) => (
+                  <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[92%] rounded-xl px-2.5 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words ${
+                      message.role === 'user'
+                          ? 'bg-primary text-on-primary rounded-2xl rounded-br-sm shadow-sm'
+                        : message.status === 'blocked'
+                        ? 'bg-amber-50 text-amber-900 border border-amber-200 rounded-bl-sm'
+                        : message.status === 'error'
+                        ? 'bg-error/10 text-error border border-error/20 rounded-bl-sm'
+                        : 'bg-white/80 text-on-surface rounded-2xl rounded-bl-sm shadow-sm'
+                    }`}>
+                      {message.role !== 'user' && <div className="font-semibold text-[10px] mb-0.5">{message.status === 'blocked' ? '安全提示' : message.status === 'error' ? '执行未完成' : '草稿纸助手'}</div>}
+                      <div>{message.content}</div>
+                      {message.details?.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{message.details.map((detail) => <span key={detail} className="rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px]">{detail}</span>)}</div>}
+                    </div>
+                  </div>
                 ))}
+                {isAgentRunning && <div className="flex justify-start"><div className="rounded-xl rounded-bl-sm bg-surface-container px-2.5 py-1.5 text-[10px] text-primary flex items-center gap-1.5"><span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>{agentLoopStage || '正在处理指令…'}</div></div>}
               </div>
 
               {/* 口述/需求输入框 */}
               <div className="relative">
+                <label htmlFor="scratchpad-ai-prompt" className="sr-only">草稿纸 AI 帮画或帮写指令</label>
                 <textarea
+                  id="scratchpad-ai-prompt"
                   value={spokenInput}
                   onChange={(e) => setSpokenInput(e.target.value)}
-                  placeholder="说出或点击上方题目公式（例如：“帮我把公式 $ax^2 + bx + \arcsin x$ 写入画板” 或 “画函数图像 y=x^2”）... AI 将严格按您所说作画写字，严禁替算答案"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      handleTriggerAgentLoop();
+                    }
+                  }}
+                  placeholder="聊聊天，或告诉我画什么、誊写什么… Enter 发送，Shift+Enter 换行"
                   disabled={isAgentRunning}
                   rows={2}
                   className="w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/40 text-[12px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary resize-none leading-relaxed pr-6"
@@ -2125,80 +2740,22 @@ export default function ScratchpadCanvas({
               </div>
 
               {/* Agent 触发按钮与状态 */}
-              <div className="flex items-center justify-between gap-1 flex-wrap">
-                <div className="flex items-center gap-1 text-[11px]">
-                  {isAgentRunning ? (
-                    <span className="text-primary font-mono animate-pulse flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px] animate-spin">sync</span>
-                      <span>{agentLoopStage}</span>
-                    </span>
-                  ) : agentMessage ? (
-                    <span className="text-secondary text-[11px] truncate max-w-[210px]" title={agentMessage}>
-                      {agentMessage}
-                    </span>
-                  ) : (
-                    <span className="text-outline text-[11px]">随时下达画图或写字指令</span>
-                  )}
-                </div>
-
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-outline">只操作草稿纸，不填写答题区</span>
                 <button
                   type="button"
                   onClick={() => handleTriggerAgentLoop()}
                   disabled={isAgentRunning || !spokenInput.trim()}
-                  className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-40 shadow-xs"
+                  className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-40 shadow-xs"
                 >
                   <span className={`material-symbols-outlined text-[13px] ${isAgentRunning ? 'animate-spin' : ''}`}>
                     {isAgentRunning ? 'progress_activity' : 'auto_fix_high'}
                   </span>
-                  <span>{isAgentRunning ? '执行绘制中...' : '⚡ AI 帮画 / 帮写'}</span>
+                  <span>{isAgentRunning ? '正在操作…' : '发送并操作草稿纸'}</span>
                 </button>
               </div>
             </div>
 
-            {/* 模块 2：规范板书与 KaTeX 预览 */}
-            <div className="flex-1 min-h-0 bg-surface-container-low rounded-xl p-2.5 border border-outline-variant/30 flex flex-col gap-1.5 overflow-hidden">
-              <div className="flex items-center justify-between pb-1 border-b border-surface-container shrink-0 text-[12px]">
-                <div className="flex items-center gap-1.5 text-on-surface font-medium">
-                  <span className="material-symbols-outlined text-[15px] text-secondary">menu_book</span>
-                  <span>板书备份与 KaTeX 公式</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={handleClearNotesClick}
-                    className="text-outline hover:text-error text-[11px] px-1.5 py-0.5 rounded hover:bg-surface-container transition cursor-pointer"
-                    title="清空板书"
-                  >
-                    清空板书
-                  </button>
-                </div>
-              </div>
-
-              {/* 板书内容展示与编辑 */}
-              <div className="flex-1 min-h-0 grid grid-cols-1 gap-2 overflow-hidden">
-                <textarea
-                  value={boardText}
-                  onChange={(e) => setBoardText(e.target.value)}
-                  placeholder="AI 整理的公式板书文本同步备份于此，亦可在此自由记录..."
-                  className="h-20 w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/30 text-[12px] font-mono text-on-surface focus:outline-none resize-none leading-relaxed shrink-0"
-                />
-
-                <div className="flex-1 overflow-y-auto p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/30 text-[13px] leading-relaxed text-on-surface">
-                  {boardText.trim() ? (
-                    <MathMarkdown content={boardText} />
-                  ) : (
-                    <div className="text-outline text-center py-6 text-[12px]">
-                      在上方输入指令让 AI 在左侧画图/写字，右侧将同步呈现高保真 KaTeX 公式
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="pt-1 border-t border-surface-container flex items-center justify-between shrink-0 text-[11px] text-outline font-mono">
-                <span>{boardText.length} 字符</span>
-                <span>草稿演算专享 · 不计入卷面</span>
-              </div>
-            </div>
           </div>
         )}
       </div>

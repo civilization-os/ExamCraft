@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import SelectMenu from '../components/SelectMenu';
 
 export default function SettingsView() {
   // Category: 'official' | 'protocol'
   const [category, setCategory] = useState('official');
+  const [providerMode, setProviderMode] = useState('other-official');
   
   // Official fields
   const [vendor, setVendor] = useState('gemini'); // 'gemini' | 'openai' | 'anthropic'
@@ -12,6 +14,8 @@ export default function SettingsView() {
   const [protocol, setProtocol] = useState('openai-compatible');
   const [baseURL, setBaseURL] = useState('https://api.deepseek.com/v1');
   const [protocolModel, setProtocolModel] = useState('deepseek-chat');
+  const [customInputPricePerMillion, setCustomInputPricePerMillion] = useState('');
+  const [customOutputPricePerMillion, setCustomOutputPricePerMillion] = useState('');
 
   // Common fields
   const [apiKey, setApiKey] = useState('');
@@ -19,13 +23,60 @@ export default function SettingsView() {
   const [hasSavedKey, setHasSavedKey] = useState(false);
   const [apiKeyMasked, setApiKeyMasked] = useState('');
   const [temperature, setTemperature] = useState(0.7);
+  const [maxOutputTokens, setMaxOutputTokens] = useState(16384);
   const [timeoutSec, setTimeoutSec] = useState(30);
+  const [structuredRetryLimit, setStructuredRetryLimit] = useState(3);
+  const [modelUsage, setModelUsage] = useState(null);
+  const [modelStatus, setModelStatus] = useState(null);
+  const refreshModelUsage = () => fetch('/api/model/usage')
+    .then((res) => res.json())
+    .then((data) => { if (data.success) setModelUsage(data); })
+    .catch((err) => console.error('Failed to load model usage:', err));
+  const refreshModelStatus = (force = false) => fetch(`/api/model/status${force ? '?refresh=1' : ''}`)
+    .then((res) => res.json())
+    .then((data) => { if (data.success) setModelStatus(data); })
+    .catch((err) => console.error('Failed to load model status:', err));
 
   // Status & Test feedback
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState(null); // { success: boolean, message: string, latencyMs?: number, provider?: string }
   const [saveMessage, setSaveMessage] = useState('');
+  const [defaultExamLayout, setDefaultExamLayout] = useState(() => {
+    try { return localStorage.getItem('examcraft_exam_default_layout') || 'split'; }
+    catch { return 'split'; }
+  });
+  const [showAnswersDefault, setShowAnswersDefault] = useState(() => {
+    try { return localStorage.getItem('examcraft_exam_show_answers_default') !== 'false'; }
+    catch { return true; }
+  });
+  const agentToneOptions = [
+    { value: 'supportive', title: '温和鼓励', detail: '语气友善，适度肯定，避免催促', icon: 'favorite' },
+    { value: 'concise', title: '简洁直接', detail: '少寒暄，清楚说明操作结果', icon: 'short_text' },
+    { value: 'patient', title: '耐心清晰', detail: '分步骤说明，表达容易理解', icon: 'record_voice_over' },
+    { value: 'professional', title: '严谨专业', detail: '措辞准确克制，反馈规范', icon: 'school' }
+  ];
+  const [scratchpadAgentTone, setScratchpadAgentTone] = useState(() => {
+    try {
+      const saved = localStorage.getItem('examcraft_scratchpad_agent_tone');
+      return agentToneOptions.some((option) => option.value === saved) ? saved : 'supportive';
+    } catch { return 'supportive'; }
+  });
+
+  const handleDefaultExamLayoutChange = (layout) => {
+    setDefaultExamLayout(layout);
+    try { localStorage.setItem('examcraft_exam_default_layout', layout); } catch {}
+  };
+
+  const handleShowAnswersDefaultChange = (show) => {
+    setShowAnswersDefault(show);
+    try { localStorage.setItem('examcraft_exam_show_answers_default', String(show)); } catch {}
+  };
+
+  const handleScratchpadAgentToneChange = (tone) => {
+    setScratchpadAgentTone(tone);
+    try { localStorage.setItem('examcraft_scratchpad_agent_tone', tone); } catch {}
+  };
 
   // Local storage stats & clear
   const [localStats, setLocalStats] = useState(() => {
@@ -53,7 +104,14 @@ export default function SettingsView() {
         localStorage.removeItem('examcraft_papers');
         localStorage.removeItem('examcraft_submissions');
         localStorage.removeItem('examcraft_notebook_data');
+        localStorage.removeItem('examcraft_active_paper');
+        localStorage.removeItem('examcraft_active_submission');
+        localStorage.removeItem('examcraft_generator_session');
         localStorage.removeItem('examcraft_scratchpad_default');
+        localStorage.removeItem('examcraft_exam_default_layout');
+        localStorage.removeItem('examcraft_exam_show_answers_default');
+        localStorage.removeItem('examcraft_scratchpad_agent_tone');
+        localStorage.removeItem('examcraft_exam_split_ratio');
         Object.keys(localStorage).forEach((k) => {
           if (k.startsWith('examcraft_scratchpad_')) localStorage.removeItem(k);
         });
@@ -71,35 +129,51 @@ export default function SettingsView() {
         if (data.success && data.config) {
           const c = data.config;
           setCategory(c.category || 'official');
+          const detectedMode = c.providerMode || (c.category === 'protocol'
+            ? (() => { try { return new URL(c.baseURL).hostname === 'api.deepseek.com' ? 'deepseek-official' : 'custom'; } catch { return 'custom'; } })()
+            : 'other-official');
+          setProviderMode(detectedMode);
           if (c.category === 'official') {
             setVendor(c.vendor || 'gemini');
             setOfficialModel(c.modelName || 'gemini-2.5-flash');
           } else {
             setProtocol(c.protocol || 'openai-compatible');
             setBaseURL(c.baseURL || 'https://api.deepseek.com/v1');
-            setProtocolModel(c.modelName || 'deepseek-chat');
+            setProtocolModel(c.modelName || (detectedMode === 'deepseek-official' ? 'deepseek-flash' : 'qwen2.5:7b'));
           }
+          setCustomInputPricePerMillion(c.customInputPricePerMillion ? String(c.customInputPricePerMillion) : '');
+          setCustomOutputPricePerMillion(c.customOutputPricePerMillion ? String(c.customOutputPricePerMillion) : '');
           if (c.hasApiKey) {
             setHasSavedKey(true);
             setApiKeyMasked(c.apiKeyMasked || '');
           }
           if (c.temperature !== undefined) setTemperature(c.temperature);
+          if (c.maxTokens !== undefined) setMaxOutputTokens(Math.min(384000, Math.max(16384, Number(c.maxTokens) || 16384)));
           if (c.timeoutMs) setTimeoutSec(c.timeoutMs / 1000);
+          if (c.structuredRetryLimit !== undefined) setStructuredRetryLimit(Math.min(10, Math.max(3, Number(c.structuredRetryLimit) || 3)));
         }
       })
       .catch((err) => console.error('Failed to load model config:', err));
+    refreshModelUsage();
+    refreshModelStatus();
   }, []);
 
   const buildPayload = () => {
     const base = {
-      modelName: category === 'official' ? officialModel : protocolModel,
+      modelName: providerMode === 'other-official' ? officialModel : protocolModel,
       apiKey: apiKey.trim() || (hasSavedKey ? apiKeyMasked : ''),
       temperature: Number(temperature),
+      maxTokens: Math.min(384000, Math.max(16384, Number(maxOutputTokens) || 16384)),
       timeoutMs: Number(timeoutSec) * 1000,
-      maxRetries: 2
+      maxRetries: 0,
+      structuredRetryLimit: Number(structuredRetryLimit),
+      providerMode,
+      customInputPricePerMillion: Number(customInputPricePerMillion) || 0,
+      customOutputPricePerMillion: Number(customOutputPricePerMillion) || 0,
+      customPricingConfigured: customInputPricePerMillion.trim() !== '' && customOutputPricePerMillion.trim() !== ''
     };
 
-    if (category === 'official') {
+    if (providerMode === 'other-official') {
       return {
         ...base,
         category: 'official',
@@ -109,8 +183,8 @@ export default function SettingsView() {
       return {
         ...base,
         category: 'protocol',
-        protocol: protocol,
-        baseURL: baseURL.trim()
+        protocol: providerMode === 'deepseek-official' ? 'openai-compatible' : protocol,
+        baseURL: providerMode === 'deepseek-official' ? 'https://api.deepseek.com' : baseURL.trim()
       };
     }
   };
@@ -131,6 +205,8 @@ export default function SettingsView() {
         setHasSavedKey(data.config.hasApiKey);
         setApiKeyMasked(data.config.apiKeyMasked);
         setApiKey('');
+        window.dispatchEvent(new Event('examcraft-model-config-updated'));
+        refreshModelStatus();
       } else {
         setSaveMessage(`❌ 保存失败: ${data.error}`);
       }
@@ -178,27 +254,17 @@ export default function SettingsView() {
     }
   };
 
-  // Quick preset helper
-  const applyPreset = (type) => {
-    if (type === 'gemini') {
+  const selectProviderMode = (mode) => {
+    setProviderMode(mode);
+    if (mode === 'other-official') {
       setCategory('official');
-      setVendor('gemini');
-      setOfficialModel('gemini-2.5-flash');
-    } else if (type === 'deepseek') {
-      setCategory('protocol');
+      return;
+    }
+    setCategory('protocol');
+    if (mode === 'deepseek-official') {
       setProtocol('openai-compatible');
-      setBaseURL('https://api.deepseek.com/v1');
-      setProtocolModel('deepseek-chat');
-    } else if (type === 'openai') {
-      setCategory('official');
-      setVendor('openai');
-      setOfficialModel('gpt-4o');
-    } else if (type === 'ollama') {
-      setCategory('protocol');
-      setProtocol('openai-compatible');
-      setBaseURL('http://localhost:11434/v1');
-      setProtocolModel('qwen2.5:7b');
-      setApiKey('EMPTY');
+      setBaseURL('https://api.deepseek.com');
+      if (!['deepseek-flash', 'deepseek-v4-pro'].includes(protocolModel)) setProtocolModel('deepseek-flash');
     }
   };
 
@@ -215,70 +281,141 @@ export default function SettingsView() {
             模型核心与 API Key 配置中心
           </h1>
           <p className="font-body-md text-body-md text-on-surface-variant">
-            基于底层统一架构 <code>model_core</code>，支持 Google Gemini、OpenAI、Anthropic 等官方提供商，以及兼容 DeepSeek、OneAPI、Ollama 等协议自部署网关。在此输入并校验您的 API Key。
+            可直连 DeepSeek 官方 API、配置其他云端模型，或接入自定义兼容接口。费用记录保存在本机，余额只向 DeepSeek 官方查询。
           </p>
         </section>
 
-        {/* Quick Presets */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-label-sm text-label-sm text-on-surface-variant font-semibold">一键快速套用预设:</span>
-          <button
-            type="button"
-            onClick={() => applyPreset('gemini')}
-            className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm font-semibold transition-colors cursor-pointer border border-primary/20"
-          >
-            Google Gemini 官方
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPreset('deepseek')}
-            className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-secondary font-label-sm font-semibold transition-colors cursor-pointer border border-secondary/20"
-          >
-            DeepSeek 协议直连
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPreset('openai')}
-            className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm font-semibold transition-colors cursor-pointer border border-outline-variant/30"
-          >
-            OpenAI 官方
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPreset('ollama')}
-            className="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm font-semibold transition-colors cursor-pointer border border-outline-variant/30"
-          >
-            本地 Ollama / vLLM
-          </button>
-        </div>
+        <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
+          <div>
+            <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold">答题默认布局</h2>
+            <p className="mt-1 text-body-sm text-on-surface-variant">设置进入考试时的默认工作区。考试中仍可通过顶部按钮临时切换；拖动分隔线调整的宽度会单独记住。</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl" role="radiogroup" aria-label="答题默认布局">
+            {[
+              { value: 'split', title: '左右分栏', detail: '左侧答题，右侧草稿纸', icon: 'vertical_split' },
+              { value: 'stacked', title: '上下布局', detail: '答题区全宽，草稿纸按需打开', icon: 'view_agenda' }
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={defaultExamLayout === option.value}
+                onClick={() => handleDefaultExamLayoutChange(option.value)}
+                className={`flex items-start gap-3 rounded-xl border p-4 text-left transition cursor-pointer ${defaultExamLayout === option.value ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container-low'}`}
+              >
+                <span className={`material-symbols-outlined mt-0.5 ${defaultExamLayout === option.value ? 'text-primary' : 'text-on-surface-variant'}`}>{option.icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-label-md font-semibold text-on-surface">{option.title}</span>
+                  <span className="mt-0.5 block text-label-sm text-on-surface-variant">{option.detail}</span>
+                </span>
+                <span className={`material-symbols-outlined text-[18px] ${defaultExamLayout === option.value ? 'text-primary' : 'text-outline-variant'}`}>
+                  {defaultExamLayout === option.value ? 'radio_button_checked' : 'radio_button_unchecked'}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="text-label-sm text-secondary" aria-live="polite">默认布局已保存在本机设置中。</div>
+        </section>
+
+        <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
+          <div>
+            <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold">解析预览默认答案显示</h2>
+            <p className="mt-1 text-body-sm text-on-surface-variant">控制智能组卷的题稿解析预览首次打开时，是否展示标准答案和解析。只影响预览显示，不会删除试卷中的答案。</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl" role="radiogroup" aria-label="解析预览默认答案显示">
+            {[
+              { value: true, title: '默认显示答案', detail: '预览中显示标准答案，可展开解析', icon: 'visibility' },
+              { value: false, title: '默认隐藏答案', detail: '预览中先隐藏答案与解析', icon: 'visibility_off' }
+            ].map((option) => (
+              <button
+                key={String(option.value)}
+                type="button"
+                role="radio"
+                aria-checked={showAnswersDefault === option.value}
+                onClick={() => handleShowAnswersDefaultChange(option.value)}
+                className={`flex items-start gap-3 rounded-xl border p-4 text-left transition cursor-pointer ${showAnswersDefault === option.value ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container-low'}`}
+              >
+                <span className={`material-symbols-outlined mt-0.5 ${showAnswersDefault === option.value ? 'text-primary' : 'text-on-surface-variant'}`}>{option.icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-label-md font-semibold text-on-surface">{option.title}</span>
+                  <span className="mt-0.5 block text-label-sm text-on-surface-variant">{option.detail}</span>
+                </span>
+                <span className={`material-symbols-outlined text-[18px] ${showAnswersDefault === option.value ? 'text-primary' : 'text-outline-variant'}`}>
+                  {showAnswersDefault === option.value ? 'radio_button_checked' : 'radio_button_unchecked'}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="text-label-sm text-secondary" aria-live="polite">默认显示偏好已保存在本机设置中。</div>
+        </section>
+
+        <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
+          <div>
+            <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold">草稿纸助手语气</h2>
+            <p className="mt-1 text-body-sm text-on-surface-variant">选择助手的默认交流方式，只影响操作反馈和安全提示，不会改变作图、誊写或防代答规则。设置保存在本机。</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl" role="radiogroup" aria-label="草稿纸助手语气">
+            {agentToneOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={scratchpadAgentTone === option.value}
+                onClick={() => handleScratchpadAgentToneChange(option.value)}
+                className={`flex items-start gap-3 rounded-xl border p-4 text-left transition cursor-pointer ${scratchpadAgentTone === option.value ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container-low'}`}
+              >
+                <span className={`material-symbols-outlined mt-0.5 ${scratchpadAgentTone === option.value ? 'text-primary' : 'text-on-surface-variant'}`}>{option.icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-label-md font-semibold text-on-surface">{option.title}</span>
+                  <span className="mt-0.5 block text-label-sm text-on-surface-variant">{option.detail}</span>
+                </span>
+                <span className={`material-symbols-outlined text-[18px] ${scratchpadAgentTone === option.value ? 'text-primary' : 'text-outline-variant'}`}>
+                  {scratchpadAgentTone === option.value ? 'radio_button_checked' : 'radio_button_unchecked'}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="text-label-sm text-secondary" aria-live="polite">语气偏好已保存在本机设置中。</div>
+        </section>
 
         {/* Main Model Core Configuration Deck */}
         <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-lg">
           {/* Category Tabs */}
           <div>
             <label className="block text-label-md font-semibold text-on-surface mb-2">模型调度架构分类</label>
-            <div className="grid grid-cols-2 p-1 bg-surface-container-high rounded-xl max-w-md border border-outline-variant/30">
+            <div className="grid grid-cols-1 sm:grid-cols-3 p-1 bg-surface-container-high rounded-xl max-w-3xl border border-outline-variant/30">
               <button
                 type="button"
-                onClick={() => setCategory('official')}
+                onClick={() => selectProviderMode('deepseek-official')}
                 className={`py-2 px-4 rounded-lg font-label-md text-label-md transition-all cursor-pointer ${
-                  category === 'official'
+                  providerMode === 'deepseek-official'
                     ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold'
                     : 'text-on-surface-variant hover:text-on-surface'
                 }`}
               >
-                云端厂商直连 (Official)
+                DeepSeek 官方
               </button>
               <button
                 type="button"
-                onClick={() => setCategory('protocol')}
+                onClick={() => selectProviderMode('custom')}
                 className={`py-2 px-4 rounded-lg font-label-md text-label-md transition-all cursor-pointer ${
-                  category === 'protocol'
+                  providerMode === 'custom'
                     ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold'
                     : 'text-on-surface-variant hover:text-on-surface'
                 }`}
               >
-                网关与自部署协议 (Protocol)
+                自定义接口
+              </button>
+              <button
+                type="button"
+                onClick={() => selectProviderMode('other-official')}
+                className={`py-2 px-4 rounded-lg font-label-md text-label-md transition-all cursor-pointer ${
+                  providerMode === 'other-official'
+                    ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                其他官方模型
               </button>
             </div>
           </div>
@@ -289,21 +426,23 @@ export default function SettingsView() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
                 <div>
                   <label className="block text-label-md font-semibold text-on-surface mb-1">官方厂商 (Vendor)</label>
-                  <select
+                  <SelectMenu
+                    ariaLabel="官方模型厂商"
                     value={vendor}
-                    onChange={(e) => {
-                      const v = e.target.value;
+                    onChange={(v) => {
                       setVendor(v);
                       if (v === 'gemini') setOfficialModel('gemini-2.5-flash');
                       if (v === 'openai') setOfficialModel('gpt-4o');
                       if (v === 'anthropic') setOfficialModel('claude-3-7-sonnet');
                     }}
-                    className="w-full px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/30 text-on-surface font-mono"
-                  >
-                    <option value="gemini">Google Gemini (官方 SDK: @google/genai)</option>
-                    <option value="openai">OpenAI (官方 SDK: openai)</option>
-                    <option value="anthropic">Anthropic (官方 SDK: @anthropic-ai/sdk)</option>
-                  </select>
+                    options={[
+                      { value: 'gemini', label: 'Google Gemini (官方 SDK: @google/genai)' },
+                      { value: 'openai', label: 'OpenAI (官方 SDK: openai)' },
+                      { value: 'anthropic', label: 'Anthropic (官方 SDK: @anthropic-ai/sdk)' }
+                    ]}
+                    className="w-full"
+                    buttonClassName="inline-flex w-full items-center justify-between gap-3 rounded-lg border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-left font-mono text-on-surface hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  />
                 </div>
 
                 <div>
@@ -324,27 +463,38 @@ export default function SettingsView() {
           {category === 'protocol' && (
             <div className="space-y-4 pt-2 border-t border-surface-container">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
-                <div>
+                {providerMode === 'custom' && <div>
                   <label className="block text-label-md font-semibold text-on-surface mb-1">协议标准 (Protocol)</label>
-                  <select
+                  <SelectMenu
+                    ariaLabel="兼容接口协议标准"
                     value={protocol}
-                    onChange={(e) => setProtocol(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/30 text-on-surface font-mono"
-                  >
-                    <option value="openai-compatible">OpenAI Compatible (DeepSeek / Ollama / vLLM / OneAPI)</option>
-                    <option value="anthropic-compatible">Anthropic Compatible</option>
-                  </select>
-                </div>
+                    onChange={setProtocol}
+                    options={[
+                      { value: 'openai-compatible', label: 'OpenAI Compatible (DeepSeek / Ollama / vLLM / OneAPI)' },
+                      { value: 'anthropic-compatible', label: 'Anthropic Compatible' }
+                    ]}
+                    className="w-full"
+                    buttonClassName="inline-flex w-full items-center justify-between gap-3 rounded-lg border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-left font-mono text-on-surface hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  />
+                </div>}
 
                 <div>
-                  <label className="block text-label-md font-semibold text-on-surface mb-1">模型名称 (modelName)</label>
-                  <input
-                    type="text"
-                    value={protocolModel}
-                    onChange={(e) => setProtocolModel(e.target.value)}
-                    placeholder="如: deepseek-chat 或 qwen2.5:7b"
-                    className="w-full px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/30 text-on-surface font-mono text-body-md"
-                  />
+                  <label className="block text-label-md font-semibold text-on-surface mb-1">模型名称</label>
+                  {providerMode === 'deepseek-official' ? (
+                    <SelectMenu
+                      ariaLabel="DeepSeek 模型"
+                      value={protocolModel}
+                      onChange={setProtocolModel}
+                      options={[
+                        { value: 'deepseek-flash', label: 'deepseek-flash · 日常推荐' },
+                        { value: 'deepseek-v4-pro', label: 'deepseek-v4-pro · 高能力' }
+                      ]}
+                      className="w-full"
+                      buttonClassName="inline-flex w-full items-center justify-between gap-3 rounded-lg border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-left font-mono text-body-md text-on-surface hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    />
+                  ) : (
+                    <input type="text" value={protocolModel} onChange={(e) => setProtocolModel(e.target.value)} placeholder="例如：qwen-plus、模型部署名" className="w-full px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/30 text-on-surface font-mono text-body-md" />
+                  )}
                 </div>
               </div>
 
@@ -354,10 +504,26 @@ export default function SettingsView() {
                   type="text"
                   value={baseURL}
                   onChange={(e) => setBaseURL(e.target.value)}
-                  placeholder="https://api.deepseek.com/v1 或 http://localhost:11434/v1"
-                  className="w-full px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/30 text-on-surface font-mono text-body-md"
+                  readOnly={providerMode === 'deepseek-official'}
+                  placeholder="例如：https://your-provider.example/v1"
+                  className={`w-full px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/30 text-on-surface font-mono text-body-md ${providerMode === 'deepseek-official' ? 'opacity-70' : ''}`}
                 />
+                {providerMode === 'deepseek-official' && <p className="mt-1 text-label-sm text-on-surface-variant">官方 OpenAI 兼容地址由系统固定为 api.deepseek.com。</p>}
               </div>
+              {providerMode === 'deepseek-official' && <p className="text-label-sm text-on-surface-variant">DeepSeek 费用按当前官方单价和请求时段估算；节假日、活动价或官方调价可能造成差异，实际扣款以钱包为准。</p>}
+              {providerMode === 'custom' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md rounded-lg bg-surface-container-low p-3">
+                  <div>
+                    <label className="block text-label-sm font-semibold text-on-surface mb-1">输入单价（元 / 百万 token）</label>
+                    <input type="number" min="0" step="0.01" value={customInputPricePerMillion} onChange={(e) => setCustomInputPricePerMillion(e.target.value)} placeholder="不填则仅统计 token" className="w-full px-3 py-2 bg-surface-container-lowest rounded-lg border border-outline-variant/30 text-on-surface font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-label-sm font-semibold text-on-surface mb-1">输出单价（元 / 百万 token）</label>
+                    <input type="number" min="0" step="0.01" value={customOutputPricePerMillion} onChange={(e) => setCustomOutputPricePerMillion(e.target.value)} placeholder="不填则仅统计 token" className="w-full px-3 py-2 bg-surface-container-lowest rounded-lg border border-outline-variant/30 text-on-surface font-mono" />
+                  </div>
+                  <p className="md:col-span-2 text-label-sm text-on-surface-variant">输入和输出单价都填写后才会估算费用；留空时只统计 token。缓存折扣、峰谷价和网关加价需折算进单价。</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -397,6 +563,11 @@ export default function SettingsView() {
 
             <div className="flex items-center justify-between text-label-sm text-on-surface-variant">
               <span>🔒 您的 API Key 存储在本地配置文件，仅在服务器与厂商间经安全 HTTPS 转发，绝不上传第三方。</span>
+              {providerMode === 'deepseek-official' && (
+                <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer" className="text-primary hover:underline flex items-center gap-1">
+                  <span>DeepSeek API Key</span><span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                </a>
+              )}
               {vendor === 'gemini' && category === 'official' && (
                 <a
                   href="https://aistudio.google.com/app/apikey"
@@ -440,6 +611,38 @@ export default function SettingsView() {
                 onChange={(e) => setTimeoutSec(parseInt(e.target.value) || 30)}
                 className="w-full px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/30 text-on-surface font-mono"
               />
+            </div>
+            <div>
+              <label htmlFor="max-output-tokens" className="block text-label-md font-semibold text-on-surface mb-1">单次输出上限（max_tokens）</label>
+              <input
+                id="max-output-tokens"
+                type="number"
+                min="16384"
+                max="384000"
+                step="1024"
+                value={maxOutputTokens}
+                onChange={(e) => setMaxOutputTokens(Math.min(384000, Math.max(16384, Number(e.target.value) || 16384)))}
+                className="w-full px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/30 text-on-surface font-mono"
+              />
+              <span className="text-[11px] text-on-surface-variant block mt-1">交卷诊断会使用此上限。它是生成上限，不代表每次都会用满；DeepSeek 官方 Chat Completions 文档支持最高 384K，其他服务商仍受各自限制。</span>
+            </div>
+            <div className="md:col-span-2 rounded-xl bg-surface-container-low p-4">
+              <div className="flex justify-between items-center mb-1">
+                <label htmlFor="structured-retry-limit" className="text-label-md font-semibold text-on-surface">结构化解析重试上限</label>
+                <span className="font-mono text-label-sm font-semibold text-primary">{structuredRetryLimit} 次</span>
+              </div>
+              <input
+                id="structured-retry-limit"
+                type="range"
+                min="3"
+                max="10"
+                step="1"
+                value={structuredRetryLimit}
+                onChange={(e) => setStructuredRetryLimit(Number(e.target.value))}
+                className="w-full accent-primary cursor-pointer"
+                aria-valuetext={`最多额外重试 ${structuredRetryLimit} 次`}
+              />
+              <p className="text-[11px] text-on-surface-variant mt-1">每次试卷解析任务最多额外纠错 {structuredRetryLimit} 次，由所有批次共享；仅对 JSON 或必需字段错误重试。输出触及 token 上限时停止纠错并提示本地规则兜底，网络、额度或鉴权失败不会自动重试。每次纠错调用都会计入 token 和费用。</p>
             </div>
           </div>
 
@@ -510,6 +713,67 @@ export default function SettingsView() {
           </div>
         </section>
 
+        {/* Local model-call ledger */}
+        <section className="bg-surface-container-lowest p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="font-headline-sm text-headline-sm font-semibold text-on-surface">模型调用记录</h2>
+              <p className="text-body-sm text-on-surface-variant mt-1">按模型入口记录 token 与估算费用，不保存题目内容或 API Key。DeepSeek 钱包余额为官方接口返回；自定义模型费用使用你填写的单价估算。</p>
+            </div>
+            <button type="button" onClick={refreshModelUsage} className="px-3 py-1.5 rounded-lg bg-surface-container text-on-surface text-label-sm hover:bg-surface-container-high">刷新记录</button>
+          </div>
+          {modelUsage ? (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
+                {[
+                  ['请求数', modelUsage.totals.calls],
+                  ['失败请求', modelUsage.totals.failed],
+                  ['输入 token', modelUsage.totals.inputTokens.toLocaleString()],
+                  ['输出 token', modelUsage.totals.outputTokens.toLocaleString()],
+                  ['总 token', modelUsage.totals.totalTokens.toLocaleString()],
+                  ['估算费用', modelUsage.totals.pricedCalls ? `¥${modelUsage.totals.estimatedCostCny.toFixed(4)}` : '未配置单价']
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg bg-surface-container-low p-3">
+                    <div className="text-label-sm text-on-surface-variant">{label}</div>
+                    <div className="mt-1 font-label-mono font-bold text-on-surface">{value}</div>
+                  </div>
+                ))}
+              </div>
+              {modelStatus?.model?.providerMode === 'deepseek-official' && (
+                <div className="flex items-center gap-2 rounded-lg bg-secondary/5 border border-secondary/20 px-3 py-2 text-label-sm text-on-surface-variant">
+                  <span className="material-symbols-outlined text-[17px] text-secondary">account_balance_wallet</span>
+                  <span>DeepSeek 钱包：</span>
+                  <strong className="font-label-mono text-secondary">
+                    {(modelStatus?.balance?.balances?.find((item) => item.currency === 'CNY') || modelStatus?.balance?.balances?.[0])
+                      ? `${(modelStatus.balance.balances.find((item) => item.currency === 'CNY') || modelStatus.balance.balances[0]).currency === 'CNY' ? '¥' : '$'}${(modelStatus.balance.balances.find((item) => item.currency === 'CNY') || modelStatus.balance.balances[0]).totalBalance.toFixed(2)}`
+                      : (modelStatus?.balanceError || '查询中')}
+                  </strong>
+                  <button type="button" onClick={() => refreshModelStatus(true)} className="ml-auto text-primary hover:underline">刷新状态</button>
+                </div>
+              )}
+              {modelUsage.records.length > 0 ? (
+                <div className="max-h-64 overflow-auto rounded-lg border border-outline-variant/30 divide-y divide-outline-variant/20">
+                  {modelUsage.records.map((record) => (
+                    <div key={record.id} className="px-3 py-2 flex items-center justify-between gap-3 text-label-sm flex-wrap">
+                      <div>
+                        <span className={record.status === 'success' ? 'text-secondary font-semibold' : 'text-error font-semibold'}>{record.status === 'success' ? '成功' : '失败'}</span>
+                        <span className="ml-2 text-on-surface font-medium">{record.operation}</span>
+                        <span className="ml-2 text-on-surface-variant">{record.model}</span>
+                        <span className="ml-2 text-outline">{new Date(record.time).toLocaleString()}</span>
+                      </div>
+                      <span className="font-label-mono text-on-surface-variant">
+                        {record.usageReported ? `${record.inputTokens.toLocaleString()} in / ${record.outputTokens.toLocaleString()} out` : '服务端未返回 token 用量'}
+                        {record.estimatedCostCny !== null && record.estimatedCostCny !== undefined ? ` · ¥${Number(record.estimatedCostCny).toFixed(4)}` : ''} · {record.durationMs} ms
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-label-sm text-on-surface-variant">暂无调用记录；记录从本次更新后的请求开始累计。</p>}
+              {modelUsage.totals.unreported > 0 && <p className="text-label-sm text-on-surface-variant">有 {modelUsage.totals.unreported} 条失败或未返回用量的请求，token 数无法由应用确认；服务商账单仍是最终依据。</p>}
+            </>
+          ) : <p className="text-label-sm text-on-surface-variant">正在读取本地调用记录…</p>}
+        </section>
+
         {/* Local Storage & Cache Data Management */}
         <section className="bg-surface-container-lowest p-space-xl rounded-2xl shadow-sm border border-outline-variant/30 space-y-space-md">
           <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
@@ -523,7 +787,7 @@ export default function SettingsView() {
           </div>
 
           <p className="text-body-sm text-on-surface-variant">
-            系统所有生成的真实试卷、考场提交记录与错题集均保存在当前浏览器的本地存储中。所有 Mock 假数据已全部移除。如需重置所有本地已作答数据，可点击下方清空按钮。
+            试卷、交卷记录与错题集保存在当前浏览器中。清空本地数据后，这些内容将无法恢复。
           </p>
 
           <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-outline-variant/20 flex-wrap gap-4">

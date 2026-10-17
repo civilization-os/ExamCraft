@@ -1,27 +1,61 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
+import SelectMenu from '../components/SelectMenu';
 import { extractExamMeta, sliceMarkdownIntoChunks } from '../utils/examChunker';
 import { calculatePaperMetrics } from '../utils/paperMetrics';
+import { getQuestionTypeClass } from '../utils/questionTypes';
+
+function loadGeneratorSession() {
+  try {
+    const session = JSON.parse(localStorage.getItem('examcraft_generator_session') || 'null');
+    return session && typeof session === 'object' ? session : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadStructuredRetryLimit() {
+  try {
+    const response = await fetch('/api/model/config');
+    const data = await response.json();
+    const limit = Number(data?.config?.structuredRetryLimit);
+    return Number.isFinite(limit) ? Math.min(10, Math.max(3, Math.floor(limit))) : 3;
+  } catch {
+    return 3;
+  }
+}
 
 export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, onNavigate }) {
-  const [activeMode, setActiveMode] = useState('markdown'); // Default to markdown
+  const [restoredSession] = useState(loadGeneratorSession);
+  const [activeMode, setActiveMode] = useState(() => (
+    restoredSession?.activeMode || (restoredSession?.parseInProgress ? 'markdown' : 'clone')
+  ));
   const [saveToast, setSaveToast] = useState(null); // { title: string, id: string }
   
   // Custom Spec State (Entry 2)
-  const [customTitle, setCustomTitle] = useState('');
-  const [totalScore, setTotalScore] = useState(100);
-  const [duration, setDuration] = useState(120);
-  const [difficulty, setDifficulty] = useState('进阶拓展');
-  const [isGenerating, setIsGenerating] = useState(false);
   
   // Markdown Generator State (Entry 3)
-  const [markdownText, setMarkdownText] = useState('');
-  const [parsedExam, setParsedExam] = useState(null);
+  const [markdownText, setMarkdownText] = useState(() => restoredSession?.markdownText || '');
+  const markdownBatchCount = useMemo(
+    () => markdownText.trim() ? sliceMarkdownIntoChunks(markdownText).length : 0,
+    [markdownText]
+  );
+  const [parsedExam, setParsedExam] = useState(() => restoredSession?.parsedExam || null);
   const [isParsingAI, setIsParsingAI] = useState(false);
-  const [showAnswers, setShowAnswers] = useState(true);
+  const [showAnswers, setShowAnswers] = useState(() => {
+    try { return localStorage.getItem('examcraft_exam_show_answers_default') !== 'false'; }
+    catch { return true; }
+  });
   const [expandedAnalysis, setExpandedAnalysis] = useState({}); // { [qId]: boolean }
   const [expandedPassages, setExpandedPassages] = useState({}); // { [qId]: boolean }
-  const [aiEnhanceMessage, setAiEnhanceMessage] = useState('');
+  const [aiEnhanceMessage, setAiEnhanceMessage] = useState(() => (
+    restoredSession?.parseInProgress
+      ? '上次解析因离开页面而中断；草稿和已完成批次已恢复，点击 AI 解析可继续。'
+      : ''
+  ));
+  const [parseUsageSummary, setParseUsageSummary] = useState(() => restoredSession?.parseUsageSummary || null);
+  const [parseNeedsResume, setParseNeedsResume] = useState(() => Boolean(restoredSession?.parseInProgress));
+  const [parseSourceText, setParseSourceText] = useState(() => restoredSession?.parseSourceText || (restoredSession?.parseInProgress ? restoredSession?.markdownText || '' : ''));
 
   // Single Question Interactive Editing & AI Assist
   const [editingQId, setEditingQId] = useState(null); // id of question being edited manually
@@ -37,10 +71,43 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
   const [cloneStage, setCloneStage] = useState(0); // 0: idle, 1: reading, 2: parsing, 3: latex, 4: done
   const [clonedPaperResult, setClonedPaperResult] = useState(null);
   const [uploadedFile, setUploadedFile] = useState(null);
+  const [isReadingPdf, setIsReadingPdf] = useState(false);
 
-  const debounceTimerRef = useRef(null);
   const activeJobIdRef = useRef(0);
-  const [chunkProgress, setChunkProgress] = useState({ current: 0, total: 0, summary: '' });
+  const parseRequestInFlightRef = useRef(false);
+  const parseAbortControllerRef = useRef(null);
+  const cloneRequestInFlightRef = useRef(false);
+  const [parsedMarkdownSource, setParsedMarkdownSource] = useState(() => restoredSession?.parsedMarkdownSource || '');
+  const [completedChunkCount, setCompletedChunkCount] = useState(() => Number(restoredSession?.completedChunkCount) || 0);
+  const [chunkProgress, setChunkProgress] = useState(() => restoredSession?.chunkProgress || { current: 0, total: 0, summary: '' });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('examcraft_generator_session', JSON.stringify({
+        activeMode,
+        markdownText,
+        parsedExam,
+        parsedMarkdownSource,
+        chunkProgress,
+        completedChunkCount,
+        parseUsageSummary,
+        parseSourceText,
+        parseInProgress: isParsingAI || parseNeedsResume
+      }));
+    } catch {}
+  }, [activeMode, markdownText, parsedExam, parsedMarkdownSource, chunkProgress, completedChunkCount, parseUsageSummary, parseSourceText, isParsingAI, parseNeedsResume]);
+
+  useEffect(() => () => {
+    activeJobIdRef.current += 1;
+    if (parseAbortControllerRef.current) {
+      parseAbortControllerRef.current.abort();
+      try {
+        const session = loadGeneratorSession() || {};
+        session.parseInProgress = true;
+        localStorage.setItem('examcraft_generator_session', JSON.stringify(session));
+      } catch {}
+    }
+  }, []);
 
   // Toggle analysis visibility for a question
   const toggleAnalysis = (id) => {
@@ -54,11 +121,52 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
   // Progressive Chunked AI Parser
   // Cuts long texts into lightweight passage-aware batches, preventing HTTP 413 and LLM output token overflows
-  const runProgressiveChunkParser = async (mdText) => {
+  const runProgressiveChunkParser = async (mdText, { resume = true } = {}) => {
     if (!mdText || !mdText.trim()) return;
+    if (parseRequestInFlightRef.current || isParsingAI) return;
+    const chunks = sliceMarkdownIntoChunks(mdText);
+    const savedSession = loadGeneratorSession();
+    const canResume = Boolean(
+      resume &&
+      savedSession?.parseInProgress &&
+      (savedSession.parseSourceText || savedSession.markdownText) === mdText &&
+      Number(savedSession.completedChunkCount) > 0
+    );
+    const resumeFrom = canResume
+      ? Math.min(chunks.length, Math.max(0, Number(savedSession.completedChunkCount) || 0))
+      : 0;
+    const scoreContext = mdText.split(/\r?\n/)
+      .filter(line => /\d/.test(line) && /每(?:小)?题|小题.*分|题.*每.*分/.test(line))
+      .slice(0, 30)
+      .join('\n');
+    if (chunks.length > 12 && !window.confirm(`这份题稿将拆为 ${chunks.length} 批，产生多次模型调用。仍要继续吗？建议先拆分题稿。`)) return;
 
+    parseRequestInFlightRef.current = true;
     const currentJobId = ++activeJobIdRef.current;
+    const controller = new AbortController();
+    parseAbortControllerRef.current = controller;
+    setParseNeedsResume(false);
     setIsParsingAI(true);
+    setParseSourceText(mdText);
+    const usageSummary = canResume && savedSession.parseUsageSummary
+      ? { ...savedSession.parseUsageSummary, totalCalls: chunks.length, complete: false }
+      : {
+      completedCalls: 0,
+      totalCalls: chunks.length,
+      totalTokens: 0,
+      estimatedCostCny: 0,
+      pricedCalls: 0,
+      unpricedCalls: 0,
+      structuredRetries: 0,
+      fallbackCalls: 0,
+      truncatedCalls: 0,
+      complete: false
+    };
+    setParseUsageSummary(usageSummary);
+    const retryLimitForRun = await loadStructuredRetryLimit();
+    usageSummary.retryLimit = retryLimitForRun;
+    setParseUsageSummary({ ...usageSummary });
+    let retryBudgetRemaining = Math.max(0, retryLimitForRun - (Number(usageSummary.structuredRetries) || 0));
 
     // 1. Instantly parse metadata in client
     const meta = extractExamMeta(mdText);
@@ -66,18 +174,21 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
       title: meta.title,
       duration: meta.duration,
       totalScore: meta.totalScore,
-      questionCount: prev?.questions?.length || 0,
-      questions: prev?.questions || []
+      questionCount: canResume ? (savedSession.parsedExam?.questions?.length || 0) : 0,
+      questions: canResume ? (savedSession.parsedExam?.questions || []) : []
     }));
 
     // 2. Slice into lightweight passage-aware chunks
-    const chunks = sliceMarkdownIntoChunks(mdText);
-    setChunkProgress({ current: 0, total: chunks.length, summary: chunks[0]?.summary || '准备切片解析...' });
+    setChunkProgress({ current: resumeFrom, total: chunks.length, summary: chunks[resumeFrom]?.summary || (resumeFrom ? '准备继续未完成批次...' : '准备切片解析...') });
+    setCompletedChunkCount(resumeFrom);
 
-    const accumulatedQuestions = [];
+    const accumulatedQuestions = canResume ? [...(savedSession.parsedExam?.questions || [])] : [];
+    let interrupted = false;
 
-    for (let i = 0; i < chunks.length; i++) {
+    for (let i = resumeFrom; i < chunks.length; i++) {
       if (activeJobIdRef.current !== currentJobId) {
+        parseRequestInFlightRef.current = false;
+        setIsParsingAI(false);
         return; // Aborted by newer user input
       }
 
@@ -97,15 +208,44 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
               section: ch.section,
               passageTitle: ch.passageTitle,
               passage: ch.passage,
-              rawQuestionsText: ch.rawQuestionsText
+              rawQuestionsText: ch.rawQuestionsText,
+              expectedQuestionNumbers: ch.qNums,
+              examTitle: meta.title,
+              scoreContext
             },
-            useAI: true
-          })
+            useAI: true,
+            structuredRetryBudget: retryBudgetRemaining
+          }),
+          signal: controller.signal
         });
 
         if (activeJobIdRef.current !== currentJobId) return;
 
         const data = await res.json();
+        if (!res.ok || !data.success) {
+          interrupted = true;
+          setAiEnhanceMessage(`第 ${i + 1} 批解析未完成（${data.error || res.statusText || '请求失败'}），已保留之前结果；点击 AI 解析可重试此批及后续批次。`);
+          break;
+        }
+        const retriesUsed = Number(data.structuredRetryCount) || 0;
+        usageSummary.structuredRetries += retriesUsed;
+        retryBudgetRemaining = Math.max(0, retryBudgetRemaining - retriesUsed);
+        if (data.mode === 'algorithmic') usageSummary.fallbackCalls += 1;
+        if (data.truncationDetected) usageSummary.truncatedCalls = (Number(usageSummary.truncatedCalls) || 0) + 1;
+        setParseUsageSummary({ ...usageSummary });
+        if (data.usage?.usageReported) {
+          usageSummary.completedCalls += 1;
+          const inputTokens = Number(data.usage.inputTokens) || 0;
+          const outputTokens = Number(data.usage.outputTokens) || 0;
+          usageSummary.totalTokens += Number(data.usage.totalTokens) || inputTokens + outputTokens;
+          if (Number.isFinite(Number(data.usage.estimatedCostCny))) {
+            usageSummary.estimatedCostCny += Number(data.usage.estimatedCostCny);
+            usageSummary.pricedCalls += 1;
+          } else {
+            usageSummary.unpricedCalls += 1;
+          }
+          setParseUsageSummary({ ...usageSummary });
+        }
         if (data.success && data.questions && data.questions.length > 0) {
           accumulatedQuestions.push(...data.questions);
 
@@ -127,38 +267,56 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
             };
           });
         }
+        setCompletedChunkCount(i + 1);
       } catch (err) {
         console.warn(`[Chunk ${i + 1} parse error]:`, err.message);
+        interrupted = true;
+        if (!controller.signal.aborted) {
+          setAiEnhanceMessage(`第 ${i + 1} 批解析连接中断，已保留之前结果；点击 AI 解析可从未完成批次继续。`);
+        }
+        break;
       }
     }
 
     if (activeJobIdRef.current === currentJobId) {
-      setChunkProgress({ current: chunks.length, total: chunks.length, summary: '切片解析完成' });
+      if (!interrupted) {
+        setChunkProgress({ current: chunks.length, total: chunks.length, summary: '切片解析完成' });
+        setParsedMarkdownSource(mdText);
+      }
+      parseRequestInFlightRef.current = false;
+      parseAbortControllerRef.current = null;
       setIsParsingAI(false);
-      setAiEnhanceMessage(`🎉 model_core 分篇章切片解析完毕！已完成 ${chunks.length} 个任务批次，成功规整 ${accumulatedQuestions.length} 道试题，杜绝了超长文本溢出。`);
+      usageSummary.complete = !interrupted;
+      setParseUsageSummary({ ...usageSummary });
+      setParseNeedsResume(interrupted);
+      if (!interrupted) {
+        const retryNotice = usageSummary.structuredRetries > 0 ? `结构错误已反馈模型并纠正重试 ${usageSummary.structuredRetries} 次。` : '';
+        const fallbackNotice = usageSummary.fallbackCalls > 0 ? `${usageSummary.fallbackCalls} 批使用了本地规则解析，请检查这些题目。` : '';
+        const truncationNotice = usageSummary.truncatedCalls > 0 ? `${usageSummary.truncatedCalls} 批输出触及上限，已停止重复纠错并使用本地规则兜底，请重点检查。` : '';
+        setAiEnhanceMessage(`🎉 分篇解析完成：${chunks.length} 批，规整 ${accumulatedQuestions.length} 道试题。${retryNotice}${fallbackNotice}${truncationNotice}`);
+      }
     }
   };
 
-  // Automatic AI parse triggered when markdownText changes with debounce
-  // No manual button needed: all parsing defaults to AI with seamless KaTeX loading state
-  useEffect(() => {
-    if (activeMode !== 'markdown') return;
-    if (!markdownText || !markdownText.trim()) return;
-
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
+  const importTextIntoMarkdownParser = async (text) => {
+    const content = String(text || '').trim();
+    if (!content) {
+      alert('没有读取到试卷文字，请检查文件内容或重新粘贴。');
+      return;
     }
+    if (parseRequestInFlightRef.current || isParsingAI) return;
 
-    debounceTimerRef.current = setTimeout(() => {
-      runProgressiveChunkParser(markdownText);
-    }, 600);
-
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-    };
-  }, [markdownText, activeMode]);
+    setCloneRawText(content);
+    setMarkdownText(content);
+    setParsedExam(null);
+    setParsedMarkdownSource('');
+    setCompletedChunkCount(0);
+    setChunkProgress({ current: 0, total: 0, summary: '' });
+    setParseNeedsResume(false);
+    setAiEnhanceMessage('');
+    setActiveMode('markdown');
+    await runProgressiveChunkParser(content, { resume: false });
+  };
 
   // Recalculate and sync total score from questions
   const handleRecalculateTotalScore = () => {
@@ -276,21 +434,25 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
     }
   };
 
-  // Trigger 1:1 AI Clone
+  // Parse text extracted by the user or uploaded from a supported text file.
   const triggerAiCloneWithText = async (textToAnalyze, fileName = '导入试卷.pdf') => {
     if (!textToAnalyze || !textToAnalyze.trim()) {
       alert('请先输入或粘贴试卷内容');
       return;
     }
+    if (cloneRequestInFlightRef.current || isAiCloning) return;
+    const chunks = sliceMarkdownIntoChunks(textToAnalyze);
+    if (chunks.length > 12 && !window.confirm(`这份试卷将拆为 ${chunks.length} 批，产生多次模型调用。仍要继续吗？建议先拆分试卷。`)) return;
+    cloneRequestInFlightRef.current = true;
     setIsAiCloning(true);
     setCloneStage(1);
 
     try {
       const meta = extractExamMeta(textToAnalyze);
-      const chunks = sliceMarkdownIntoChunks(textToAnalyze);
       setCloneStage(2);
 
       const allQuestions = [];
+      let retryBudgetRemaining = await loadStructuredRetryLimit();
       for (let i = 0; i < chunks.length; i++) {
         const ch = chunks[i];
         setCloneStage(Math.min(3, 2 + ((i + 1) / chunks.length)));
@@ -302,15 +464,23 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
               section: ch.section,
               passageTitle: ch.passageTitle,
               passage: ch.passage,
-              rawQuestionsText: ch.rawQuestionsText
+              rawQuestionsText: ch.rawQuestionsText,
+              expectedQuestionNumbers: ch.qNums,
+              examTitle: meta.title
             },
-            useAI: true
+            useAI: true,
+            structuredRetryBudget: retryBudgetRemaining
           })
         });
         const data = await res.json();
+        retryBudgetRemaining = Math.max(0, retryBudgetRemaining - (Number(data?.structuredRetryCount) || 0));
         if (data.success && data.questions) {
           allQuestions.push(...data.questions);
         }
+      }
+
+      if (allQuestions.length === 0) {
+        throw new Error('没有识别到有效题目。请检查文本内容，或切换到 Markdown 工作台整理题稿。');
       }
 
       setCloneStage(3);
@@ -323,15 +493,15 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
       const paper = {
         id: 'cloned-' + Date.now(),
-        title: meta.title || fileName.replace(/\.[^/.]+$/, '') || '1:1 AI 智能克隆试卷',
-        source: '真题克隆 (篇章切片 AI 解析)',
+        title: meta.title || fileName.replace(/\.[^/.]+$/, '') || 'AI 识别试卷',
+        source: '试卷文本识别',
         sourceType: 'ai-imported',
         date: '刚刚',
         questionCount: allQuestions.length,
         totalScore: meta.totalScore || 100,
         duration: meta.duration || 120,
         difficulty: calculatePaperMetrics({ title: meta.title, questions: allQuestions, duration: meta.duration }).difficulty,
-        tags: ['#AI克隆', '#篇章切片', '#KaTeX高保真'],
+        tags: ['#文本识别', '#篇章切片', '#KaTeX排版'],
         status: '未作答 (全新排版完毕)',
         typeBreakdown: {
           choices: allQuestions.filter(q => q.type.includes('选择')).length,
@@ -358,34 +528,75 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
       alert(`AI 导入切片解析失败: ${err.message}`);
       setCloneStage(0);
     } finally {
+      cloneRequestInFlightRef.current = false;
       setIsAiCloning(false);
     }
   };
 
-  const handleSimulateUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      if (file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
-        reader.onload = (event) => {
-          const content = event.target.result;
-          setMarkdownText(content);
-          setActiveMode('markdown');
-        };
-        reader.readAsText(file);
-        return;
-      }
+  const extractPdfText = async (file) => {
+    const [pdfjsLib, workerModule] = await Promise.all([
+      import('pdfjs-dist/legacy/build/pdf.mjs'),
+      import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')
+    ]);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
 
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pages = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const linesByY = new Map();
+      for (const item of content.items) {
+        if (!('str' in item) || !item.str.trim()) continue;
+        const y = Math.round(item.transform[5] / 2) * 2;
+        const line = linesByY.get(y) || [];
+        line.push({ x: item.transform[4], text: item.str.trim() });
+        linesByY.set(y, line);
+      }
+      const lines = [...linesByY.entries()]
+        .sort(([yA], [yB]) => yB - yA)
+        .map(([, line]) => line.sort((a, b) => a.x - b.x).map(item => item.text).join(' '));
+      pages.push(lines.join('\n'));
+    }
+
+    return { text: pages.join('\n\n').trim(), pages };
+  };
+
+  const handleSimulateUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    e.target.value = '';
+    if (!['pdf', 'md', 'markdown', 'tex', 'txt'].includes(extension)) {
+      alert('当前支持 PDF、Markdown、TeX 和 TXT 文件。Word 文档请先复制题目文本后粘贴到输入框。');
+      return;
+    }
+
+    if (extension === 'pdf') {
+      setIsReadingPdf(true);
+      setUploadedFile({ name: file.name, size: (file.size / 1024).toFixed(1) + 'KB', status: '正在提取 PDF 文字…' });
+      try {
+        const { text: content } = await extractPdfText(file);
+        if (!content) {
+          throw new Error('未提取到可选文字。该文件可能是扫描图片版 PDF，目前需要先 OCR 或复制文字后粘贴。');
+        }
+        setUploadedFile(null);
+        setIsReadingPdf(false);
+        await importTextIntoMarkdownParser(content);
+      } catch (error) {
+        setUploadedFile(null);
+        alert(`PDF 导入失败：${error.message || '无法读取文件'}`);
+      } finally {
+        setIsReadingPdf(false);
+      }
+      return;
+    }
+
+      const reader = new FileReader();
       reader.onload = (event) => {
         const content = event.target.result;
-        setCloneRawText(content);
-        setUploadedFile(prev => ({
-          ...prev,
-          name: file.name,
-          size: (file.size / 1024).toFixed(1) + 'KB',
-          status: '已载入文件'
-        }));
-        triggerAiCloneWithText(content, file.name);
+        setUploadedFile(null);
+        importTextIntoMarkdownParser(content);
       };
 
       try {
@@ -393,7 +604,6 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
       } catch {
         setUploadedFile(prev => ({ ...prev, name: file.name }));
       }
-    }
   };
 
   const handleSaveClone = (goToLibrary = false) => {
@@ -406,100 +616,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
   };
 
   const handleLaunchClone = () => {
-    if (clonedPaperResult) {
-      onStartExam(clonedPaperResult);
-      return;
-    }
-    const paper = papers[0];
-    if (paper) onStartExam(paper);
-  };
-
-  const buildCustomPaperObject = (highlightQuestion = null) => {
-    return {
-      id: 'custom-' + Date.now(),
-      title: customTitle || '《自由规格智能生成试卷》',
-      source: '自由规格智能生成 (model_core 驱动)',
-      sourceType: 'custom',
-      date: '刚刚',
-      questionCount: 17,
-      totalScore: totalScore,
-      duration: duration,
-      difficulty: difficulty === '考研冲刺' ? 5 : difficulty === '进阶拓展' ? 4 : 3,
-      tags: ['#自定义组卷', `#${difficulty}`, '#model_core生成'],
-      status: '未作答 (全新排版完毕)',
-      typeBreakdown: { choices: 8, blanks: 5, solutions: 4 },
-      highlightQuestion
-    };
-  };
-
-  const handleLaunchCustom = async () => {
-    setIsGenerating(true);
-    let generatedQuestion = null;
-
-    try {
-      const res = await fetch('/api/model/generate-paper', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: customTitle || '《自由规格智能生成试卷》',
-          subject: '高等数学与微积分',
-          totalScore,
-          duration,
-          difficulty,
-          choicesCount: 8,
-          blanksCount: 5,
-          solutionsCount: 4
-        })
-      });
-      const data = await res.json();
-      if (data.success && data.data?.highlightQuestion) {
-        generatedQuestion = data.data.highlightQuestion;
-      }
-    } catch (e) {
-      console.warn('Backend paper generation notice:', e.message);
-    } finally {
-      setIsGenerating(false);
-    }
-
-    const customPaper = buildCustomPaperObject(generatedQuestion);
-    onStartExam(customPaper);
-  };
-
-  const handleSaveCustom = async (goToLibrary = false) => {
-    setIsGenerating(true);
-    let generatedQuestion = null;
-
-    try {
-      const res = await fetch('/api/model/generate-paper', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: customTitle || '《自由规格智能生成试卷》',
-          subject: '高等数学与微积分',
-          totalScore,
-          duration,
-          difficulty,
-          choicesCount: 8,
-          blanksCount: 5,
-          solutionsCount: 4
-        })
-      });
-      const data = await res.json();
-      if (data.success && data.data?.highlightQuestion) {
-        generatedQuestion = data.data.highlightQuestion;
-      }
-    } catch (e) {
-      console.warn('Backend paper generation notice:', e.message);
-    } finally {
-      setIsGenerating(false);
-    }
-
-    const customPaper = buildCustomPaperObject(generatedQuestion);
-    if (onSavePaper) {
-      onSavePaper(customPaper, goToLibrary);
-    }
-    setSaveToast({ title: customPaper.title, id: customPaper.id });
-    setTimeout(() => setSaveToast(null), 4000);
+    if (clonedPaperResult) onStartExam(clonedPaperResult);
   };
 
   const buildMarkdownPaperObject = () => {
@@ -549,6 +666,19 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
     onStartExam(paper);
   };
 
+  const canContinueParse = Boolean(
+    parseNeedsResume &&
+    parseSourceText === markdownText &&
+    completedChunkCount > 0 &&
+    completedChunkCount < markdownBatchCount
+  );
+  const hasCurrentParse = Boolean(
+    markdownText.trim() && (
+      (parsedExam?.questions?.length && parsedMarkdownSource === markdownText) ||
+      (parseSourceText === markdownText && (parseNeedsResume || completedChunkCount > 0))
+    )
+  );
+
   return (
     <div className="flex flex-col w-full relative min-h-full pb-16">
       {/* Background Matrix */}
@@ -572,13 +702,13 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
           <div className="space-y-space-xs max-w-2xl">
             <div className="inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded bg-surface-container text-primary font-label-mono text-label-mono tracking-wider">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
-              <span>INTELLIGENT TRIPLE-ENGINE WORKSPACE · KATEX READY</span>
+              <span>试卷创建工作台 · 两种方式 · 统一进入考场</span>
             </div>
             <h1 className="font-headline-xl text-headline-xl text-on-surface tracking-tight font-semibold">
-              多模态智能组卷工作台
+              创建或导入试卷
             </h1>
             <p className="font-body-lg text-body-lg text-on-surface-variant">
-              支持「1:1 历年真题 PDF 克隆」、「自由参数规格蓝图」与「Markdown 题稿即时转卷」，全量支持长文本篇章切片、KaTeX 矩阵排版与单题交互 AI 微调。
+              导入识别已有试卷，或编写 Markdown 题稿并生成可作答试卷。
             </p>
           </div>
 
@@ -590,7 +720,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
             </div>
             <div className="px-space-md py-space-xs rounded-lg bg-surface-container-lowest shadow-sm flex items-center gap-space-xs text-on-surface border border-outline-variant/30">
               <span className="material-symbols-outlined text-primary text-[16px]">auto_awesome</span>
-              <span>model_core 全程自动 AI 介入</span>
+              <span>按需使用 AI 解析与整理</span>
             </div>
           </div>
         </section>
@@ -607,20 +737,10 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
             }`}
           >
             <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
-            <span>入口一 · 1:1 真题 PDF 原样克隆</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveMode('custom')}
-            className={`flex-1 min-w-[200px] py-2.5 px-4 rounded-xl font-label-md text-label-md transition-all flex items-center justify-center gap-2 cursor-pointer ${
-              activeMode === 'custom'
-                ? 'bg-primary text-on-primary font-semibold shadow-xs'
-                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low'
-            }`}
-          >
-            <span className="material-symbols-outlined text-[18px]">dashboard_customize</span>
-            <span>入口二 · 自由规格矩阵智能生成</span>
+            <span className="flex flex-col items-start text-left leading-tight">
+              <span>识别已有试卷</span>
+              <span className={`mt-0.5 text-[10px] font-normal ${activeMode === 'clone' ? 'text-on-primary/80' : 'text-on-surface-variant'}`}>上传或粘贴 · AI 结构化</span>
+            </span>
           </button>
 
           <button
@@ -633,12 +753,14 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
             }`}
           >
             <span className="material-symbols-outlined text-[18px]">markdown</span>
-            <span>入口三 · Markdown 题稿即时转卷</span>
-            <span className="text-[10px] font-label-mono px-1.5 py-0.2 rounded bg-secondary-container text-on-secondary-container font-bold">无感 AI</span>
+            <span className="flex flex-col items-start text-left leading-tight">
+              <span>编辑 Markdown 题稿</span>
+              <span className={`mt-0.5 text-[10px] font-normal ${activeMode === 'markdown' ? 'text-on-primary/80' : 'text-on-surface-variant'}`}>编写或导入 · 实时预览</span>
+            </span>
           </button>
         </div>
 
-        {/* MODE 1: 1:1 PDF & Raw Exam Text AI Clone */}
+        {/* MODE 1: Raw Exam Text Parsing */}
         {activeMode === 'clone' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-xl items-stretch">
             {/* Left: Input (Dropzone + Direct Paste Textarea + AI Action) */}
@@ -648,7 +770,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                 <div className="flex items-center justify-between pb-space-xs">
                   <div className="inline-flex items-center gap-space-xs px-space-sm py-1 rounded bg-secondary/10 text-secondary font-label-mono text-label-mono font-medium">
                     <span className="material-symbols-outlined text-[14px]">auto_fix_high</span>
-                    <span>model_core 大模型全面介入分析</span>
+                    <span>导入原卷 · 识别后可选下一步</span>
                   </div>
                   <div className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-primary">
                     <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
@@ -657,24 +779,30 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
 
                 <div className="space-y-space-xs">
                   <h2 className="font-headline-lg text-headline-lg text-on-surface font-semibold">
-                    真题文件 / 试题草稿 1:1 AI 智能克隆
+                    试卷文本识别与结构化
                   </h2>
                   <p className="font-body-md text-body-md text-on-surface-variant">
-                    导入任意非规范格式的真题文件或直接粘贴考题文本。底层大模型自动按篇章切分、推导分值、并将公式转录为标准矢量 LaTeX。
+                    上传支持的文本文件或粘贴题目内容，AI 会整理为可作答试卷。解析后可直接进入考场，或转到 Markdown 工作台微调；原文件版式与图片不会保留。
                   </p>
                 </div>
 
                 {/* Upload Dropzone */}
                 <label className="rounded-xl bg-surface-container-low p-space-md text-center flex flex-col items-center justify-center transition-colors hover:bg-surface-container group/drop cursor-pointer border border-dashed border-outline-variant/60 block">
-                  <input type="file" accept=".pdf,.docx,.tex,.md,.txt" onChange={handleSimulateUpload} className="hidden" />
+                  <input type="file" accept=".pdf,.tex,.md,.markdown,.txt,application/pdf,text/plain,text/markdown" onChange={handleSimulateUpload} className="hidden" disabled={isReadingPdf || isParsingAI} />
                   <div className="w-10 h-10 rounded-full bg-surface-container-lowest shadow-sm flex items-center justify-center text-primary group-hover/drop:scale-105 transition-transform">
                     <span className="material-symbols-outlined text-[22px]">cloud_upload</span>
                   </div>
                   <p className="mt-1 font-label-md text-label-md text-on-surface font-semibold">
                     选择或拖拽试卷文件至此处 (<span className="text-primary hover:underline">浏览本地文件</span>)
                   </p>
-                  <p className="font-label-mono text-[11px] text-on-surface-variant">支持 .pdf, .docx, .tex, .md, .txt (自动分块解析长文本)</p>
+                  <p className="font-label-mono text-[11px] text-on-surface-variant">支持 PDF、Markdown、TeX、TXT；PDF 将提取文字后交由 AI 识别，扫描版 PDF 需先 OCR</p>
                 </label>
+                {isReadingPdf && (
+                  <p className="flex items-center gap-1.5 text-xs text-primary" role="status" aria-live="polite">
+                    <span className="material-symbols-outlined text-base animate-spin">progress_activity</span>
+                    正在读取 PDF 页面并提取文字…
+                  </p>
+                )}
 
                 {/* Direct Paste Raw Exam Textarea */}
                 <div className="space-y-1">
@@ -722,14 +850,14 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
               <div className="pt-space-md">
                 <button
                   type="button"
-                  onClick={() => triggerAiCloneWithText(cloneRawText.trim() || undefined, uploadedFile?.name || 'custom_exam.md')}
-                  disabled={isAiCloning || (!cloneRawText.trim() && !uploadedFile)}
+                  onClick={() => importTextIntoMarkdownParser(cloneRawText)}
+                  disabled={isReadingPdf || isParsingAI || !cloneRawText.trim()}
                   className="w-full h-11 px-space-lg rounded-lg bg-primary-container hover:bg-primary text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
                 >
-                  <span className={`material-symbols-outlined text-[20px] ${isAiCloning ? 'animate-spin' : ''}`}>
-                    {isAiCloning ? 'progress_activity' : 'bolt'}
+                  <span className={`material-symbols-outlined text-[20px] ${isParsingAI ? 'animate-spin' : ''}`}>
+                    {isParsingAI ? 'progress_activity' : 'bolt'}
                   </span>
-                  <span>{isAiCloning ? '正在调用 model_core 深度解析中...' : '⚡ 启动 model_core AI 深度解析并克隆生成'}</span>
+                  <span>{isReadingPdf ? '正在提取 PDF 文字…' : isParsingAI ? '正在分批解析试题…' : 'AI 识别并生成试卷'}</span>
                 </button>
               </div>
             </section>
@@ -741,7 +869,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                   <div className="flex items-center gap-2">
                     <span className="material-symbols-outlined text-secondary text-[20px]">verified</span>
                     <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
-                      {clonedPaperResult ? 'AI 试卷模型解析生成成果' : '1:1 克隆技术特性'}
+                      {clonedPaperResult ? '试卷识别结果' : '文本识别能力'}
                     </h3>
                   </div>
                   {clonedPaperResult && (
@@ -826,7 +954,9 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                       {clonedPaperResult.questions.map((q, idx) => (
                         <div key={idx} className="p-2.5 rounded-lg bg-surface-container-low border border-outline-variant/20 space-y-1 text-body-sm">
                           <div className="flex items-center justify-between">
-                            <span className="font-semibold text-primary font-label-mono">第 {q.num || idx + 1} 题 ({q.type} · {q.score}分)</span>
+                            <span className="font-semibold font-label-mono text-on-surface">第 {q.num || idx + 1} 题</span>
+                            <span className={`px-2 py-0.5 rounded border text-[11px] font-semibold ${getQuestionTypeClass(q.type)}`}>{q.type}</span>
+                            <span className="text-primary font-semibold font-label-mono">{q.score}分</span>
                             <span className="text-secondary font-semibold font-mono text-[12px]">标答: {q.standardAnswer}</span>
                           </div>
                           <MathMarkdown content={q.prompt} className="text-on-surface font-medium" />
@@ -846,7 +976,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                       <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">format_shapes</span>
                       <div>
                         <p className="font-semibold text-label-md text-on-surface">全格式自适应大模型解析</p>
-                        <p className="text-body-sm text-on-surface-variant">无需手动修改排版，大模型自动识别长篇篇章、题干、选项 A/B/C/D 与分步标答。</p>
+                      <p className="text-body-sm text-on-surface-variant">自动识别篇章、题干、选项与标答，并整理为结构化试题。</p>
                       </div>
                     </div>
                     <div className="p-space-md rounded-lg bg-surface-container-low flex items-start gap-space-sm">
@@ -855,6 +985,10 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                         <p className="font-semibold text-label-md text-on-surface">复杂高等数学 LaTeX 向量化</p>
                         <p className="text-body-sm text-on-surface-variant">对多重积分、偏导数、特征值矩阵与微积分展开式原位提取并完成 KaTeX 渲染。</p>
                       </div>
+                    </div>
+                    <div className="rounded-lg border border-primary/15 bg-primary/5 px-space-md py-space-sm text-body-sm text-on-surface-variant">
+                      <div className="font-label-md font-semibold text-primary">识别完成后的去向</div>
+                      <p className="mt-1">直接开考会留在入口一的流程；需要手动改题稿时，再选择下方“转到 Markdown 工作台”。</p>
                     </div>
                   </div>
                 )}
@@ -879,14 +1013,14 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                       className="flex-[1.2] h-10 px-4 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-label-md flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.99] cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-[18px]">play_circle</span>
-                      <span>确认并进入考场</span>
+                    <span>进入考场</span>
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={handleLaunchClone}
-                    disabled={!papers || papers.length === 0}
+                    disabled={!clonedPaperResult}
                     className="w-full h-10 px-space-lg rounded-lg bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
                   >
                     <span className="material-symbols-outlined text-[18px]">play_circle</span>
@@ -905,7 +1039,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                     className="w-full h-9 px-space-md rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md flex items-center justify-center gap-space-xs transition-colors cursor-pointer border border-outline-variant/30"
                   >
                     <span className="material-symbols-outlined text-[16px]">edit</span>
-                    <span>导入至 Markdown 工作台进行微调</span>
+                    <span>转到 Markdown 工作台继续编辑（可选）</span>
                   </button>
                 )}
               </div>
@@ -913,137 +1047,38 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
           </div>
         )}
 
-        {/* MODE 2: Custom Parameterized Spec Engine */}
-        {activeMode === 'custom' && (
-          <section className="relative rounded-xl bg-surface-container-lowest shadow-sm p-space-xl border border-primary ring-2 ring-primary max-w-4xl mx-auto w-full space-y-space-lg">
-            <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
-              <div className="inline-flex items-center gap-space-xs px-space-sm py-1 rounded bg-primary/10 text-primary font-label-mono text-label-mono font-medium">
-                <span className="material-symbols-outlined text-[14px]">tune</span>
-                <span>自定义分值与题型矩阵 (model_core 驱动)</span>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-primary">
-                <span className="material-symbols-outlined text-[18px]">dashboard_customize</span>
-              </div>
-            </div>
-
-            <div className="space-y-space-xs">
-              <h2 className="font-headline-lg text-headline-lg text-on-surface font-semibold">
-                自由规格智能生成
-              </h2>
-              <p className="font-body-md text-body-md text-on-surface-variant">
-                无原题模板时，自主调控题量分布、分数权重与测试考纲。底层通过 <code>model_core</code> 智能选拔符合要求的优质题目。
-              </p>
-            </div>
-
-            <div className="space-y-space-sm">
-              <div>
-                <label className="block font-label-sm text-label-sm text-on-surface-variant mb-1">测验标题命名</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={customTitle}
-                    onChange={(e) => setCustomTitle(e.target.value)}
-                    className="w-full h-9 px-space-md bg-surface-container-low rounded font-body-md text-body-md text-on-surface focus:outline-none focus:bg-surface-container-lowest transition-colors border border-outline-variant/30 pr-8"
-                  />
-                  <span className="material-symbols-outlined text-[16px] text-on-surface-variant absolute right-space-sm top-2.5">edit</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-space-md">
-                <div className="bg-surface-container-low rounded p-space-sm flex items-center justify-between border border-outline-variant/20">
-                  <div>
-                    <span className="block font-label-sm text-label-sm text-on-surface-variant">试卷设定总分</span>
-                    <span className="font-label-mono text-headline-sm font-semibold text-on-surface">
-                      {totalScore} <span className="text-body-sm font-normal text-on-surface-variant">PTS</span>
-                    </span>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setTotalScore(s => Math.max(50, s - 10))}
-                      className="w-6 h-6 rounded bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container shadow-xs cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTotalScore(s => Math.min(150, s + 10))}
-                      className="w-6 h-6 rounded bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container shadow-xs cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-surface-container-low rounded p-space-sm flex items-center justify-between border border-outline-variant/20">
-                  <div>
-                    <span className="block font-label-sm text-label-sm text-on-surface-variant">建议限时时长</span>
-                    <span className="font-label-mono text-headline-sm font-semibold text-on-surface">
-                      {duration} <span className="text-body-sm font-normal text-on-surface-variant">MIN</span>
-                    </span>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setDuration(d => Math.max(30, d - 10))}
-                      className="w-6 h-6 rounded bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container shadow-xs cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDuration(d => Math.min(240, d + 10))}
-                      className="w-6 h-6 rounded bg-surface-container-lowest text-on-surface flex items-center justify-center hover:bg-surface-container shadow-xs cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2 flex flex-col sm:flex-row gap-2">
-              <button
-                type="button"
-                onClick={() => handleSaveCustom(false)}
-                disabled={isGenerating}
-                className="flex-1 h-11 px-4 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-headline-sm text-label-md flex items-center justify-center gap-2 border border-primary/30 shadow-xs transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
-                title="生成并直接保存至试卷库，暂不开考"
-              >
-                <span className="material-symbols-outlined text-[19px]">bookmark_add</span>
-                <span>生成并存入试卷库</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleLaunchCustom}
-                disabled={isGenerating}
-                className="flex-[1.2] h-11 px-space-lg rounded-lg bg-inverse-surface hover:bg-on-background text-inverse-on-surface font-headline-sm text-headline-sm flex items-center justify-center gap-space-sm shadow-md transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
-              >
-                <span className={`material-symbols-outlined text-[20px] ${isGenerating ? 'animate-spin' : ''}`}>
-                  {isGenerating ? 'progress_activity' : 'psychology'}
-                </span>
-                <span>{isGenerating ? '正在调用 model_core 组卷中...' : '智能生成新卷并进入考场'}</span>
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* MODE 3: Markdown Generation Workbench with Full KaTeX UI & Seamless AI Ingestion */}
         {activeMode === 'markdown' && (
           <div className="flex flex-col gap-space-lg">
             {/* Control Bar */}
             <div className="bg-surface-container-lowest p-space-md rounded-xl shadow-sm border border-outline-variant/30 flex items-center justify-between gap-space-md flex-wrap">
               <div className="flex items-center gap-2 text-on-surface-variant font-label-sm">
                 <span className="material-symbols-outlined text-[18px] text-primary">edit_note</span>
-                <span>在左侧编写或粘贴 Markdown 试题，大模型自动实时按篇章切片并同步至 KaTeX 排版预览</span>
+                <span>编辑或粘贴题稿后，使用 AI 解析生成预览；解析会按题目分批调用模型</span>
               </div>
 
               <div className="flex items-center gap-2">
-                <label className="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm transition-colors cursor-pointer border border-outline-variant/30 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[16px]">upload_file</span>
-                  <span>导入本地 Markdown</span>
-                  <input type="file" accept=".md,.markdown,.txt" onChange={handleSimulateUpload} className="hidden" />
-                </label>
+                <button
+                  type="button"
+                  onClick={() => runProgressiveChunkParser(markdownText, { resume: false })}
+                  disabled={!markdownText.trim() || isParsingAI}
+                  title={`按篇章切片调用模型，预计 ${markdownBatchCount} 批`}
+                  className="px-3 py-1.5 rounded-lg bg-primary text-on-primary font-label-sm font-semibold transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                >
+                  <span className={`material-symbols-outlined text-[16px] ${isParsingAI ? 'animate-spin' : ''}`}>{isParsingAI ? 'progress_activity' : 'auto_awesome'}</span>
+                  <span>{isParsingAI ? '正在解析…' : `${hasCurrentParse ? 'AI 重新解析' : 'AI 解析'}（${markdownBatchCount} 批）`}</span>
+                </button>
+                {canContinueParse && (
+                  <button
+                    type="button"
+                    onClick={() => runProgressiveChunkParser(markdownText, { resume: true })}
+                    disabled={isParsingAI}
+                    title={`从第 ${completedChunkCount + 1} / ${markdownBatchCount} 批继续解析`}
+                    className="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm font-semibold transition-colors cursor-pointer border border-outline-variant/30 flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+                    <span>继续解析</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1056,6 +1091,29 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                   <span>{showAnswers ? '隐藏标答/解析' : '显示标答/解析'}</span>
                 </button>
               </div>
+              {parseUsageSummary && (
+                <div className="w-full flex items-center gap-2 text-xs text-on-surface-variant" aria-live="polite">
+                  <span className="material-symbols-outlined text-[15px] text-primary">monitoring</span>
+                  <span>
+                    本次解析：{parseUsageSummary.totalTokens.toLocaleString()} tokens
+                    {' · '}
+                    {parseUsageSummary.pricedCalls > 0
+                      ? `约 ¥${parseUsageSummary.estimatedCostCny.toFixed(6)}`
+                      : '费用暂不可估'}
+                    {' · '}
+                    {parseUsageSummary.complete
+                      ? `已统计 ${parseUsageSummary.completedCalls}/${parseUsageSummary.totalCalls} 批`
+                      : `统计中 ${parseUsageSummary.completedCalls}/${parseUsageSummary.totalCalls} 批`}
+                    {parseUsageSummary.unpricedCalls > 0 && '（部分批次费用未计价）'}
+                  </span>
+                  {parseUsageSummary.structuredRetries > 0 && (
+                    <span className="text-amber-700">结构纠错 {parseUsageSummary.structuredRetries}/{parseUsageSummary.retryLimit ?? '—'} 次</span>
+                  )}
+                  {parseUsageSummary.pricedCalls > 0 && parseUsageSummary.pricedCalls < parseUsageSummary.completedCalls && (
+                    <span>部分批次费用暂不可估</span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* AI Status / Notice Banner */}
@@ -1101,7 +1159,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                   <textarea
                     value={markdownText}
                     onChange={(e) => setMarkdownText(e.target.value)}
-                    placeholder="在此编写或粘贴 Markdown 试卷文本，大模型将自动实时切分与规整..."
+                    placeholder="在此编写或粘贴 Markdown 试卷文本，编辑完成后点击上方“AI 解析”..."
                     className="w-full h-[620px] mt-2 p-3.5 bg-surface-container-low rounded-lg font-mono text-code-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest border border-outline-variant/30 leading-relaxed resize-none"
                   />
                 </div>
@@ -1109,8 +1167,8 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                 {/* Markdown format tips */}
                 <div className="p-space-sm bg-surface-container-low rounded-lg text-[11px] text-on-surface-variant space-y-1 font-mono">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-on-surface font-sans">💡 自动 AI 规整规范：</span>
-                    <span className="text-[10px] text-primary">无需手动点按钮，停止输入后自动触发 AI</span>
+                    <span className="font-semibold text-on-surface font-sans">💡 AI 解析说明：</span>
+                    <span className="text-[10px] text-primary">仅点击“AI 解析”后调用模型，避免编辑时重复消耗额度</span>
                   </div>
                   <p>• 篇章材料：支持 <code>#### Text 1</code>、<code>#### 阅读篇章</code> 自动关联绑定下属考题</p>
                   <p>• 题号：支持 <code>### 1</code>、<code>### 21</code>，大题小问（1.证明 2.计算）将智能保留在题干内</p>
@@ -1119,7 +1177,7 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                 </div>
               </div>
 
-              {/* Right: Real-time KaTeX Live Exam Paper Preview with Rich Loading State & Interactive Editing */}
+              {/* Right: KaTeX Exam Paper Preview with Interactive Editing */}
               <div className="bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/30 p-space-lg flex flex-col justify-between space-y-space-md relative overflow-hidden">
                 <div className="space-y-space-md">
                   {/* Preview Header & AI Synchronizer Indicator */}
@@ -1135,12 +1193,18 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                           <span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>
                           <span>AI 正在重构排版...</span>
                         </span>
-                      ) : (
+                      ) : markdownText.trim() && parsedMarkdownSource !== markdownText ? (
+                        <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-label-mono text-code-sm font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                          <span>题稿有改动，待解析</span>
+                        </span>
+                      ) : parsedMarkdownSource ? (
                         <span className="px-2 py-0.5 rounded bg-secondary/15 text-secondary font-label-mono text-code-sm font-semibold flex items-center gap-1">
                           <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
-                          <span>已同步最新</span>
+                          <span>已解析当前题稿</span>
                         </span>
-                      )}
+                      ) : <span className="text-[11px] text-on-surface-variant">等待题稿解析</span>
+                      }
                     </div>
                   </div>
 
@@ -1333,9 +1397,9 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                                 <span className="px-2 py-0.5 rounded bg-primary-fixed text-primary font-label-mono text-label-mono font-semibold">
                                   {q.num || String(idx + 1).padStart(2, '0')}
                                 </span>
-                                <span className="text-label-sm font-semibold text-on-surface">{q.type}</span>
+                                <span className={`px-2 py-0.5 rounded border text-label-sm font-semibold ${getQuestionTypeClass(q.type)}`}>{q.type}</span>
                                 <span className="text-primary font-semibold text-[12px] bg-surface-container px-2 py-0.5 rounded font-label-mono">
-                                  {q.score} 分
+                                  {Number(q.score) > 0 ? `${q.score} 分` : '未设分值'}
                                 </span>
                               </div>
 
@@ -1407,18 +1471,21 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                   <div>
                                     <label className="text-[11px] text-on-surface-variant block mb-0.5">题型</label>
-                                    <select
+                                    <SelectMenu
+                                      ariaLabel={`设置第 ${editForm.num} 题的题型`}
                                       value={editForm.type}
-                                      onChange={(e) => setEditForm(f => ({ ...f, type: e.target.value }))}
-                                      className="w-full h-8 px-2 bg-surface-container-lowest rounded text-[12px] border border-outline-variant/30 text-on-surface focus:outline-none"
-                                    >
-                                      <option value="单项选择题">单项选择题</option>
-                                      <option value="多项选择题">多项选择题</option>
-                                      <option value="填空题">填空题</option>
-                                      <option value="综合计算与解答题">综合计算与解答题</option>
-                                      <option value="证明题">证明题</option>
-                                      <option value="阅读理解题">阅读理解题</option>
-                                    </select>
+                                      onChange={(type) => setEditForm(f => ({ ...f, type }))}
+                                      options={[
+                                        { value: '单项选择题', label: '单项选择题' },
+                                        { value: '多项选择题', label: '多项选择题' },
+                                        { value: '填空题', label: '填空题' },
+                                        { value: '综合计算与解答题', label: '综合计算与解答题' },
+                                        { value: '证明题', label: '证明题' },
+                                        { value: '阅读理解题', label: '阅读理解题' }
+                                      ]}
+                                      className="w-full"
+                                      buttonClassName="inline-flex h-8 w-full items-center justify-between gap-1 rounded border border-outline-variant/30 bg-surface-container-lowest px-2 text-left text-[12px] text-on-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                    />
                                   </div>
 
                                   <div>
@@ -1658,9 +1725,9 @@ export default function ExamGeneratorView({ papers, onStartExam, onSavePaper, on
                                   <span className="px-1.5 py-0.5 rounded bg-secondary-container text-on-secondary-container text-[11px] font-bold">
                                     标准答案
                                   </span>
-                                  <span className="font-mono text-secondary font-bold text-label-md">
-                                    {q.standardAnswer}
-                                  </span>
+                                  <div className="text-secondary font-bold text-label-md">
+                                    <MathMarkdown content={q.standardAnswer} />
+                                  </div>
                                 </div>
 
                                 {q.analysis && (

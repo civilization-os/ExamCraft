@@ -26,6 +26,13 @@ export default function MathMarkdown({ content, className = '' }) {
       return `@@@DISPLAY_MATH_${idx}@@@`;
     });
 
+    // AI providers commonly use standard TeX delimiters instead of Markdown dollars.
+    str = str.replace(/\\\[([\s\S]*?)\\\]/g, (match, math) => {
+      const idx = mathBlocks.length;
+      mathBlocks.push(math.trim());
+      return `@@@DISPLAY_MATH_${idx}@@@`;
+    });
+
     // 2. Any standalone matrix/aligned/cases environment that was NOT inside $$...$$
     str = str.replace(/\\begin\{(pmatrix|bmatrix|vmatrix|Vmatrix|matrix|aligned|cases)\}([\s\S]*?)\\end\{\1\}/g, (match) => {
       const idx = mathBlocks.length;
@@ -35,6 +42,12 @@ export default function MathMarkdown({ content, className = '' }) {
 
     // 3. Extract inline math: $...$
     str = str.replace(/\$([^\$\n]+?)\$/g, (match, math) => {
+      const idx = mathInlines.length;
+      mathInlines.push(math.trim());
+      return `@@@INLINE_MATH_${idx}@@@`;
+    });
+
+    str = str.replace(/\\\(([^\n]*?)\\\)/g, (match, math) => {
       const idx = mathInlines.length;
       mathInlines.push(math.trim());
       return `@@@INLINE_MATH_${idx}@@@`;

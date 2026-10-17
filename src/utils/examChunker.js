@@ -77,7 +77,7 @@ export function sliceMarkdownIntoChunks(mdText) {
     }
 
     // Passage header (### Text 1, #### Text 1, ### Passage A, #### 阅读材料, etc.)
-    const passageMatch = !inDetails && line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*)/i);
+    const passageMatch = !inDetails && line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*)/i);
     if (passageMatch) {
       flushPassage();
       currentPassageTitle = passageMatch[1].trim();
@@ -96,8 +96,10 @@ export function sliceMarkdownIntoChunks(mdText) {
       const mBold = line.match(/^\*\*(\d+)[\.、\s]*\*\*\s*(.*)$/);
       // 2. Hash headers like ### 1, ## 21
       const mHash = line.match(/^(?:###|##)\s*(?:题\s*)?(\d+)[\.、\s]*(.*)$/);
-      // 3. Sequential numbers like 1., 21. (exclude lines with % or bullet points)
-      const mNum = line.match(/^(\d+)[\.、]\s+([^\d%].*)$/);
+      // 3. Plain numbered questions commonly extracted from PDF, including full-width punctuation.
+      const mNum = line.match(/^(\d+)[\.．、)]\s*([^\d%].*)$/);
+      const mParenNum = line.match(/^[（(](\d+)[）)]\s*([^\d%].*)$/);
+      const mCnNum = line.match(/^第\s*(\d+)\s*题[.．、：:\s]*(.*)$/);
 
       if (mBold) {
         isQHeader = true;
@@ -105,9 +107,9 @@ export function sliceMarkdownIntoChunks(mdText) {
       } else if (mHash && !passageMatch) {
         isQHeader = true;
         qNum = parseInt(mHash[1], 10);
-      } else if (mNum && !line.includes('%') && !isCollectingPassage && questionBlocks.length > 0) {
-        const candidateNum = parseInt(mNum[1], 10);
-        const lastNum = questionBlocks[questionBlocks.length - 1].qNum || 0;
+      } else if ((mNum || mParenNum || mCnNum) && !line.includes('%') && !isCollectingPassage) {
+        const candidateNum = parseInt((mNum || mParenNum || mCnNum)[1], 10);
+        const lastNum = questionBlocks.length ? (questionBlocks[questionBlocks.length - 1].qNum || 0) : 0;
         if (candidateNum === lastNum + 1) {
           isQHeader = true;
           qNum = candidateNum;
@@ -140,13 +142,51 @@ export function sliceMarkdownIntoChunks(mdText) {
   flushPassage();
 
   if (questionBlocks.length === 0) {
-    return [{
+    // Unstructured sources (especially text extracted from PDFs) still need bounded
+    // requests. Keep line boundaries where possible so the model can parse each slice.
+    const maxChars = 5200;
+    const chunks = [];
+    let buffer = [];
+    let bufferLength = 0;
+    const flush = () => {
+      const text = buffer.join('\n').trim();
+      if (!text) return;
+      chunks.push({
+        chunkIndex: chunks.length,
+        section: currentSection,
+        passageTitle: '',
+        passage: '',
+        rawQuestionsText: text,
+        qNums: [],
+        summary: chunks.length ? `未结构化文本（第 ${chunks.length + 1} 批）` : '未结构化文本（第 1 批）'
+      });
+      buffer = [];
+      bufferLength = 0;
+    };
+
+    for (const rawLine of lines) {
+      if (bufferLength && bufferLength + rawLine.length + 1 > maxChars) flush();
+      if (rawLine.length <= maxChars) {
+        buffer.push(rawLine);
+        bufferLength += rawLine.length + 1;
+        continue;
+      }
+      for (let offset = 0; offset < rawLine.length; offset += maxChars) {
+        const part = rawLine.slice(offset, offset + maxChars);
+        if (bufferLength && bufferLength + part.length > maxChars) flush();
+        buffer.push(part);
+        bufferLength += part.length;
+        if (offset + maxChars < rawLine.length) flush();
+      }
+    }
+    flush();
+    return chunks.length ? chunks : [{
       chunkIndex: 0,
       section: currentSection,
       passageTitle: '',
       passage: '',
       rawQuestionsText: mdText,
-      qNums: [1],
+      qNums: [],
       summary: '全文解析'
     }];
   }

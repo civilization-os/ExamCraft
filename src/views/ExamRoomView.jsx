@@ -1,7 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import ScratchpadCanvas from '../components/ScratchpadCanvas';
 import { getQuestionDifficulty } from '../utils/paperMetrics';
+import { getQuestionTypeClass, normalizeQuestionType, stripAnswerMaterial } from '../utils/questionTypes';
+
+const prefersSplitExamLayout = () => {
+  try { return localStorage.getItem('examcraft_exam_default_layout') !== 'stacked'; }
+  catch { return true; }
+};
 
 export default function ExamRoomView({
   activePaper,
@@ -12,6 +18,50 @@ export default function ExamRoomView({
   onUpdatePaper
 }) {
   const [currentQIndex, setCurrentQIndex] = useState(0);
+  const [isAnswerCardCollapsed, setIsAnswerCardCollapsed] = useState(false);
+  const [modelUsageStatus, setModelUsageStatus] = useState(null);
+  const normalizeQuestions = (list) => (list || []).map((question) => {
+    let userAnswer = question.userAnswer;
+    if (typeof userAnswer === 'string' && /^\s*\{/.test(userAnswer) && /"latex"\s*:/.test(userAnswer)) {
+      try {
+        const parsed = JSON.parse(userAnswer);
+        if (typeof parsed?.latex === 'string') userAnswer = parsed.latex;
+      } catch {
+        const match = /"latex"\s*:\s*"((?:\\.|[^"\\])*)"/s.exec(userAnswer);
+        if (match) userAnswer = match[1].replace(/\\\\/g, '\\').replace(/\\"/g, '"');
+      }
+    }
+    return {
+      ...question,
+      ...(typeof userAnswer === 'string' ? { userAnswer } : {}),
+      type: normalizeQuestionType(question, activePaper?.title || '')
+    };
+  });
+
+  useEffect(() => {
+    let active = true;
+    let requestPending = false;
+    const refreshStatus = () => {
+      if (requestPending) return;
+      requestPending = true;
+      fetch('/api/model/status')
+        .then((res) => res.json())
+        .then((data) => { if (active && data.success) setModelUsageStatus(data); })
+        .catch(() => {})
+        .finally(() => { requestPending = false; });
+    };
+    refreshStatus();
+    const intervalId = window.setInterval(refreshStatus, 10_000);
+    const onVisibilityChange = () => { if (document.visibilityState === 'visible') refreshStatus(); };
+    window.addEventListener('examcraft-model-config-updated', refreshStatus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener('examcraft-model-config-updated', refreshStatus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
 
   // Initialize questionList: try to restore saved answers if user previously sealed or paused
   const [questionList, setQuestionList] = useState(() => {
@@ -20,15 +70,15 @@ export default function ExamRoomView({
       const saved = localStorage.getItem(`examcraft_answers_${activePaper.id}`);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return normalizeQuestions(parsed);
       }
     } catch {}
-    return questions || [];
+    return normalizeQuestions(questions);
   });
 
   useEffect(() => {
     if (!activePaper?.id) {
-      setQuestionList(questions || []);
+      setQuestionList(normalizeQuestions(questions));
       setCurrentQIndex(0);
       return;
     }
@@ -37,12 +87,12 @@ export default function ExamRoomView({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setQuestionList(parsed);
+          setQuestionList(normalizeQuestions(parsed));
           return;
         }
       }
     } catch {}
-    setQuestionList(questions || []);
+    setQuestionList(normalizeQuestions(questions));
   }, [questions, activePaper?.id]);
 
   // Exam Lifecycle Status: 考试中 vs 已封卷 (围棋封盘)
@@ -75,17 +125,48 @@ export default function ExamRoomView({
 
   // Submitting state for AI grading
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitRequestInFlightRef = useRef(false);
   const [submitProgressText, setSubmitProgressText] = useState('');
+  const [submitProgressStage, setSubmitProgressStage] = useState(0);
+  const [submitElapsedSeconds, setSubmitElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!isSubmitting) {
+      setSubmitElapsedSeconds(0);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    const timerId = window.setInterval(() => {
+      setSubmitElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timerId);
+  }, [isSubmitting]);
 
   // Answering Mode: 'ai-scribe' or 'ocr'
   const [answerMode, setAnswerMode] = useState('ai-scribe');
 
   // Candidate draft input for current question
   const currentQ = questionList[currentQIndex] || questionList[0] || null;
+  const currentPassageItems = currentQ?.passage
+    ? questionList
+      .map((question, index) => ({ question, index }))
+      .filter(({ question }) => (
+        question?.options?.length > 0 &&
+        (currentQ.passageGroupId && question.passageGroupId
+          ? question.passageGroupId === currentQ.passageGroupId
+          : question.passage === currentQ.passage && (question.passageTitle || '') === (currentQ.passageTitle || ''))
+      ))
+    : [];
+  const isMultiQuestionPassage = currentPassageItems.length > 1;
   const [candidateDraft, setCandidateDraft] = useState(currentQ?.userAnswer || '');
+  const fillAnswerInputRef = useRef(null);
+  const mathFieldRef = useRef(null);
+  const [fillInputMode, setFillInputMode] = useState('visual');
+  const [mathLiveReady, setMathLiveReady] = useState(false);
   
   // Real AI Scribe result state
   const [isScribing, setIsScribing] = useState(false);
+  const scribeRequestInFlightRef = useRef(false);
   const [scribedLatex, setScribedLatex] = useState(currentQ?.aiTranscription || '');
   const [stepScores, setStepScores] = useState(currentQ?.stepScores || []);
 
@@ -108,14 +189,93 @@ export default function ExamRoomView({
 
   // 每一题都有自己独立的草稿纸 Key，并且独立持久化
   const currentQKey = currentQ?.id || `q_${currentQ?.num || currentQIndex}`;
-  const scratchpadStorageKey = activePaper?.id
-    ? `examcraft_scratchpad_${activePaper.id}_${currentQKey}`
-    : `examcraft_scratchpad_default_${currentQKey}`;
   const scratchpadCanvasStorageKey = activePaper?.id
     ? `examcraft_scratchpad_canvas_${activePaper.id}_${currentQKey}`
     : `examcraft_scratchpad_canvas_default_${currentQKey}`;
-  const [showScratchpad, setShowScratchpad] = useState(false);
+  const [showScratchpad, setShowScratchpad] = useState(prefersSplitExamLayout);
   const [isScratchpadMaximized, setIsScratchpadMaximized] = useState(false);
+  const [isSplitWorkspace, setIsSplitWorkspace] = useState(prefersSplitExamLayout);
+  const [splitRatio, setSplitRatio] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('examcraft_exam_split_ratio'));
+      return saved >= 0.35 && saved <= 0.72 ? saved : 0.56;
+    } catch { return 0.56; }
+  });
+  const splitWorkspaceRef = useRef(null);
+  const [scratchpadDraftRevision, setScratchpadDraftRevision] = useState(0);
+  const questionMarksStorageKey = `examcraft_question_marks_${activePaper?.id || 'paper'}`;
+  const getQuestionMarkKey = (question, index) => `qmark_${index}_${question?.id || question?.num || 'question'}`;
+  const normalizeSavedQuestionMarks = (savedKeys) => {
+    if (!Array.isArray(savedKeys)) return [];
+    const nextKeys = [];
+    savedKeys.forEach((savedKey) => {
+      if (typeof savedKey !== 'string') return;
+      if (savedKey.startsWith('qmark_')) {
+        if (questionList.some((question, index) => getQuestionMarkKey(question, index) === savedKey)) nextKeys.push(savedKey);
+        return;
+      }
+      const matches = questionList
+        .map((question, index) => ({ question, index }))
+        .filter(({ question, index }) => savedKey === question?.id || savedKey === `q_${question?.num || index}`);
+      // Legacy IDs/numbers that identify multiple questions are ambiguous; drop them
+      // instead of painting a review marker onto every matching question.
+      if (matches.length === 1) nextKeys.push(getQuestionMarkKey(matches[0].question, matches[0].index));
+    });
+    return [...new Set(nextKeys)];
+  };
+  const [markedQuestionKeys, setMarkedQuestionKeys] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`examcraft_question_marks_${activePaper?.id || 'paper'}`);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return normalizeSavedQuestionMarks(parsed);
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(questionMarksStorageKey);
+      const normalized = normalizeSavedQuestionMarks(saved ? JSON.parse(saved) : []);
+      setMarkedQuestionKeys(normalized);
+      localStorage.setItem(questionMarksStorageKey, JSON.stringify(normalized));
+    } catch {
+      setMarkedQuestionKeys([]);
+    }
+  }, [questionMarksStorageKey, questionList]);
+  const currentQuestionMarkKey = getQuestionMarkKey(currentQ, currentQIndex);
+  const isCurrentQuestionMarked = markedQuestionKeys.includes(currentQuestionMarkKey);
+  const toggleCurrentQuestionMark = () => {
+    const next = isCurrentQuestionMarked
+      ? markedQuestionKeys.filter((key) => key !== currentQuestionMarkKey)
+      : [...markedQuestionKeys, currentQuestionMarkKey];
+    setMarkedQuestionKeys(next);
+    try {
+      localStorage.setItem(questionMarksStorageKey, JSON.stringify(next));
+    } catch {}
+    showExamToast(isCurrentQuestionMarked ? '已取消本题复查标记' : `已标记第 ${currentQ?.num} 题，交卷前可在答题卡中定位`, 'info');
+  };
+  const questionScratchpadKeys = useMemo(() => questionList.map((question, index) => {
+    const key = question?.id || `q_${question?.num || index}`;
+    const prefix = activePaper?.id
+      ? `examcraft_scratchpad_${activePaper.id}_${key}`
+      : `examcraft_scratchpad_default_${key}`;
+    const canvasKey = activePaper?.id
+      ? `examcraft_scratchpad_canvas_${activePaper.id}_${key}`
+      : `examcraft_scratchpad_canvas_default_${key}`;
+    return { textKey: prefix, canvasKey };
+  }), [questionList, activePaper?.id, scratchpadDraftRevision]);
+  const questionDraftFlags = useMemo(() => questionScratchpadKeys.map(({ textKey, canvasKey }) => {
+    try {
+      return Boolean(
+        localStorage.getItem(textKey)?.trim() ||
+        localStorage.getItem(canvasKey) ||
+        localStorage.getItem(`${canvasKey}_elements`) ||
+        localStorage.getItem(`${canvasKey}_recovery`)
+      );
+    } catch {
+      return false;
+    }
+  }), [questionScratchpadKeys]);
 
   // 草稿纸窗口自由拖拽移动与透视透明度状态
   const [scratchpadPos, setScratchpadPos] = useState(null);
@@ -152,6 +312,9 @@ export default function ExamRoomView({
     const startTop = rect.top;
     const startMouseX = e.clientX;
     const startMouseY = e.clientY;
+    let nextPosition = { x: startLeft, y: startTop };
+    let frameId = null;
+    let hasMoved = false;
 
     setIsDraggingScratchpad(true);
     document.body.style.userSelect = 'none';
@@ -159,6 +322,8 @@ export default function ExamRoomView({
     const onMouseMove = (moveEvt) => {
       const deltaX = moveEvt.clientX - startMouseX;
       const deltaY = moveEvt.clientY - startMouseY;
+      if (deltaX === 0 && deltaY === 0) return;
+      hasMoved = true;
 
       const modalW = modalEl.offsetWidth || 760;
       const modalH = modalEl.offsetHeight || 580;
@@ -168,11 +333,23 @@ export default function ExamRoomView({
       // 保证草稿纸不被完全拖出视口边界
       const newX = Math.max(0, Math.min(winW - Math.min(modalW, 120), startLeft + deltaX));
       const newY = Math.max(0, Math.min(winH - Math.min(modalH, 40), startTop + deltaY));
-
-      setScratchpadPos({ x: Math.round(newX), y: Math.round(newY) });
+      nextPosition = { x: Math.round(newX), y: Math.round(newY) };
+      if (frameId === null) {
+        frameId = window.requestAnimationFrame(() => {
+          modalEl.style.translate = `${nextPosition.x - startLeft}px ${nextPosition.y - startTop}px`;
+          frameId = null;
+        });
+      }
     };
 
     const onMouseUp = () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      modalEl.style.translate = 'none';
+      if (hasMoved) {
+        modalEl.style.left = `${nextPosition.x}px`;
+        modalEl.style.top = `${nextPosition.y}px`;
+        setScratchpadPos(nextPosition);
+      }
       setIsDraggingScratchpad(false);
       document.body.style.userSelect = '';
       window.removeEventListener('mousemove', onMouseMove);
@@ -183,8 +360,34 @@ export default function ExamRoomView({
     window.addEventListener('mouseup', onMouseUp);
   };
 
+  const handleSplitResizeStart = (e) => {
+    if (e.button !== 0) return;
+    const workspace = splitWorkspaceRef.current;
+    if (!workspace) return;
+    e.preventDefault();
+    const rect = workspace.getBoundingClientRect();
+    let latestRatio = splitRatio;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onPointerMove = (moveEvent) => {
+      const ratio = Math.max(0.35, Math.min(0.72, (moveEvent.clientX - rect.left) / rect.width));
+      latestRatio = ratio;
+      setSplitRatio(ratio);
+    };
+    const onPointerUp = () => {
+      try { localStorage.setItem('examcraft_exam_split_ratio', String(latestRatio)); } catch {}
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+  };
+
   // Submit Modal
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
+  const [isClearCurrentAnswerModalOpen, setIsClearCurrentAnswerModalOpen] = useState(false);
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
 
   // Sync draft when switching question
@@ -210,12 +413,30 @@ export default function ExamRoomView({
   };
 
   const answeredCount = questionList.filter((q) => q.userAnswer && q.userAnswer.trim().length > 0).length;
+  const questionGroups = useMemo(() => {
+    const groups = [];
+    const groupIndex = new Map();
+    questionList.forEach((question, index) => {
+      const type = question.type || '未分类';
+      if (!groupIndex.has(type)) {
+        groupIndex.set(type, groups.length);
+        groups.push({ type, items: [] });
+      }
+      groups[groupIndex.get(type)].items.push({ question, index });
+    });
+    return groups;
+  }, [questionList]);
+  const examTodayTokens = Number(modelUsageStatus?.today?.tokens || 0);
+  const examTodayCostKnown = (modelUsageStatus?.today?.pricedCalls || 0) > 0;
+  const examTodayCost = Number(modelUsageStatus?.today?.estimatedCostCny || 0);
+  const examWalletBalance = modelUsageStatus?.balance?.balances?.find((item) => item.currency === 'CNY')
+    || modelUsageStatus?.balance?.balances?.[0];
 
-  const handleUpdateAnswer = (val) => {
-    setCandidateDraft(val);
+  const handleUpdateAnswer = (val, targetIndex = currentQIndex) => {
+    if (targetIndex === currentQIndex) setCandidateDraft(val);
     setQuestionList((prev) => {
       const next = prev.map((q, idx) =>
-        idx === currentQIndex
+        idx === targetIndex
           ? { ...q, userAnswer: val, status: val.trim() ? 'answered' : 'unanswered' }
           : q
       );
@@ -227,6 +448,45 @@ export default function ExamRoomView({
       return next;
     });
   };
+
+  const handleClearCurrentAnswer = () => {
+    const cleared = questionList.map((question, index) => index === currentQIndex
+      ? { ...question, userAnswer: '', aiTranscription: '', stepScores: [], status: 'unanswered' }
+      : question);
+    setQuestionList(cleared);
+    if (activePaper?.id) {
+      try { localStorage.setItem(`examcraft_answers_${activePaper.id}`, JSON.stringify(cleared)); } catch {}
+    }
+    setCandidateDraft('');
+    setScribedLatex('');
+    setStepScores([]);
+    setIsClearCurrentAnswerModalOpen(false);
+    showExamToast(`已清空第 ${currentQ?.num || currentQIndex + 1} 题答案；其他题目和草稿纸内容已保留。`, 'success');
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (fillInputMode !== 'visual' || !currentQ || currentQ.options?.length) return undefined;
+    Promise.all([import('mathlive'), import('mathlive/fonts.css')]).then(() => {
+      if (!cancelled) setMathLiveReady(true);
+    }).catch(() => {
+      if (!cancelled) setMathLiveReady(false);
+    });
+    return () => { cancelled = true; };
+  }, [currentQIndex, currentQ?.type, Boolean(currentQ?.options?.length), fillInputMode]);
+
+  useEffect(() => {
+    setFillInputMode(currentQ?.type?.includes('填空') ? 'visual' : 'description');
+  }, [currentQIndex]);
+
+  useEffect(() => {
+    const field = mathFieldRef.current;
+    if (fillInputMode !== 'visual' || !mathLiveReady || !field) return undefined;
+    if (field.value !== candidateDraft) field.value = candidateDraft;
+    const syncAnswer = () => handleUpdateAnswer(field.value);
+    field.addEventListener('input', syncAnswer);
+    return () => field.removeEventListener('input', syncAnswer);
+  }, [candidateDraft, currentQIndex, fillInputMode, mathLiveReady]);
 
   // 封卷操作（类似围棋封盘：考卷进入防作弊密封，计时完全冻结，安全暂存）
   const handleSealExam = () => {
@@ -279,10 +539,12 @@ export default function ExamRoomView({
 
   // Call real model_core AI scribe
   const handleTriggerAIScribe = async () => {
+    if (scribeRequestInFlightRef.current) return;
     if (!candidateDraft.trim()) {
       showExamToast('请先在左侧输入考生的速记或草稿内容。', 'warn');
       return;
     }
+    scribeRequestInFlightRef.current = true;
     setIsScribing(true);
     try {
       const res = await fetch('/api/model/ai-scribe', {
@@ -290,22 +552,33 @@ export default function ExamRoomView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rawDraft: candidateDraft,
-          mathProblem: `${currentQ.prompt} ${currentQ.mathExpression || ''}`
+          mathProblem: `${stripAnswerMaterial(currentQ.prompt)} ${currentQ.mathExpression || ''}`,
+          questionType: currentQ.type
         })
       });
       const data = await res.json();
       if (data.success && data.data) {
-        if (data.data.latex) setScribedLatex(data.data.latex);
+        const transcription = String(data.data.latex || '').trim();
+        if (!transcription || transcription.includes('考场纪律')) {
+          showExamToast('没有识别到可填写的转写内容，原草稿已保留。', 'warn');
+          return;
+        }
+        setScribedLatex(transcription);
+        handleUpdateAnswer(transcription);
+        if (currentQ.type?.includes('填空')) setFillInputMode('visual');
         if (data.data.stepScores && data.data.stepScores.length > 0) {
           setStepScores(data.data.stepScores);
+        } else if (currentQ.type?.includes('填空')) {
+          setStepScores([]);
         }
-        showExamToast('✨ AI 规范转录完成 (已忠实保留您的推导演算)', 'success');
+        showExamToast('✨ 转写结果已同步到本题答案，请检查公式后继续作答', 'success');
       } else {
         showExamToast(data.error || '未检测到配置的 API Key，已保留当前预设规范排版。请前往「系统设置」输入 API Key。', 'warn');
       }
     } catch (err) {
       showExamToast(`AI 代笔调用失败: ${err.message}`, 'warn');
     } finally {
+      scribeRequestInFlightRef.current = false;
       setIsScribing(false);
     }
   };
@@ -320,15 +593,18 @@ export default function ExamRoomView({
 
   // Real Auto Grading & AI Evaluation Submission
   const handleConfirmSubmit = async () => {
+    if (submitRequestInFlightRef.current) return;
+    submitRequestInFlightRef.current = true;
     setIsSubmitModalOpen(false);
     setIsSubmitting(true);
-    setSubmitProgressText('正在启动 AI 多模态判题模型，逐题核验作答与步骤...');
+    setSubmitProgressStage(0);
+    setSubmitProgressText('正在核对客观题并汇总本次作答...');
 
     // 1. Evaluate answers
     let calculatedScore = 0;
     let correctCount = 0;
 
-    const gradedQuestions = questionList.map((q, idx) => {
+    let gradedQuestions = questionList.map((q, idx) => {
       const qKey = q.id || `q_${q.num || idx}`;
       const textKey = `examcraft_scratchpad_${activePaper?.id || 'paper'}_${qKey}`;
       const canvasKey = `examcraft_scratchpad_canvas_${activePaper?.id || 'paper'}_${qKey}`;
@@ -363,22 +639,19 @@ export default function ExamRoomView({
       } else if (isChoice) {
         const cleanUser = userAns.replace(/[^A-Za-z]/g, '').toUpperCase();
         const cleanStd = stdAns.replace(/[^A-Za-z]/g, '').toUpperCase();
-        isCorrect = cleanUser === cleanStd && cleanUser.length > 0;
+        const isMultiChoice = q.type?.includes('多项选择') || q.type?.includes('多选');
+        const normalizedUser = isMultiChoice ? [...cleanUser].sort().join('') : cleanUser;
+        const normalizedStd = isMultiChoice ? [...cleanStd].sort().join('') : cleanStd;
+        isCorrect = normalizedUser === normalizedStd && normalizedUser.length > 0;
         scoreObtained = isCorrect ? maxScore : 0;
       } else if (isBlank) {
         const normUser = userAns.replace(/\s+/g, '').toLowerCase();
         const normStd = stdAns.replace(/\s+/g, '').toLowerCase();
-        isCorrect = (normUser === normStd) || (normStd.length > 0 && normStd.includes(normUser)) || (normUser.length > 0 && normUser.includes(normStd));
+        isCorrect = normUser.length > 0 && normStd.length > 0 && (normUser === normStd || normStd.includes(normUser) || normUser.includes(normStd));
         scoreObtained = isCorrect ? maxScore : 0;
-      } else {
-        // Subjective / Solution:
-        if (userAns.length >= 15) {
-          isCorrect = true;
-          scoreObtained = Math.round(maxScore * 0.85);
-        } else {
-          isCorrect = false;
-          scoreObtained = Math.round(maxScore * 0.3);
-        }
+      } else if (userAns) {
+        // Subjective answers need human review; length is not evidence of correctness.
+        isCorrect = null;
       }
 
       if (isCorrect) correctCount++;
@@ -390,9 +663,8 @@ export default function ExamRoomView({
         scoreObtained,
         userAnswer: userAns,
         standardAnswer: stdAns,
-        aiInsight: isCorrect
-          ? '核心推导严谨规范，公式通式与采分点已全部达成。'
-          : `作答演算步骤或选项辨析出现偏差，标准答案为【${stdAns || '详见分步解析'}】。`,
+        aiInsight: null,
+        gradingStatus: isCorrect === null ? 'manual-review' : 'auto-checked',
         scratchpad: {
           text: scratchpadText,
           canvasDataUrl: scratchpadCanvas,
@@ -403,11 +675,13 @@ export default function ExamRoomView({
     });
 
     const totalPaperScore = activePaper?.totalScore || questionList.reduce((sum, q) => sum + (q.score || 5), 0);
-    const accuracy = Math.round((correctCount / questionList.length) * 100);
+    const autoCheckedCount = gradedQuestions.filter((q) => q.gradingStatus === 'auto-checked' && q.userAnswer).length;
+    let accuracy = autoCheckedCount ? Math.round((correctCount / autoCheckedCount) * 100) : 0;
     const durationTotal = activePaper?.duration ? activePaper.duration * 60 : 5400;
     const durationSpent = Math.max(10, durationTotal - secondsLeft);
 
-    setSubmitProgressText('正在生成全卷 AI 命题组名师深度诊断评测报告...');
+    setSubmitProgressText('正在生成本次作答诊断...');
+    setSubmitProgressStage(1);
 
     let aiReviewData = null;
     try {
@@ -420,13 +694,33 @@ export default function ExamRoomView({
           totalScore: totalPaperScore,
           accuracy,
           durationSpent,
-          questionsSummary: gradedQuestions.slice(0, 30).map((q) => ({
+          questionsSummary: gradedQuestions.slice(0, 60).map((q, index) => ({
+            index,
             num: q.num,
             type: q.type,
+            prompt: String(q.prompt || '').slice(0, 2400),
+            options: Array.isArray(q.options) ? q.options.slice(0, 8).map((option) => ({ key: option.key, text: String(option.text || option.content || '').slice(0, 400) })) : [],
             isCorrect: q.isCorrect,
             scoreObtained: q.scoreObtained,
+            maxScore: Number(q.score) || 0,
             userAnswer: q.userAnswer,
-            standardAnswer: q.standardAnswer
+            standardAnswer: String(q.standardAnswer || '').slice(0, 1600),
+            analysis: String(q.analysis || '').slice(0, 1000),
+            scratchpad: {
+              text: String(q.scratchpad?.text || '').slice(0, 800),
+              // Send compact, readable vector instructions only; never serialize canvas image data.
+              elements: (q.scratchpad?.elements || []).slice(0, 8).map((element) => ({
+                title: String(element.title || '').slice(0, 100),
+                actions: (element.actions || []).slice(0, 8).map((action) => ({
+                  type: action.type,
+                  content: typeof action.content === 'string' ? action.content.slice(0, 500) : undefined,
+                  expr: typeof action.expr === 'string' ? action.expr.slice(0, 180) : undefined,
+                  label: typeof action.label === 'string' ? action.label.slice(0, 120) : undefined,
+                  shapeType: action.shapeType,
+                  plane: action.plane
+                }))
+              }))
+            }
           }))
         })
       });
@@ -435,18 +729,52 @@ export default function ExamRoomView({
         aiReviewData = resJson.data;
       }
     } catch (e) {
-      console.warn('AI evaluation request failed, using default evaluation:', e);
+      console.warn('AI evaluation request failed:', e);
+    }
+
+    setSubmitProgressStage(2);
+    setSubmitProgressText('正在整理逐题评语并保存报告...');
+
+    if (Array.isArray(aiReviewData?.questionReviews)) {
+      const reviewByIndex = new Map(aiReviewData.questionReviews
+        .filter((review) => Number.isInteger(Number(review.index)))
+        .map((review) => [Number(review.index), review]));
+      gradedQuestions = gradedQuestions.map((question, index) => {
+        const review = reviewByIndex.get(index);
+        if (!review) return question;
+        const hasSuggestedScore = question.gradingStatus === 'manual-review'
+          && question.userAnswer
+          && review.scoreObtained !== null
+          && review.scoreObtained !== undefined
+          && review.scoreObtained !== ''
+          && Number.isFinite(Number(review.scoreObtained));
+        const maxScore = Math.max(0, Number(question.score) || 0);
+        const aiScore = hasSuggestedScore
+          ? Math.min(maxScore, Math.max(0, Number(review.scoreObtained)))
+          : question.scoreObtained;
+        return {
+          ...question,
+          ...(hasSuggestedScore ? {
+            scoreObtained: aiScore,
+            isCorrect: aiScore >= maxScore && maxScore > 0,
+            gradingStatus: 'ai-graded'
+          } : {}),
+          aiInsight: typeof review.comment === 'string' ? review.comment.slice(0, 1200) : question.aiInsight
+        };
+      });
+      calculatedScore = gradedQuestions.reduce((sum, question) => sum + (Number(question.scoreObtained) || 0), 0);
+      const answeredQuestions = gradedQuestions.filter((question) => question.userAnswer?.trim());
+      accuracy = answeredQuestions.length
+        ? Math.round((gradedQuestions.filter((question) => question.userAnswer?.trim() && question.isCorrect === true).length / answeredQuestions.length) * 100)
+        : 0;
     }
 
     if (!aiReviewData) {
       aiReviewData = {
-        summary: `考生在本次《${activePaper?.title || '模拟卷'}》中取得了 ${calculatedScore}/${totalPaperScore} 分的成绩。基础概念掌握扎实，建议重点攻坚失分错题，强化薄弱环节。`,
-        strengths: ['常规客观题作答规范', '时间节奏把控合理', '重点公式记忆准确'],
-        weaknesses: ['变形细节易出现笔误', '临界条件分析需巩固', '综合应用题给分点自核需加强'],
-        actionPlan: [
-          '将本次答卷中的典型错题一键沉淀至错题本进行专项复练',
-          '针对失分题型进行举一反三同构变式训练'
-        ]
+        summary: '智能诊断暂不可用。客观题按标准答案核对，主观题请对照答案与解析自行复核。',
+        strengths: [],
+        weaknesses: [],
+        actionPlan: ['将需要复习的题目收录至错题本，方便后续练习']
       };
     }
 
@@ -494,6 +822,7 @@ export default function ExamRoomView({
       console.warn('Failed to save submission to localStorage:', e);
     }
 
+    submitRequestInFlightRef.current = false;
     setIsSubmitting(false);
 
     if (onSubmitExam) {
@@ -502,6 +831,39 @@ export default function ExamRoomView({
       setIsResultModalOpen(true);
     }
   };
+
+  const renderScratchpadCanvas = (docked = false) => (
+    <ScratchpadCanvas
+      key={`${activePaper?.id || 'paper'}_${currentQKey}`}
+      questionNum={currentQ?.num}
+      questionData={currentQ}
+      questionIndex={currentQIndex}
+      questionCount={questionList.length}
+      questionNums={questionList.map((question, index) => question?.num || index + 1)}
+      questionDraftFlags={questionDraftFlags}
+      modelStatus={modelUsageStatus}
+      onNavigateQuestion={setCurrentQIndex}
+      onDraftChange={() => setScratchpadDraftRevision((revision) => revision + 1)}
+      storageKey={scratchpadCanvasStorageKey}
+      contextProblem={currentQ ? `${currentQ.prompt} ${currentQ.mathExpression || ''}` : ''}
+      isMaximized={docked ? false : isScratchpadMaximized}
+      onToggleMaximize={() => {
+        if (docked) setIsSplitWorkspace(false);
+        setShowScratchpad(true);
+        setIsScratchpadMaximized(!isScratchpadMaximized);
+      }}
+      onClose={() => {
+        setIsScratchpadMaximized(false);
+        setIsSplitWorkspace(false);
+        setShowScratchpad(false);
+      }}
+      opacity={scratchpadOpacity}
+      onOpacityChange={handleScratchpadOpacityChange}
+      onWindowDragStart={docked ? null : handleScratchpadDragStart}
+      isMoved={docked ? false : scratchpadPos !== null}
+      onResetPosition={docked ? undefined : () => setScratchpadPos(null)}
+    />
+  );
 
   if (!activePaper || !questionList || questionList.length === 0 || !currentQ) {
     return (
@@ -554,7 +916,7 @@ export default function ExamRoomView({
           <div className="flex items-center space-x-space-xs text-primary font-headline-sm text-headline-sm">
             <span className="material-symbols-outlined text-primary text-[20px] material-symbols-fill">terminal</span>
             <span className="tracking-tight text-on-surface font-headline-sm truncate max-w-xs md:max-w-md font-semibold">
-              {activePaper?.title || '全国高等数学模拟冲刺卷 #04'}
+              {activePaper?.title || '当前试卷'}
             </span>
           </div>
           <span className="hidden sm:inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-secondary-container/30 text-secondary font-label-mono text-label-mono border border-secondary-container">
@@ -564,7 +926,7 @@ export default function ExamRoomView({
         </div>
 
         {/* Center: Global Progress Bar & Current Type */}
-        <div className="hidden lg:flex flex-col items-center justify-center min-w-[260px]">
+        <div className="hidden 2xl:flex flex-col items-center justify-center min-w-[260px]">
           <div className="flex items-center justify-between w-full mb-1">
             <span className="text-on-surface-variant font-sans text-[12px] font-medium flex items-center gap-1">
               <span>答题进度:</span>
@@ -572,7 +934,7 @@ export default function ExamRoomView({
               <span className="text-outline-variant">/</span>
               <span className="font-mono">{questionList.length}</span>
             </span>
-            <span className="px-2 py-0.5 bg-surface-container text-on-surface-variant font-sans text-[11px] font-medium rounded-md">
+            <span className={`px-2 py-0.5 border font-sans text-[11px] font-medium rounded-md ${getQuestionTypeClass(currentQ.type)}`}>
               {currentQ.type}
             </span>
           </div>
@@ -586,6 +948,28 @@ export default function ExamRoomView({
 
         {/* Right: Telemetry & Actions */}
         <div className="flex items-center space-x-space-sm sm:space-x-space-md">
+          {/* Live model usage remains visible while the global workspace header is hidden. */}
+          <div
+            className="hidden lg:flex shrink-0 items-center gap-1 rounded-lg border border-outline-variant/30 bg-surface-container-low px-2 py-1 font-label-mono text-[10px] text-on-surface-variant"
+            title={`本机今日用量：${examTodayTokens.toLocaleString()} tokens；费用估算 ${examTodayCostKnown ? `¥${examTodayCost.toFixed(4)}` : '暂无单价'}${examWalletBalance ? `；钱包 ${examWalletBalance.currency === 'CNY' ? '¥' : '$'}${examWalletBalance.totalBalance.toFixed(2)}` : ''}`}
+            aria-label={`AI 今日 ${examTodayTokens.toLocaleString()} tokens，费用估算 ${examTodayCostKnown ? `¥${examTodayCost.toFixed(4)}` : '暂无单价'}`}
+          >
+            <span className="material-symbols-outlined text-[14px] text-primary">token</span>
+            <span>AI 今日 {examTodayTokens.toLocaleString()}</span>
+            <span className="text-outline-variant">·</span>
+            <span>{examTodayCostKnown ? `¥${examTodayCost.toFixed(4)}` : '¥—'}</span>
+            {modelUsageStatus?.model?.providerMode === 'deepseek-official' && (
+              <>
+                <span className="hidden 2xl:inline max-w-24 truncate text-on-surface-variant">DeepSeek</span>
+                <span className="hidden xl:inline text-outline-variant">·</span>
+                <span className="hidden xl:inline-flex max-w-24 items-center gap-0.5 truncate text-secondary" title={modelUsageStatus.balanceError || 'DeepSeek 官方钱包余额'}>
+                  <span className="material-symbols-outlined text-[13px]">account_balance_wallet</span>
+                  {examWalletBalance ? `${examWalletBalance.currency === 'CNY' ? '¥' : '$'}${examWalletBalance.totalBalance.toFixed(2)}` : '钱包—'}
+                </span>
+              </>
+            )}
+          </div>
+
           {/* Status Pill: 考试中 vs 已封卷 */}
           <span className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-sans font-semibold border ${
             isSealed
@@ -628,7 +1012,10 @@ export default function ExamRoomView({
           {/* Quick Scratchpad Toggle with Active Indicator */}
           <button
             type="button"
-            onClick={() => setShowScratchpad(!showScratchpad)}
+            onClick={() => {
+              if (isSplitWorkspace) setIsSplitWorkspace(false);
+              setShowScratchpad(!showScratchpad);
+            }}
             className={`hidden sm:inline-flex items-center space-x-1.5 px-3 py-1 font-sans text-[12px] font-medium rounded-lg border transition cursor-pointer ${
               showScratchpad
                 ? 'bg-primary text-on-primary border-primary shadow-xs'
@@ -639,12 +1026,31 @@ export default function ExamRoomView({
             <span className="material-symbols-outlined text-[17px]">draw</span>
             <span>第 {currentQ?.num} 题草稿</span>
             {Boolean(
-              localStorage.getItem(scratchpadStorageKey) ||
               localStorage.getItem(scratchpadCanvasStorageKey) ||
               localStorage.getItem(`${scratchpadCanvasStorageKey}_elements`)
             ) && (
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="本题已有专属草稿存档"></span>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (isSplitWorkspace) {
+                setIsSplitWorkspace(false);
+                setShowScratchpad(false);
+              } else {
+                setIsSplitWorkspace(true);
+                setShowScratchpad(true);
+                setIsScratchpadMaximized(false);
+              }
+            }}
+            aria-pressed={isSplitWorkspace}
+            className={`hidden lg:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-sans font-medium transition cursor-pointer ${isSplitWorkspace ? 'bg-primary text-on-primary border-primary' : 'bg-surface text-on-surface-variant border-outline-variant/50 hover:bg-surface-container'}`}
+            title="左右分栏：左侧答题，右侧草稿；拖动中间分隔线可调整宽度"
+          >
+            <span className="material-symbols-outlined text-[16px]">vertical_split</span>
+            <span>{isSplitWorkspace ? '退出分栏' : '左右工作台'}</span>
           </button>
 
           {/* Focus Mode Pill */}
@@ -664,217 +1070,216 @@ export default function ExamRoomView({
             className="inline-flex items-center space-x-1 px-3 sm:px-space-lg py-1.5 bg-primary hover:bg-primary-container text-on-primary font-label-md text-label-md rounded-lg shadow-sm transition-all active:scale-95 cursor-pointer"
           >
             <span className="material-symbols-outlined text-[18px]">check_circle</span>
-            <span>交卷并提交评测</span>
+            <span className="hidden sm:inline">交卷并提交评测</span>
           </button>
         </div>
       </header>
 
       {/* Main Focus Runner Layout */}
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-margin-tablet lg:px-margin-desktop py-space-xl flex flex-col space-y-space-xl pb-24">
-        {/* Navigation Sheet Pill Bar */}
-        <section className="bg-surface-container-lowest rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 shadow-xs border border-outline-variant/30 flex flex-wrap lg:flex-nowrap items-center justify-between gap-3 sm:gap-4 overflow-x-auto">
-          {/* Left: Matrix Title & Progress Badge */}
-          <div className="flex items-center gap-3 shrink-0 select-none">
-            <div className="flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-[20px] text-primary">grid_view</span>
-              <span className="font-sans text-[14px] font-bold text-on-surface tracking-tight">答题卡矩阵</span>
+      <div className={`w-full ${isSplitWorkspace ? 'max-w-none' : 'max-w-7xl'} mx-auto px-4 sm:px-margin-tablet lg:px-margin-desktop py-space-xl flex flex-col space-y-space-xl pb-24`}>
+        {/* Answer card matrix */}
+        <section className="bg-surface-container-lowest rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 shadow-xs border border-outline-variant/30 flex flex-col gap-2 sm:gap-3 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 select-none">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[20px] text-primary">grid_view</span>
+                <span className="font-sans text-[14px] font-bold text-on-surface tracking-tight">答题卡矩阵</span>
+              </div>
+              <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-sans font-medium bg-surface-container-low text-on-surface-variant border border-outline-variant/25">
+                <span className={`w-1.5 h-1.5 rounded-full ${answeredCount === questionList.length ? 'bg-emerald-500' : 'bg-primary'}`}></span>
+                <span>已答</span>
+                <span className="font-mono font-bold text-primary">{answeredCount}</span>
+                <span className="text-outline-variant">/</span>
+                <span className="font-mono text-on-surface-variant font-medium">{questionList.length}</span>
+              </div>
+              <span className="hidden 2xl:inline-flex items-center gap-2.5 text-[11px] font-sans text-on-surface-variant/70">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary ring-1 ring-primary/40"></span>当前</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>已填涂</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-outline-variant/60"></span>未答</span>
+              </span>
             </div>
-
-            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-sans font-medium bg-surface-container-low text-on-surface-variant border border-outline-variant/25">
-              <span className={`w-1.5 h-1.5 rounded-full ${answeredCount === questionList.length ? 'bg-emerald-500' : 'bg-primary'}`}></span>
-              <span>已答</span>
-              <span className="font-mono font-bold text-primary">{answeredCount}</span>
-              <span className="text-outline-variant">/</span>
-              <span className="font-mono text-on-surface-variant font-medium">{questionList.length}</span>
-            </div>
-
-            <div className="hidden xl:block h-4 w-[1px] bg-outline-variant/30"></div>
-
-            {/* Quick Status Legend */}
-            <div className="hidden 2xl:flex items-center gap-2.5 text-[11px] font-sans text-on-surface-variant/70">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary ring-1 ring-primary/40"></span>当前</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>已填涂</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-outline-variant/60"></span>未答</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setIsAnswerCardCollapsed((collapsed) => !collapsed)} aria-expanded={!isAnswerCardCollapsed} aria-controls="exam-answer-card-questions" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface text-[12px] font-sans font-medium border border-outline-variant/30 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{isAnswerCardCollapsed ? 'expand_more' : 'expand_less'}</span>
+                <span>{isAnswerCardCollapsed ? '展开答题卡' : '收起答题卡'}</span>
+              </button>
+              <button type="button" disabled={currentQIndex === 0} onClick={() => setCurrentQIndex((i) => Math.max(0, i - 1))} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface text-[12px] font-sans font-medium border border-outline-variant/30 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed active:scale-95" title="切换至上一题">
+                <span className="material-symbols-outlined text-[16px]">chevron_left</span><span className="hidden sm:inline">上一题</span>
+              </button>
+              <button type="button" disabled={currentQIndex === questionList.length - 1} onClick={() => setCurrentQIndex((i) => Math.min(questionList.length - 1, i + 1))} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-white text-[12px] font-sans font-medium shadow-xs transition-all cursor-pointer disabled:opacity-35 disabled:bg-surface-container-low disabled:text-on-surface-variant disabled:shadow-none disabled:cursor-not-allowed active:scale-95 font-semibold" title="切换至下一题">
+                <span className="hidden sm:inline">下一题</span><span className="material-symbols-outlined text-[16px]">chevron_right</span>
+              </button>
             </div>
           </div>
-
-          {/* Middle: Question Pills with 5-Question Visual Rhythm */}
-          <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto py-1 max-w-full">
-            {questionList.map((q, idx) => {
-              const isCurrent = idx === currentQIndex;
-              const isAnswered = q.userAnswer && q.userAnswer.trim().length > 0;
-              const isGroupEnd = (idx + 1) % 5 === 0 && idx !== questionList.length - 1;
-              return (
-                <button
-                  key={`q_pill_${q.id ?? 'item'}_${idx}`}
-                  type="button"
-                  onClick={() => setCurrentQIndex(idx)}
-                  className={`w-8 h-8 min-w-[32px] rounded-lg text-[12px] font-mono transition-all duration-150 flex items-center justify-center cursor-pointer select-none ${
-                    isGroupEnd ? 'mr-1.5 sm:mr-2' : ''
-                  } ${
-                    isCurrent
-                      ? 'ring-2 ring-primary ring-offset-2 ring-offset-surface-container-lowest bg-primary text-on-primary font-bold shadow-sm scale-105 z-10'
-                      : isAnswered
-                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-700/60 font-semibold hover:bg-emerald-100/80'
-                      : 'bg-surface-container-low text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-container border border-outline-variant/25 hover:border-outline-variant/60 font-medium'
-                  }`}
-                  title={`第 ${q.num} 题 (${isCurrent ? '当前正在作答' : isAnswered ? '已完成作答' : '未作答'})`}
-                >
-                  {q.num}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Right: Prev & Next Question Actions */}
-          <div className="flex items-center gap-2 shrink-0 select-none">
-            <button
-              type="button"
-              disabled={currentQIndex === 0}
-              onClick={() => setCurrentQIndex((i) => Math.max(0, i - 1))}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface text-[12px] font-sans font-medium border border-outline-variant/30 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed active:scale-95"
-              title="切换至上一题"
-            >
-              <span className="material-symbols-outlined text-[16px]">chevron_left</span>
-              <span className="hidden sm:inline">上一题</span>
-            </button>
-            <button
-              type="button"
-              disabled={currentQIndex === questionList.length - 1}
-              onClick={() => setCurrentQIndex((i) => Math.min(questionList.length - 1, i + 1))}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-white text-[12px] font-sans font-medium shadow-xs transition-all cursor-pointer disabled:opacity-35 disabled:bg-surface-container-low disabled:text-on-surface-variant disabled:shadow-none disabled:cursor-not-allowed active:scale-95 font-semibold"
-              title="切换至下一题"
-            >
-              <span className="hidden sm:inline">下一题</span>
-              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-            </button>
+          <div id="exam-answer-card-questions" hidden={isAnswerCardCollapsed} className="max-h-56 min-w-0 overflow-y-auto overscroll-contain py-1 pr-1">
+            <div className="flex flex-col gap-2.5">
+              {questionGroups.map((group) => (
+                <div key={group.type} className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1.5">
+                  <div className="flex w-32 shrink-0 items-center gap-1.5 pt-1 sm:w-40">
+                    <span className={`max-w-32 truncate rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${getQuestionTypeClass(group.type)}`} title={group.type}>{group.type}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-on-surface-variant">{group.items.length}</span>
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                    {group.items.map(({ question: q, index: idx }) => {
+                      const isCurrent = idx === currentQIndex;
+                      const isAnswered = Boolean(q.userAnswer && q.userAnswer.trim().length > 0);
+                      const isMarked = markedQuestionKeys.includes(getQuestionMarkKey(q, idx));
+                      return (
+                        <button key={`q_pill_${q.id ?? 'item'}_${idx}`} type="button" onClick={() => setCurrentQIndex(idx)} aria-current={isCurrent ? 'step' : undefined} aria-label={`第 ${q.num} 题，${q.type}${isCurrent ? '，当前题目' : isAnswered ? '，已作答' : '，未作答'}${isMarked ? '，已标记复查' : ''}`} className={`relative flex h-8 min-w-[32px] select-none items-center justify-center rounded-lg border px-1.5 font-mono text-[12px] transition-all duration-150 ${getQuestionTypeClass(q.type)} ${isCurrent ? 'z-10 scale-105 font-bold ring-2 ring-primary ring-offset-2 ring-offset-surface-container-lowest shadow-sm' : isAnswered ? 'font-semibold ring-1 ring-emerald-500/60 hover:brightness-95' : 'font-medium hover:brightness-95'}`} title={`第 ${q.num} 题 · ${q.type} · ${isCurrent ? '当前' : isAnswered ? '已作答' : '未答'}${isMarked ? ' · 标记复查' : ''}`}>
+                          {q.num}
+                          {isAnswered && <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-surface-container-lowest" aria-hidden="true" />}
+                          {isMarked && <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-surface-container-lowest" aria-hidden="true" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
-        {/* Question Header Card */}
-        <section className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 flex flex-col space-y-space-md">
-          <div className="flex items-center justify-between pb-space-xs border-b border-surface-container">
-            <div className="flex items-center space-x-space-md">
-              <span className="px-2.5 py-1 bg-primary-fixed text-on-primary-fixed font-headline-sm text-headline-sm rounded font-semibold">
-                题号 {currentQ.num}
-              </span>
-              <span className="text-on-surface-variant font-label-md text-label-md">
-                {currentQ.type} · 满分 {currentQ.score} 分
-              </span>
+        <div ref={splitWorkspaceRef} className={`${isSplitWorkspace ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,var(--answer-ratio))_12px_minmax(360px,1fr)] items-start' : 'flex flex-col'} gap-space-md xl:gap-space-lg min-w-0`} style={isSplitWorkspace ? { '--answer-ratio': `${splitRatio * 100}%` } : undefined}>
+        <div className="min-w-0 space-y-space-md">
+        <section className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 flex flex-col space-y-space-md min-w-0">
+          <div className="flex items-center justify-between gap-3 pb-space-xs border-b border-surface-container">
+            <div className="flex items-center gap-space-sm min-w-0">
+              <span className="shrink-0 px-2.5 py-1 bg-primary-fixed text-on-primary-fixed font-headline-sm text-headline-sm rounded font-semibold">题号 {currentQ.num}</span>
+              <span className={`shrink-0 rounded-md border px-2 py-1 text-label-sm font-medium ${getQuestionTypeClass(currentQ.type)}`}>{currentQ.type} · 满分 {currentQ.score} 分</span>
             </div>
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                onClick={() => showExamToast(`已为题号 ${currentQ.num} 开启备忘笔记标记`, 'info')}
-                className="inline-flex items-center space-x-1 px-2 py-1 text-on-surface-variant hover:text-primary text-label-sm font-label-sm rounded hover:bg-surface-container-low transition cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">bookmark_add</span>
-                <span>添加笔记</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <button type="button" onClick={toggleCurrentQuestionMark} aria-pressed={isCurrentQuestionMarked} className={`inline-flex items-center gap-1 px-2 py-1 text-label-sm rounded hover:bg-surface-container-low transition cursor-pointer ${isCurrentQuestionMarked ? 'text-amber-700' : 'text-on-surface-variant hover:text-primary'}`}>
+                <span className="material-symbols-outlined text-[16px]">{isCurrentQuestionMarked ? 'bookmark_added' : 'bookmark_add'}</span>
+                <span>{isCurrentQuestionMarked ? '已标记复查' : '标记复查'}</span>
               </button>
               <span className="text-outline-variant">|</span>
-              <span className="text-on-surface-variant font-sans text-[12px] flex items-center gap-1">
-                难度: <span className="text-tertiary tracking-wider font-mono">{getQuestionDifficulty(currentQ).stars}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-outline font-sans">
-                  {getQuestionDifficulty(currentQ).label}
-                </span>
-              </span>
+              <span className="text-on-surface-variant text-[12px]">难度: <span className="text-tertiary tracking-wider font-mono">{getQuestionDifficulty(currentQ).stars}</span></span>
             </div>
           </div>
-
-          {/* Passage / Reading Comprehension Material */}
           {currentQ.passage && (
-            <div className="mb-space-md p-space-md bg-surface-container-low rounded-xl border border-secondary/30 space-y-2">
-              <div className="flex items-center justify-between text-secondary font-semibold font-label-md">
-                <span className="flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[18px]">menu_book</span>
-                  <span>{currentQ.passageTitle || '【阅读理解 / 篇章背景材料】'}</span>
-                </span>
-                <span className="text-[12px] font-label-mono text-on-surface-variant">请结合本篇材料回答下述问题</span>
+            <div className="p-space-md bg-surface-container-low rounded-xl border border-secondary/30 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-secondary font-semibold font-label-md">{currentQ.passageTitle || '阅读材料'}</div>
+                {isMultiQuestionPassage && <span className="shrink-0 rounded-full bg-secondary-container/40 px-2 py-0.5 text-[11px] font-medium text-secondary">已答 {currentPassageItems.filter(({ question }) => Boolean(question.userAnswer?.trim())).length} / {currentPassageItems.length} 题</span>}
               </div>
-              <div className="max-h-80 overflow-y-auto p-space-sm bg-surface-container-lowest rounded-lg text-body-md leading-relaxed text-on-surface border border-outline-variant/20 whitespace-pre-line font-sans">
-                <MathMarkdown content={currentQ.passage} />
+              <div className="exam-english-passage max-h-80 overflow-y-auto p-space-sm sm:px-4 sm:py-3 bg-surface-container-lowest rounded-lg text-on-surface border border-outline-variant/20">
+                <MathMarkdown content={currentQ.passage.replace(/\{\{\s*(\d+)\s*\}\}/g, '**($1) ______**')} />
               </div>
             </div>
           )}
-
-          {/* Mathematical Prompt Description */}
-          <div className="py-space-md">
-            <MathMarkdown
-              content={currentQ.prompt}
-              className="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm font-semibold"
-            />
+          {!isMultiQuestionPassage && <div className="py-space-md min-w-0 overflow-x-auto">
+            <MathMarkdown content={currentQ.prompt} className="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm font-semibold" />
             {currentQ.mathExpression && (
-              <div className="bg-surface-container-low px-space-xl py-space-lg rounded-lg border-l-4 border-primary flex items-center justify-between overflow-x-auto my-2">
-                <div className="flex items-center space-x-3 text-primary font-semibold">
-                  <MathMarkdown
-                    content={currentQ.mathExpression.startsWith('$') ? currentQ.mathExpression : `$$${currentQ.mathExpression}$$`}
-                    className="text-headline-md"
-                  />
-                  {currentQ.condition && (
-                    <span className="text-body-md text-on-surface-variant font-sans font-normal ml-4">
-                      {currentQ.condition}
-                    </span>
-                  )}
-                </div>
-                <span className="text-on-surface-variant font-label-mono text-label-mono uppercase tracking-widest hidden md:inline-block">
-                  {currentQ.category || 'ADVANCED EXAM'}
-                </span>
+              <div className="bg-surface-container-low px-space-xl py-space-lg rounded-lg border-l-4 border-primary overflow-x-auto my-2">
+                <MathMarkdown content={currentQ.mathExpression.startsWith('$') ? currentQ.mathExpression : `$$${currentQ.mathExpression}$$`} className="text-headline-md" />
               </div>
             )}
-          </div>
+          </div>}
+          {isMultiQuestionPassage && (
+            <div className="space-y-3">
+              {currentPassageItems.map(({ question, index }) => (
+                <article key={question.id || `passage-question-${index}`} className={`rounded-xl border p-3 sm:p-4 transition-colors ${index === currentQIndex ? 'border-primary/50 bg-primary/[0.035] ring-1 ring-primary/20' : 'border-outline-variant/30 bg-surface-container-lowest'}`}>
+                  <div className="mb-2 flex items-start gap-2">
+                    <button type="button" onClick={() => setCurrentQIndex(index)} className="shrink-0 rounded-md bg-primary-fixed px-2 py-1 text-xs font-bold text-primary hover:bg-primary/15" aria-label={`定位第 ${question.num} 题`}>
+                      {question.num || String(index + 1).padStart(2, '0')}
+                    </button>
+                    <MathMarkdown content={question.prompt} className="min-w-0 flex-1 font-body-md text-body-md font-medium text-on-surface" />
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {question.options.map((option, optionIndex) => {
+                      const selected = question.userAnswer === option.key;
+                      return (
+                        <button
+                          key={`${question.id || index}-${option.key || optionIndex}`}
+                          type="button"
+                          onClick={() => handleUpdateAnswer(option.key, index)}
+                          aria-pressed={selected}
+                          className={`flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${selected ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary/30' : 'border-outline-variant/30 bg-surface-container-low text-on-surface hover:border-primary/40 hover:bg-primary/[0.03]'}`}
+                        >
+                          <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${selected ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}>{option.key}</span>
+                          <MathMarkdown content={option.text} className="min-w-0 flex-1 text-body-sm" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
-
-        {/* Question Type: Choice vs Blank vs Comprehensive */}
-        {currentQ.options && (
-          <section className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 space-y-space-md">
-            <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">单选题候选项选择：</h3>
+        {!isMultiQuestionPassage && currentQ.options?.length > 0 && (
+          <section className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 space-y-space-md min-w-0">
+            <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">候选项选择：</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
               {currentQ.options.map((opt, optIdx) => {
                 const isSelected = currentQ.userAnswer === opt.key;
-                return (
-                  <button
-                    key={`opt_${opt.key || 'k'}_${optIdx}`}
-                    type="button"
-                    onClick={() => handleUpdateAnswer(opt.key)}
-                    className={`flex items-center gap-space-md p-space-md rounded-xl border text-left transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-primary/5 border-primary ring-2 ring-primary text-primary font-semibold'
-                        : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'
-                    }`}
-                  >
-                    <span
-                      className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-label-md shrink-0 ${
-                        isSelected ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'
-                      }`}
-                    >
-                      {opt.key}
-                    </span>
-                    <MathMarkdown content={opt.text} className="font-body-md text-body-md" />
-                  </button>
-                );
+                return <button key={`opt_${opt.key || 'k'}_${optIdx}`} type="button" onClick={() => handleUpdateAnswer(opt.key)} aria-pressed={isSelected} className={`flex items-center gap-space-md p-space-md rounded-xl border text-left transition-all cursor-pointer min-w-0 ${isSelected ? 'bg-primary/5 border-primary ring-2 ring-primary text-primary font-semibold' : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'}`}>
+                  <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-label-md shrink-0 ${isSelected ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}>{opt.key}</span>
+                  <MathMarkdown content={opt.text} className="font-body-md text-body-md min-w-0" />
+                </button>;
               })}
             </div>
           </section>
         )}
-
         {/* If Blank Fill */}
-        {currentQ.type === '填空题' && (
+        {currentQ.type?.includes('填空') && !currentQ.options?.length && (
           <section className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 space-y-space-md">
-            <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">请在横线处填入最终算式或数值：</h3>
-            <div className="max-w-md">
-              <input
-                type="text"
-                value={candidateDraft}
-                onChange={(e) => handleUpdateAnswer(e.target.value)}
-                placeholder="例如：x^4/2 + (3/2)x^2"
-                className="w-full px-4 py-2.5 bg-surface-container-low rounded-lg font-mono text-body-lg border border-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest"
-              />
+            <div>
+              <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">填写答案，或用文字描述后转成公式：</h3>
+              <p className="text-body-sm text-on-surface-variant mt-1">可输入公式或文字描述；转换优先使用数学符号，例如“x 大于 5 且小于 7”→5&lt;x&lt;7，“p 大于 1 或 p 小于 2”→p&gt;1 ∨ p&lt;2。只做转写，不推导答案。</p>
+            </div>
+            <div className="space-y-3">
+              <div className="inline-flex rounded-lg bg-surface-container-low p-1 border border-outline-variant/30" role="tablist" aria-label="答案输入方式">
+                <button type="button" role="tab" aria-selected={fillInputMode === 'visual'} onClick={() => setFillInputMode('visual')}
+                  className={`px-3 py-1.5 rounded-md text-label-md transition ${fillInputMode === 'visual' ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                  公式编辑
+                </button>
+                <button type="button" role="tab" aria-selected={fillInputMode === 'description'} onClick={() => setFillInputMode('description')}
+                  className={`px-3 py-1.5 rounded-md text-label-md transition ${fillInputMode === 'description' ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                  文字描述
+                </button>
+              </div>
+              {fillInputMode === 'visual' ? (
+                <div className="rounded-lg border border-outline-variant/50 bg-surface-container-low px-4 py-3 focus-within:ring-2 focus-within:ring-primary focus-within:bg-surface-container-lowest">
+                  {mathLiveReady ? (
+                    <>
+                      <math-field
+                        ref={mathFieldRef}
+                        virtual-keyboard-mode="onfocus"
+                        smart-fence
+                        aria-label="可视化公式答案编辑器"
+                        className="exam-math-field block w-full min-h-12 bg-transparent text-xl text-on-surface outline-none"
+                        style={{ display: 'block', width: '100%', minWidth: '360px', boxSizing: 'border-box', minHeight: '48px', padding: '4px 0', '--caret-color': 'var(--color-primary, #3825d8)' }}
+                      />
+                      <div className="mt-1 text-label-sm text-on-surface-variant">点击后可用屏幕公式键盘，也可直接使用键盘输入；公式会自动排版。</div>
+                    </>
+                  ) : <div className="py-3 text-body-sm text-on-surface-variant">正在加载公式编辑器…</div>}
+                </div>
+              ) : (
+                <textarea
+                  ref={fillAnswerInputRef}
+                  value={candidateDraft}
+                  onChange={(e) => handleUpdateAnswer(e.target.value)}
+                  placeholder="用文字描述答案，例如：x 大于 5 且小于 7、根号二分之一"
+                  rows={3}
+                  className="w-full px-4 py-3 bg-surface-container-low rounded-lg font-body-md text-body-md border border-outline-variant/40 focus:outline-none focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest resize-y"
+                />
+              )}
+              <button
+                type="button"
+                onClick={handleTriggerAIScribe}
+                disabled={isScribing || !candidateDraft.trim()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-on-primary font-label-md rounded-lg shadow-xs hover:bg-primary-container transition cursor-pointer disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-[17px] ${isScribing ? 'animate-spin' : ''}`}>{isScribing ? 'progress_activity' : 'auto_fix_high'}</span>
+                <span>{isScribing ? 'AI 正在转写…' : 'AI 转成公式并填入答案'}</span>
+              </button>
             </div>
           </section>
         )}
 
         {/* Comprehensive Calculus / Proof Question (Dual Modality Input Switcher) */}
-        {currentQ.type === '综合计算与解答题' && (
+        {!currentQ.options?.length && !currentQ.type?.includes('填空') && (
           <section className="flex flex-col space-y-space-md">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-space-sm">
@@ -882,11 +1287,13 @@ export default function ExamRoomView({
                   考生作答交付模式
                 </span>
                 <span className="text-on-surface-variant font-body-sm text-body-sm">
-                  (互斥二选一 · 系统即时转译)
+                  请选择一种作答方式
                 </span>
               </div>
-              <div className="text-label-mono text-label-mono text-on-surface-variant">
-                当前已保存草稿: <span className="text-secondary font-semibold font-mono">14:02:19 自动暂存</span>
+              <div className="text-label-mono text-label-mono text-on-surface-variant" aria-live="polite">
+                {candidateDraft.trim()
+                  ? <span className="text-secondary font-semibold">已自动保存</span>
+                  : <span>尚未作答</span>}
               </div>
             </div>
 
@@ -992,14 +1399,33 @@ export default function ExamRoomView({
                             AI 规范转录标准数学分步卷面
                           </span>
                         </div>
-                        <span className="px-2 py-0.5 rounded bg-secondary/15 text-secondary font-label-mono text-code-sm font-semibold">
-                          实时公式向量化
-                        </span>
+                        <div className="inline-flex rounded-lg bg-surface-container-low p-1 border border-outline-variant/30" role="tablist" aria-label="答案编辑方式">
+                          <button type="button" role="tab" aria-selected={fillInputMode === 'description'} onClick={() => setFillInputMode('description')}
+                            className={`px-2.5 py-1 rounded-md text-label-sm transition ${fillInputMode === 'description' ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                            排版预览
+                          </button>
+                          <button type="button" role="tab" aria-selected={fillInputMode === 'visual'} onClick={() => setFillInputMode('visual')}
+                            className={`px-2.5 py-1 rounded-md text-label-sm transition ${fillInputMode === 'visual' ? 'bg-surface-container-lowest text-primary shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                            公式编辑
+                          </button>
+                        </div>
                       </div>
 
                       {/* Mathematical Render Container */}
                       <div className="mt-space-sm p-space-md bg-surface-container-low rounded-lg space-y-space-sm border border-outline-variant/30 overflow-x-auto leading-relaxed">
-                        {scribedLatex ? (
+                        {fillInputMode === 'visual' ? (mathLiveReady ? (
+                          <>
+                            <math-field
+                              ref={mathFieldRef}
+                              virtual-keyboard-mode="onfocus"
+                              smart-fence
+                              aria-label="简答题可视化公式答案编辑器"
+                              className="exam-math-field block w-full min-h-48 bg-transparent text-lg text-on-surface outline-none"
+                              style={{ display: 'block', width: '100%', minWidth: '360px', boxSizing: 'border-box', minHeight: '192px', padding: '8px 0', '--caret-color': 'var(--color-primary, #3825d8)' }}
+                            />
+                            <div className="text-label-sm text-on-surface-variant">公式会直接排版；文字说明和多步推导可继续在左侧草稿区输入。</div>
+                          </>
+                        ) : <div className="py-8 text-on-surface-variant">正在加载公式编辑器…</div>) : scribedLatex ? (
                           <MathMarkdown content={scribedLatex} className="text-on-surface" />
                         ) : (
                           <div className="text-on-surface-variant italic font-sans text-body-sm">
@@ -1108,7 +1534,38 @@ export default function ExamRoomView({
             )}
           </section>
         )}
-      </div>
+        </div>
+
+        {isSplitWorkspace && showScratchpad && (
+          <>
+            <div
+              role="separator"
+              aria-label="调整答题区与草稿纸宽度"
+              aria-orientation="vertical"
+              aria-valuenow={Math.round(splitRatio * 100)}
+              aria-valuemin={35}
+              aria-valuemax={72}
+              tabIndex={0}
+              onPointerDown={handleSplitResizeStart}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                const next = Math.max(0.35, Math.min(0.72, splitRatio + (event.key === 'ArrowRight' ? 0.02 : -0.02)));
+                setSplitRatio(next);
+                try { localStorage.setItem('examcraft_exam_split_ratio', String(next)); } catch {}
+              }}
+              className="hidden xl:flex h-[calc(100vh-240px)] min-h-[520px] items-center justify-center cursor-col-resize touch-none rounded-full outline-none group"
+              title="拖动调整左右区域宽度；也可用键盘左右方向键调整"
+            >
+              <span className="h-16 w-1 rounded-full bg-outline-variant/60 group-hover:bg-primary group-focus:bg-primary transition-colors" />
+            </div>
+            <aside className="min-w-0 h-[calc(100vh-240px)] min-h-[520px] sticky top-4">
+              {renderScratchpadCanvas(true)}
+            </aside>
+          </>
+        )}
+        </div>
+        </div>
 
       {/* Global Unified Exam Toast Notification */}
       {examToast.show && (
@@ -1131,7 +1588,7 @@ export default function ExamRoomView({
       )}
 
       {/* Unified Integrated Scratchpad Workbench (Hand-drawing Canvas + Notes + Agent Loop) */}
-      {showScratchpad && (
+      {showScratchpad && !isSplitWorkspace && (
         <>
           {/* Backdrop when maximized */}
           {isScratchpadMaximized && (
@@ -1148,7 +1605,6 @@ export default function ExamRoomView({
               top: !isScratchpadMaximized && scratchpadPos ? `${scratchpadPos.y}px` : undefined,
               bottom: !isScratchpadMaximized && !scratchpadPos ? '20px' : undefined,
               right: !isScratchpadMaximized && !scratchpadPos ? '20px' : undefined,
-              opacity: scratchpadOpacity / 100,
             }}
             className={`z-50 shadow-2xl ${
               isDraggingScratchpad
@@ -1157,33 +1613,35 @@ export default function ExamRoomView({
             } ${
               isScratchpadMaximized
                 ? 'fixed inset-2 sm:inset-4 lg:inset-6 animate-in zoom-in-95'
-                : 'fixed w-[760px] max-w-[96vw] h-[580px] max-h-[88vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
+                : 'fixed w-[760px] max-w-[96vw] h-[min(680px,88vh)] min-h-[420px] max-h-[88vh] resize overflow-hidden animate-in slide-in-from-bottom-5'
             }`}
           >
-            <ScratchpadCanvas
-              key={`${activePaper?.id || 'paper'}_${currentQKey}`}
-              questionNum={currentQ?.num}
-              questionData={currentQ}
-              storageKey={scratchpadCanvasStorageKey}
-              textStorageKey={scratchpadStorageKey}
-              contextProblem={currentQ ? `${currentQ.prompt} ${currentQ.mathExpression || ''}` : ''}
-              isMaximized={isScratchpadMaximized}
-              onToggleMaximize={() => setIsScratchpadMaximized(!isScratchpadMaximized)}
-              onClose={() => {
-                setIsScratchpadMaximized(false);
-                setShowScratchpad(false);
-              }}
-              opacity={scratchpadOpacity}
-              onOpacityChange={handleScratchpadOpacityChange}
-              onWindowDragStart={handleScratchpadDragStart}
-              isMoved={scratchpadPos !== null}
-              onResetPosition={() => setScratchpadPos(null)}
-            />
+            {renderScratchpadCanvas(false)}
           </div>
         </>
       )}
 
       {/* Submit Confirmation Modal */}
+      {isClearCurrentAnswerModalOpen && (
+        <div className="fixed inset-0 z-[60] bg-on-background/45 backdrop-blur-sm flex items-center justify-center p-4" role="presentation">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md" role="dialog" aria-modal="true" aria-labelledby="clear-answers-title">
+            <div className="flex items-center gap-space-sm text-error">
+              <span className="material-symbols-outlined text-[26px]">ink_eraser</span>
+              <h3 id="clear-answers-title" className="font-headline-sm text-headline-sm font-semibold text-on-surface">清空第 {currentQ?.num || currentQIndex + 1} 题答案？</h3>
+            </div>
+            <p className="text-body-md text-on-surface-variant leading-relaxed">
+              只会清空本题答案及 AI 转写，并将本题恢复为未答。其他题目和本题草稿纸内容都会保留，此操作无法撤销。
+            </p>
+            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
+              <button type="button" onClick={() => setIsClearCurrentAnswerModalOpen(false)} className="px-4 py-2 rounded-lg bg-surface-container text-on-surface font-label-md cursor-pointer">取消</button>
+              <button type="button" onClick={handleClearCurrentAnswer} className="px-4 py-2 rounded-lg bg-error hover:bg-error/90 text-white font-label-md shadow-sm cursor-pointer inline-flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[17px]">delete_sweep</span>
+                确认清空
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {isSubmitModalOpen && (
         <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md">
@@ -1193,7 +1651,7 @@ export default function ExamRoomView({
             </div>
             <p className="text-body-md text-on-surface-variant leading-relaxed">
               当前已填涂 <span className="font-bold text-primary">{answeredCount}</span> 题，未作答 <span className="font-bold text-tertiary">{questionList.length - answeredCount}</span> 题。
-              交卷后将启动 AI 智能判卷引擎，原位核验作答与步骤并生成全真考情诊断复盘报告。
+              交卷后将按标准答案核对客观题；主观题不会自动判分，请在报告中对照解析复核。智能诊断服务可用时会补充本次作答分析。
             </p>
             <div className="flex justify-end gap-2 pt-2 border-t border-surface-container">
               <button
@@ -1219,18 +1677,31 @@ export default function ExamRoomView({
       {/* AI Grading & Evaluating Progress Overlay */}
       {isSubmitting && (
         <div className="fixed inset-0 z-50 bg-on-background/60 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest rounded-2xl max-w-sm w-full p-space-xl shadow-2xl border border-outline-variant/40 text-center space-y-space-md animate-in zoom-in-95 duration-200">
-            <div className="w-14 h-14 rounded-full bg-primary-container/20 text-primary flex items-center justify-center mx-auto animate-spin">
-              <span className="material-symbols-outlined text-[32px]">sync</span>
+          <div className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 shrink-0 rounded-full bg-primary-container/20 text-primary flex items-center justify-center">
+                <span className="material-symbols-outlined text-[28px] animate-spin">sync</span>
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
+                  正在提交并生成报告
+                </h3>
+                <p className="text-body-sm text-on-surface-variant mt-1" aria-live="polite">
+                  {submitProgressText || '正在准备评测…'}
+                </p>
+              </div>
             </div>
-            <div className="space-y-1">
-              <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
-                AI 智能阅卷评测中
-              </h3>
-              <p className="text-body-sm text-on-surface-variant font-label-mono">
-                {submitProgressText || '正在比对标准答案与采分点...'}
-              </p>
+            <div className="h-2 overflow-hidden rounded-full bg-surface-container" role="progressbar" aria-label="交卷评测进度">
+              <div className="exam-submit-progress-sweep h-full w-[38%] rounded-full bg-primary" />
             </div>
+            <div className="grid grid-cols-3 gap-2 text-center text-xs sm:text-sm">
+              {['核对答案', '生成 AI 诊断', '整理并保存'].map((label, index) => (
+                <div key={label} className={`rounded-lg px-2 py-2 transition-colors ${index < submitProgressStage ? 'bg-secondary-container/60 text-secondary' : index === submitProgressStage ? 'bg-primary-container/50 text-primary font-semibold' : 'bg-surface-container-low text-on-surface-variant'}`}>
+                  {index < submitProgressStage ? '✓ ' : index === submitProgressStage ? '● ' : ''}{label}
+                </div>
+              ))}
+            </div>
+            <p className="text-center text-xs text-on-surface-variant">已用时 {Math.floor(submitElapsedSeconds / 60)}:{String(submitElapsedSeconds % 60).padStart(2, '0')}</p>
           </div>
         </div>
       )}
