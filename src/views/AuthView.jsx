@@ -17,6 +17,11 @@ const SLIDES = [
       { label: "智能评分点", value: "4 个断点分步给分", valueClass: "text-secondary-fixed-dim" },
       { label: "重构格式", value: "标准 LaTeX 双栏印刷体", valueClass: "text-primary-fixed-dim" }
     ],
+    highlights: [
+      { icon: "view_column", title: "双栏印刷原位排版", desc: "100% 完整保留大题排版与公式图表位置，避免题型格式错位" },
+      { icon: "speed", title: "分步断点智能采分", desc: "大模型按答题断点与推导链客观评分，支持草稿笔迹溯源" },
+      { icon: "precision_manufacturing", title: "原位 OCR 超高保真", desc: "数学公式与特殊符号识别保留率达 99.4%，无缝转为标准 LaTeX" }
+    ],
     tags: ["#数学公式LaTeX还原", "#智能分步给分", "#全真双栏印刷排版", "#原位OCR保留率 99.4%"],
     quote: "“复习备考效率提升 300%，特别是大试卷全景漫游和分步批改功能！”",
     author: "—— 985 高校高等数学教研组 核心考务团队"
@@ -36,6 +41,11 @@ const SLIDES = [
       { label: "漫游体验", value: "整卷全景一览无余", valueClass: "text-secondary-fixed-dim" },
       { label: "智能草稿", value: "独立随题云端漫游", valueClass: "text-primary-fixed-dim" }
     ],
+    highlights: [
+      { icon: "pan_tool", title: "按住空格极速平移", desc: "考场大卷物理手势漫游，双指与滚轮 25%~400% 无级自由缩放" },
+      { icon: "edit_note", title: "分屏便签随题草稿", desc: "每一道题目配备专属草稿纸，随时记录公式推导与灵感草图" },
+      { icon: "cloud_sync", title: "心流状态实时保存", desc: "笔迹与公式实时云端持久化漫游，切题或断网永不丢失" }
+    ],
     tags: ["#无限画布漫游", "#手势平移", "#草稿本双屏同显", "#题干高保真缩放"],
     quote: "“彻底告别了传统网考单题死板翻页，学生作答大题推导逻辑一览无余。”",
     author: "—— 华东重点示范高中 教学质量评估组"
@@ -54,6 +64,11 @@ const SLIDES = [
       { label: "防作弊机制", value: "代写代算刚性拦截", valueClass: "text-inverse-on-surface" },
       { label: "辅助定位", value: "启发式思路引导", valueClass: "text-secondary-fixed-dim" },
       { label: "评阅规范", value: "分步踩分客观核验", valueClass: "text-primary-fixed-dim" }
+    ],
+    highlights: [
+      { icon: "gavel", title: "严禁直接泄露答案", desc: "草稿助手仅规范 LaTeX 排版与思维大纲，杜绝直接帮算与代写" },
+      { icon: "alt_route", title: "解题逻辑断点检测", desc: "毫秒级感知作答心流与推演链，识别非正常突变答案" },
+      { icon: "verified", title: "国家防作弊纪律", desc: "满足高校期末统考与标准化考场学术诚信白名单标准" }
     ],
     tags: ["#防作弊逻辑链", "#学术诚信白名单", "#分步推理溯源", "#代笔规范约束"],
     quote: "“既赋予学生智能解题思路启发，又把住了考场学术诚信的红线底线。”",
@@ -208,10 +223,10 @@ export default function AuthView({
   const activeSlideData = SLIDES[currentSlide];
 
   return (
-    <div className="min-h-screen w-full bg-surface text-on-surface flex flex-col justify-center items-center p-3 sm:p-5 lg:p-6 xl:p-8 2xl:p-10 selection:bg-primary-container selection:text-on-primary-container animate-fade-in">
-      <div className="w-full max-w-[1920px] 2xl:max-w-[2160px] mx-auto min-h-[calc(100vh-2.5rem)] flex flex-col lg:flex-row items-stretch justify-between gap-5 lg:gap-6 xl:gap-8 my-auto">
+    <div className="w-full min-h-screen bg-surface text-on-surface flex flex-col justify-center items-stretch p-3 sm:p-4 lg:p-5 xl:p-6 selection:bg-primary-container selection:text-on-primary-container animate-fade-in">
+      <div className="w-full flex-1 flex flex-col lg:flex-row items-stretch justify-between gap-4 lg:gap-5 xl:gap-6 my-auto">
         {/* LEFT COLUMN: Showcase & Feature Walkthrough Carousel (Large & Expansive) */}
-        <div className="w-full lg:flex-1 flex flex-col justify-between rounded-3xl bg-inverse-surface text-inverse-on-surface p-6 sm:p-8 lg:p-10 xl:p-12 relative overflow-hidden shadow-2xl min-h-[580px] lg:min-h-[720px]">
+        <div className="w-full lg:flex-1 flex flex-col justify-between rounded-3xl bg-inverse-surface text-inverse-on-surface p-6 sm:p-8 lg:p-9 xl:p-11 relative overflow-hidden shadow-2xl min-h-[580px] lg:min-h-0">
           {/* Subtle Ambient Lighting Blobs */}
           <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-primary-container/20 blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -right-24 w-80 h-80 rounded-full bg-surface-tint/15 blur-2xl pointer-events-none"></div>
@@ -231,22 +246,22 @@ export default function AuthView({
           </div>
 
           {/* Main Carousel Slider Content */}
-          <div className="relative z-10 my-auto py-6">
+          <div className="relative z-10 my-auto py-4 sm:py-6">
             <div
               className={`transition-all duration-200 transform ${
                 isFading ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'
               }`}
             >
               {/* Slide Title & Description */}
-              <div className="space-y-3 mb-6 sm:mb-8">
+              <div className="space-y-2.5 mb-5 sm:mb-6">
                 <div className="inline-flex items-center gap-2 text-primary-fixed-dim font-mono text-[11px]">
-                  <span className="px-2 py-0.5 rounded bg-primary-container/40">{activeSlideData.num}</span>
+                  <span className="px-2 py-0.5 rounded bg-primary-container/40 font-semibold">{activeSlideData.num}</span>
                   <span className="text-surface-dim text-[12px]">{activeSlideData.category}</span>
                 </div>
                 <h2 className="text-2xl sm:text-3xl lg:text-[34px] xl:text-[38px] font-semibold text-inverse-on-surface tracking-tight leading-tight">
                   {activeSlideData.title}
                 </h2>
-                <p className="text-sm sm:text-base xl:text-lg text-surface-dim max-w-2xl leading-relaxed">
+                <p className="text-sm sm:text-base xl:text-lg text-surface-dim max-w-3xl leading-relaxed">
                   {activeSlideData.desc}
                 </p>
               </div>
@@ -259,7 +274,7 @@ export default function AuthView({
                     <span className="material-symbols-outlined text-primary-fixed text-[22px] shrink-0">
                       picture_as_pdf
                     </span>
-                    <span className="font-mono text-xs sm:text-sm text-surface-bright font-medium truncate max-w-[260px] sm:max-w-md">
+                    <span className="font-mono text-xs sm:text-sm text-surface-bright font-medium truncate max-w-[280px] sm:max-w-xl">
                       {activeSlideData.filename}
                     </span>
                   </div>
@@ -270,17 +285,17 @@ export default function AuthView({
                 </div>
 
                 {/* Formula / Interactive Simulation Block */}
-                <div className="rounded-xl bg-inverse-surface/85 p-4 space-y-2.5 border border-white/5">
+                <div className="rounded-xl bg-inverse-surface/90 p-4 space-y-2.5 border border-white/5 shadow-inner">
                   <div className="flex items-center justify-between text-surface-dim font-mono text-[11px]">
-                    <span className="truncate pr-2">{activeSlideData.nodeLabel}</span>
+                    <span className="truncate pr-2 font-medium">{activeSlideData.nodeLabel}</span>
                     <span className="text-secondary-fixed font-mono shrink-0">{activeSlideData.confidence}</span>
                   </div>
 
-                  <div className="font-mono text-xs sm:text-sm text-inverse-primary bg-surface-container-highest/10 p-3 rounded-lg overflow-x-auto leading-relaxed border border-white/5">
+                  <div className="font-mono text-xs sm:text-sm xl:text-base text-inverse-primary bg-surface-container-highest/10 p-3.5 rounded-lg overflow-x-auto leading-relaxed border border-white/5">
                     {activeSlideData.formula}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-4 text-surface-variant text-[11px] pt-1">
+                  <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-surface-variant text-[11px] sm:text-xs pt-1">
                     {activeSlideData.metaItems.map((item, idx) => (
                       <span key={idx}>
                         {item.label}: <strong className={item.valueClass}>{item.value}</strong>
@@ -288,6 +303,30 @@ export default function AuthView({
                     ))}
                   </div>
                 </div>
+
+                {/* Intelligent Capability Highlights Grid */}
+                {activeSlideData.highlights && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                    {activeSlideData.highlights.map((h, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 rounded-xl bg-surface-container-highest/10 border border-white/5 backdrop-blur-sm space-y-1 hover:bg-surface-container-highest/15 transition-all"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="material-symbols-outlined text-primary-fixed-dim text-[18px]">
+                            {h.icon}
+                          </span>
+                          <span className="text-xs font-semibold text-inverse-on-surface">
+                            {h.title}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-surface-dim leading-snug line-clamp-2">
+                          {h.desc}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Floating Capabilities Tags */}
                 <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -307,7 +346,7 @@ export default function AuthView({
               </div>
 
               {/* Customer/Endorsement Quote Card */}
-              <div className="mt-5 rounded-xl bg-surface-container-highest/10 p-4 backdrop-blur-sm flex items-start gap-3 border border-white/5">
+              <div className="mt-4 rounded-xl bg-surface-container-highest/10 p-3.5 sm:p-4 backdrop-blur-sm flex items-start gap-3 border border-white/5">
                 <span className="material-symbols-outlined text-primary-fixed-dim text-[22px] shrink-0 mt-0.5">
                   format_quote
                 </span>
@@ -324,9 +363,9 @@ export default function AuthView({
           </div>
 
           {/* Bottom Row: Multi-Slide Navigation & Progress */}
-          <div className="relative z-10 pt-4">
+          <div className="relative z-10 pt-3">
             {/* Progress Bar Indicator */}
-            <div className="w-full bg-surface-container-highest/20 h-1 rounded-full overflow-hidden mb-3">
+            <div className="w-full bg-surface-container-highest/20 h-1.5 rounded-full overflow-hidden mb-3">
               <div
                 className="bg-primary-container h-full transition-all duration-300"
                 style={{ width: `${((currentSlide + 1) / SLIDES.length) * 100}%` }}
@@ -349,7 +388,7 @@ export default function AuthView({
                       key={idx}
                       type="button"
                       onClick={() => handleSelectSlide(idx)}
-                      className={`px-3 py-1.5 rounded-full text-left font-mono text-[11px] transition-all duration-200 cursor-pointer ${
+                      className={`px-3.5 py-1.5 rounded-full text-left font-mono text-[11px] transition-all duration-200 cursor-pointer ${
                         isActive
                           ? 'bg-primary-container text-on-primary font-medium shadow-sm'
                           : 'bg-surface-container-highest/20 text-surface-variant hover:text-inverse-on-surface'
@@ -385,7 +424,7 @@ export default function AuthView({
         </div>
 
         {/* RIGHT COLUMN: Authentication Workstation Card (Slimmer & Focused) */}
-        <div className="w-full lg:w-[420px] xl:w-[450px] 2xl:w-[480px] shrink-0 flex flex-col justify-between bg-surface-container-lowest rounded-3xl p-5 sm:p-7 xl:p-8 shadow-2xl relative border border-surface-container/60">
+        <div className="w-full lg:w-[410px] xl:w-[440px] 2xl:w-[460px] shrink-0 flex flex-col justify-between bg-surface-container-lowest rounded-3xl p-5 sm:p-6 xl:p-8 shadow-2xl relative border border-surface-container/60 min-h-[580px] lg:min-h-0">
           {/* Top Utilities Bar: Cluster & Help & Back Button */}
           <div className="flex items-center justify-between w-full pb-3 border-b border-surface-container/60">
             <div className="inline-flex items-center gap-1.5 text-on-surface-variant text-[11px] sm:text-[12px] font-medium">
@@ -428,8 +467,8 @@ export default function AuthView({
           {/* Center Wrapper: Main Form */}
           <div className="w-full mx-auto my-auto py-3 sm:py-4">
             {/* Header Brand Identity */}
-            <div className="mb-5 sm:mb-6">
-              <div className="inline-flex items-center gap-2.5 mb-2">
+            <div className="mb-4 sm:mb-5">
+              <div className="inline-flex items-center gap-2.5 mb-1.5">
                 <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-on-primary shadow-sm">
                   <span className="material-symbols-outlined text-[20px]">auto_awesome</span>
                 </div>
@@ -443,7 +482,7 @@ export default function AuthView({
             </div>
 
             {/* Mode Switch: Segmented Control Tabs */}
-            <div className="w-full bg-surface-container p-1 rounded-xl flex items-center gap-1 mb-5">
+            <div className="w-full bg-surface-container p-1 rounded-xl flex items-center gap-1 mb-4">
               <button
                 type="button"
                 onClick={() => {
@@ -477,11 +516,11 @@ export default function AuthView({
             </div>
 
             {/* Fast University & Social Auth */}
-            <div className="space-y-2 mb-5">
+            <div className="space-y-2 mb-4">
               <button
                 type="button"
                 onClick={handleCarsiSSO}
-                className="w-full h-10 px-4 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface flex items-center justify-between transition-colors shadow-xs group cursor-pointer border border-surface-container"
+                className="w-full h-10 px-3.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface flex items-center justify-between transition-colors shadow-xs group cursor-pointer border border-surface-container"
               >
                 <div className="flex items-center gap-2.5">
                   <span className="material-symbols-outlined text-[18px] text-primary">account_balance</span>
@@ -513,7 +552,7 @@ export default function AuthView({
             </div>
 
             {/* Divider */}
-            <div className="relative flex items-center justify-center my-4 sm:my-5">
+            <div className="relative flex items-center justify-center my-3.5">
               <div className="w-full h-px bg-surface-container-high"></div>
               <span className="absolute px-3 bg-surface-container-lowest font-mono text-[11px] text-outline">
                 或使用账号 / 手机号登录
@@ -522,22 +561,22 @@ export default function AuthView({
 
             {/* Notification & Alerts */}
             {errorMsg && (
-              <div className="mb-4 p-3 rounded-xl bg-error/10 border border-error/30 text-error text-xs flex items-center gap-2 animate-shake">
+              <div className="mb-3 p-2.5 rounded-xl bg-error/10 border border-error/30 text-error text-xs flex items-center gap-2 animate-shake">
                 <span className="material-symbols-outlined text-[18px] shrink-0">error</span>
                 <span>{errorMsg}</span>
               </div>
             )}
             {infoNotice && (
-              <div className="mb-4 p-3 rounded-xl bg-primary/10 border border-primary/20 text-primary text-xs flex items-center gap-2">
+              <div className="mb-3 p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary text-xs flex items-center gap-2">
                 <span className="material-symbols-outlined text-[18px] shrink-0">info</span>
                 <span>{infoNotice}</span>
               </div>
             )}
 
             {/* Main Form Fields */}
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-3.5">
               {/* Input 1: Identity / Email / Username */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <label className="block text-xs font-semibold text-on-surface" htmlFor="identity-input">
                   账号 / 邮箱 / 学工号
                 </label>
@@ -560,7 +599,7 @@ export default function AuthView({
 
               {/* Input 2: Password or SMS Code */}
               {!isOtpMode ? (
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs font-semibold text-on-surface" htmlFor="password-input">
                       登录密码
@@ -602,7 +641,7 @@ export default function AuthView({
                   </div>
                 </div>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label className="block text-xs font-semibold text-on-surface">
                     短信验证码
                   </label>
@@ -636,7 +675,7 @@ export default function AuthView({
               {/* Extra Register Fields */}
               {tab === 'register' && (
                 <>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <label className="block text-xs font-semibold text-on-surface">
                       确认密码
                     </label>
@@ -656,7 +695,7 @@ export default function AuthView({
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     <label className="block text-xs font-semibold text-on-surface">身份角色</label>
                     <div className="grid grid-cols-2 gap-2">
                       <label
@@ -708,7 +747,7 @@ export default function AuthView({
                     className="w-3.5 h-3.5 rounded text-primary focus:ring-primary bg-surface-container border-surface-container"
                   />
                   <span className="text-xs text-on-surface-variant font-medium">
-                    记住此设备 (30天内免登录)
+                    记住此设备 (30天免登录)
                   </span>
                 </label>
                 <div className="inline-flex items-center gap-1 font-mono text-[11px] text-secondary font-medium">
@@ -745,7 +784,7 @@ export default function AuthView({
               </button>
 
               {/* Alternative Quick Mode Link */}
-              <div className="text-center pt-2">
+              <div className="text-center pt-1.5">
                 <button
                   type="button"
                   onClick={() => setIsOtpMode(!isOtpMode)}
@@ -777,7 +816,7 @@ export default function AuthView({
           </div>
 
           {/* Bottom Disclaimer / Compliance Footer */}
-          <div className="w-full text-center pt-3 border-t border-surface-container/50">
+          <div className="w-full text-center pt-2.5 border-t border-surface-container/50">
             <p className="text-[11px] text-outline">
               登录即代表您已同意{' '}
               <a
