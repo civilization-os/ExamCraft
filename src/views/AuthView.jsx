@@ -6,35 +6,34 @@ const SLIDES = [
     num: "MODULE 01 / 03",
     category: "多模态试卷重构",
     title: "1:1 完整真题 PDF 原样精确克隆与排版解析",
-    desc: "只需拖拽历年期末或考研真题卷，自适应多模态大模型即刻原位提取数学公式、题型分值结构与双栏排版。",
-    filename: "2024届全国高等数学期末统考试卷A.pdf",
-    statusTag: "100% 23题完全对齐",
-    nodeLabel: "PARSE NODE: Question 17 (Differential Equation)",
-    confidence: "LaTeX Confidence 99.8%",
+    desc: "支持直接导入历年期末或考研真题 PDF 试卷，多模态大模型即刻原位提取数学公式、题型分值结构与双栏排版。",
+    filename: "高等数学期末统考真题卷.pdf",
+    statusTag: "双栏题型版面原位还原",
+    nodeLabel: "PARSE NODE: 微积分与微分方程综合题",
+    confidence: "LaTeX 公式置信度 99.8%",
     formula: "$$ \\lim_{x \\to 0} \\frac{\\int_0^x \\sin(t^2)\\,dt}{x^3} = \\frac{1}{3} \\quad \\implies \\quad \\nabla^2 \\Phi + \\lambda_k \\Phi = 0 $$",
     metaItems: [
-      { label: "分值", value: "12 分", valueClass: "text-inverse-on-surface" },
-      { label: "智能评分点", value: "4 个断点分步给分", valueClass: "text-secondary-fixed-dim" },
-      { label: "重构格式", value: "标准 LaTeX 双栏印刷体", valueClass: "text-primary-fixed-dim" }
+      { label: "试题分值", value: "12 分", valueClass: "text-inverse-on-surface" },
+      { label: "评分断点", value: "4 个步骤采分点", valueClass: "text-secondary-fixed-dim" },
+      { label: "排版规范", value: "标准 LaTeX 双栏印刷体", valueClass: "text-primary-fixed-dim" }
     ],
     highlights: [
-      { icon: "view_column", title: "双栏印刷原位排版", desc: "100% 完整保留大题排版与公式图表位置，避免题型格式错位" },
-      { icon: "speed", title: "分步断点智能采分", desc: "大模型按答题断点与推导链客观评分，支持草稿笔迹溯源" },
-      { icon: "precision_manufacturing", title: "原位 OCR 超高保真", desc: "数学公式与特殊符号识别保留率达 99.4%，无缝转为标准 LaTeX" }
+      { icon: "view_column", title: "双栏印刷原位排版", desc: "保留大题排版与公式图表位置，避免题型格式错位" },
+      { icon: "speed", title: "分步断点智能采分", desc: "多模态模型自动划分采分节点，解答题按步骤客观给分" },
+      { icon: "precision_manufacturing", title: "公式高清还原", desc: "数学符号与微积分公式无损转为标准可编辑 LaTeX 格式" }
     ],
-    tags: ["#数学公式LaTeX还原", "#智能分步给分", "#全真双栏印刷排版", "#原位OCR保留率 99.4%"],
-    quote: "“复习备考效率提升 300%，特别是大试卷全景漫游和分步批改功能！”",
-    author: "—— 985 高校高等数学教研组 核心考务团队"
+    tags: ["#数学公式LaTeX还原", "#智能分步给分", "#全真双栏印刷排版", "#PDF多模态解析"],
+    note: "支持将历年试卷与参考答案直接拖拽导入，系统自动拆解大题题型与选项结构，快速复原为高拟真数字考卷。"
   },
   {
     num: "MODULE 02 / 03",
     category: "沉浸式答题界面",
     title: "大试卷全景漫游模式与空格物理平移手势",
     desc: "无限画布自由缩放拖拽，支持题卡任意位置公式批注与分屏草稿本，还原高拟真考场心流体验。",
-    filename: "物理学与凝聚态理论综合能力联考卷.pdf",
-    statusTag: "60 FPS 物理平移手势",
-    nodeLabel: "CANVAS NODE: Infinite Canvas & Gesture Panning",
-    confidence: "Gesture Latency < 16ms",
+    filename: "大学物理与力学综合考评卷.pdf",
+    statusTag: "物理快捷手势漫游",
+    nodeLabel: "CANVAS NODE: 无限大试卷画布与平移手势",
+    confidence: "手势交互延时 < 16ms",
     formula: "快捷交互：按住 [空格键] 拖拽画布 · 滚轮双指 25%~400% 无级缩放 · 随题草稿本实时公式推演",
     metaItems: [
       { label: "缩放范围", value: "25% ~ 400%", valueClass: "text-inverse-on-surface" },
@@ -42,37 +41,35 @@ const SLIDES = [
       { label: "智能草稿", value: "独立随题云端漫游", valueClass: "text-primary-fixed-dim" }
     ],
     highlights: [
-      { icon: "pan_tool", title: "按住空格极速平移", desc: "考场大卷物理手势漫游，双指与滚轮 25%~400% 无级自由缩放" },
-      { icon: "edit_note", title: "分屏便签随题草稿", desc: "每一道题目配备专属草稿纸，随时记录公式推导与灵感草图" },
-      { icon: "cloud_sync", title: "心流状态实时保存", desc: "笔迹与公式实时云端持久化漫游，切题或断网永不丢失" }
+      { icon: "pan_tool", title: "按住空格极速平移", desc: "大试卷物理手势自由漫游，双指与滚轮 25%~400% 顺滑缩放" },
+      { icon: "edit_note", title: "分屏便签随题草稿", desc: "每一道题目配备专属草稿纸，随时记录公式推导与思路备忘" },
+      { icon: "cloud_sync", title: "作答状态实时持久化", desc: "作答记录与草稿笔记实时云端漫游，切题或断网永不丢失" }
     ],
-    tags: ["#无限画布漫游", "#手势平移", "#草稿本双屏同显", "#题干高保真缩放"],
-    quote: "“彻底告别了传统网考单题死板翻页，学生作答大题推导逻辑一览无余。”",
-    author: "—— 华东重点示范高中 教学质量评估组"
+    tags: ["#无限画布漫游", "#手势平移", "#草稿本双屏同显", "#全景大试卷心流"],
+    note: "打破传统单题死板翻页模式，采用整卷全景漫游画卷，考生可在全局与细节之间自如缩放，掌控答题节奏。"
   },
   {
     num: "MODULE 03 / 03",
-    category: "学术诚信与智能评阅",
-    title: "AI辅助规范代笔·诚信作答实时行为分析",
-    desc: "辅助规范考生解题推演步骤，杜绝无脑代码代做；毫秒级监控解题心流与公式书写逻辑链断裂。",
-    filename: "计算机算法与数据结构期中实训评估卷.pdf",
-    statusTag: "学术防线 100% 覆盖",
-    nodeLabel: "INTEGRITY NODE: Academic Integrity & Step Analysis",
-    confidence: "Compliance Grade A+",
-    formula: "纪律准则：草稿纸严格规范 LaTeX 书写与思路大纲整理，严禁代算与题目答案泄露",
+    category: "智能评阅与学情诊断",
+    title: "多维智能批阅与全卷学情诊断分析报告",
+    desc: "客观题标准答案毫秒比对，主观解答题多步骤踩分复核，交卷后即时输出雷达图与薄弱知识点提分动作建议。",
+    filename: "计算机算法与数据结构期末考试卷.pdf",
+    statusTag: "客观智能全卷复核",
+    nodeLabel: "EVALUATE NODE: 步骤推导溯源与学情雷达",
+    confidence: "评阅规范 100% 覆盖",
+    formula: "全卷总评：考点掌握度雷达图 · 典型错因定位 · 专项举一反三提分行动建议",
     metaItems: [
-      { label: "防作弊机制", value: "代写代算刚性拦截", valueClass: "text-inverse-on-surface" },
-      { label: "辅助定位", value: "启发式思路引导", valueClass: "text-secondary-fixed-dim" },
-      { label: "评阅规范", value: "分步踩分客观核验", valueClass: "text-primary-fixed-dim" }
+      { label: "评阅机制", value: "分步踩分客观核验", valueClass: "text-inverse-on-surface" },
+      { label: "诊断报告", value: "雷达分析与薄弱点", valueClass: "text-secondary-fixed-dim" },
+      { label: "复习闭环", value: "错题集一键重考", valueClass: "text-primary-fixed-dim" }
     ],
     highlights: [
-      { icon: "gavel", title: "严禁直接泄露答案", desc: "草稿助手仅规范 LaTeX 排版与思维大纲，杜绝直接帮算与代写" },
-      { icon: "alt_route", title: "解题逻辑断点检测", desc: "毫秒级感知作答心流与推演链，识别非正常突变答案" },
-      { icon: "verified", title: "国家防作弊纪律", desc: "满足高校期末统考与标准化考场学术诚信白名单标准" }
+      { icon: "assignment_turned_in", title: "客观步骤智能评分", desc: "大模型结合考生最终答案与草稿推演，按步骤给出合理分数" },
+      { icon: "insights", title: "全卷学情雷达诊断", desc: "多维度量化概念掌握度、计算准确率与时间分配策略" },
+      { icon: "collections_bookmark", title: "错题智能归纳沉淀", desc: "自动收录错题至错题本，支持智能组卷进行举一反三专项巩固" }
     ],
-    tags: ["#防作弊逻辑链", "#学术诚信白名单", "#分步推理溯源", "#代笔规范约束"],
-    quote: "“既赋予学生智能解题思路启发，又把住了考场学术诚信的红线底线。”",
-    author: "—— 软件工程拔尖创新人才培养基地"
+    tags: ["#多维学情诊断", "#错题智能收录", "#分步推理踩分", "#专项举一反三"],
+    note: "交卷后无需漫长等待，AI 阅卷引擎即刻生成全卷诊断报告，清晰指出失分原因并规划针对性复习路径。"
   }
 ];
 
@@ -88,12 +85,9 @@ export default function AuthView({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [role, setRole] = useState('teacher'); // 'teacher' | 'student'
   const [showPassword, setShowPassword] = useState(false);
-  const [isOtpMode, setIsOtpMode] = useState(false);
-  const [smsCode, setSmsCode] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [infoNotice, setInfoNotice] = useState('');
 
   // Carousel state
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -144,24 +138,16 @@ export default function AuthView({
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
-    setInfoNotice('');
 
     const cleanUsername = username.trim();
     if (!cleanUsername) {
-      setErrorMsg('请输入账号、邮箱或学工号');
+      setErrorMsg('请输入用户名或邮箱');
       return;
     }
 
-    if (isOtpMode) {
-      if (!smsCode || smsCode.trim().length < 4) {
-        setErrorMsg('请输入有效的动态验证码');
-        return;
-      }
-    } else {
-      if (!password) {
-        setErrorMsg('请输入登录密码');
-        return;
-      }
+    if (!password) {
+      setErrorMsg('请输入登录密码');
+      return;
     }
 
     if (tab === 'register') {
@@ -183,8 +169,7 @@ export default function AuthView({
     try {
       let user;
       if (tab === 'login') {
-        const effectivePassword = isOtpMode ? `otp_${smsCode.trim()}` : password;
-        user = await apiLogin(cleanUsername, effectivePassword);
+        user = await apiLogin(cleanUsername, password);
       } else {
         user = await apiRegister(cleanUsername, password);
       }
@@ -195,29 +180,10 @@ export default function AuthView({
       }
       if (onSuccess) onSuccess(user);
     } catch (err) {
-      setErrorMsg(err.message || '认证失败，请检查网络或账号密码');
+      setErrorMsg(err.message || '认证失败，请检查账号密码');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Fast SSO / Demo helpers
-  const handleCarsiSSO = () => {
-    setUsername('carsi.faculty@university.edu.cn');
-    setPassword('Carsi2026!Edu');
-    setInfoNotice('已连接 CARSI / EduID 高校教育联盟统一认证网关，账号与凭证已自动就绪');
-  };
-
-  const handleWechatLogin = () => {
-    setUsername('wx_user_edu');
-    setPassword('WechatPass888');
-    setInfoNotice('已模拟微信扫码安全授权，账号信息已就绪');
-  };
-
-  const handleGithubLogin = () => {
-    setUsername('github_developer');
-    setPassword('GithubSecure2026');
-    setInfoNotice('已调取 GitHub OpenID 授权，账号凭据已就绪');
   };
 
   const activeSlideData = SLIDES[currentSlide];
@@ -231,17 +197,17 @@ export default function AuthView({
           <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-primary-container/20 blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -right-24 w-80 h-80 rounded-full bg-surface-tint/15 blur-2xl pointer-events-none"></div>
 
-          {/* Top Row: Badge & Global Status */}
+          {/* Top Row: Brand & Product Features Indicator */}
           <div className="relative z-10 flex items-center justify-between gap-4">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-highest/15 backdrop-blur-md border border-white/10">
               <span className="inline-block w-2 h-2 rounded-full bg-secondary-container animate-pulse"></span>
               <span className="font-mono text-[11px] tracking-wide text-inverse-primary uppercase font-medium">
-                ExamCraft AI · v2.4 Feature Preview
+                ExamCraft AI Workbench
               </span>
             </div>
             <div className="hidden sm:flex items-center gap-2 text-surface-variant text-[12px] font-medium">
-              <span className="material-symbols-outlined text-[16px] text-secondary-fixed">verified_user</span>
-              <span>高等教育自适应模型已就绪</span>
+              <span className="material-symbols-outlined text-[16px] text-secondary-fixed">auto_fix_high</span>
+              <span>双入口智能组卷 · 原卷解析 · 在线考练</span>
             </div>
           </div>
 
@@ -278,7 +244,7 @@ export default function AuthView({
                       {activeSlideData.filename}
                     </span>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary-container/20 text-secondary-fixed font-mono text-[11px] shrink-0">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary-container/20 text-secondary-fixed font-mono text-[11px] shrink-0 font-medium">
                     <span className="material-symbols-outlined text-[14px]">check_circle</span>
                     {activeSlideData.statusTag}
                   </span>
@@ -345,17 +311,14 @@ export default function AuthView({
                 </div>
               </div>
 
-              {/* Customer/Endorsement Quote Card */}
+              {/* Functional Explanation Note Card */}
               <div className="mt-4 rounded-xl bg-surface-container-highest/10 p-3.5 sm:p-4 backdrop-blur-sm flex items-start gap-3 border border-white/5">
-                <span className="material-symbols-outlined text-primary-fixed-dim text-[22px] shrink-0 mt-0.5">
-                  format_quote
+                <span className="material-symbols-outlined text-primary-fixed-dim text-[20px] shrink-0 mt-0.5">
+                  info
                 </span>
                 <div>
-                  <p className="text-xs sm:text-sm text-inverse-on-surface italic leading-snug">
-                    {activeSlideData.quote}
-                  </p>
-                  <p className="text-[11px] text-surface-variant mt-1 font-medium">
-                    {activeSlideData.author}
+                  <p className="text-xs sm:text-sm text-inverse-on-surface leading-snug">
+                    {activeSlideData.note}
                   </p>
                 </div>
               </div>
@@ -382,7 +345,7 @@ export default function AuthView({
                       ? '01 真题PDF解析'
                       : idx === 1
                       ? '02 全景漫游与平移'
-                      : '03 诚信作答辅助';
+                      : '03 智能评阅诊断';
                   return (
                     <button
                       key={idx}
@@ -424,71 +387,46 @@ export default function AuthView({
         </div>
 
         {/* RIGHT COLUMN: Authentication Workstation Card (Slimmer & Focused) */}
-        <div className="w-full lg:w-[410px] xl:w-[440px] 2xl:w-[460px] shrink-0 flex flex-col justify-between bg-surface-container-lowest rounded-3xl p-5 sm:p-6 xl:p-8 shadow-2xl relative border border-surface-container/60 min-h-[580px] lg:min-h-0">
-          {/* Top Utilities Bar: Cluster & Help & Back Button */}
-          <div className="flex items-center justify-between w-full pb-3 border-b border-surface-container/60">
-            <div className="inline-flex items-center gap-1.5 text-on-surface-variant text-[11px] sm:text-[12px] font-medium">
-              <span className="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-              <span>华东教育节点 v2.4-stable</span>
-            </div>
-            <div className="flex items-center gap-2.5">
+        <div className="w-full lg:w-[400px] xl:w-[430px] shrink-0 flex flex-col justify-between bg-surface-container-lowest rounded-3xl p-6 sm:p-8 shadow-2xl relative border border-surface-container/60 min-h-[580px] lg:min-h-0">
+          {/* Top Utilities: Back Button if available */}
+          <div className="flex items-center justify-end w-full pb-2 min-h-[32px]">
+            {allowBack && onBack && (
               <button
                 type="button"
-                className="inline-flex items-center gap-1 text-[11px] sm:text-[12px] text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer"
+                onClick={onBack}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors cursor-pointer border border-surface-container"
+                title="返回工作台"
               >
-                <span className="material-symbols-outlined text-[15px]">language</span>
-                <span>中文</span>
+                <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                <span>返回工作台</span>
               </button>
-              <a
-                href="#help"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setInfoNotice('ExamCraft AI 支持标准题库接入、LaTeX双栏试卷渲染、多端数据同步。');
-                }}
-                className="inline-flex items-center gap-1 text-[11px] sm:text-[12px] text-on-surface-variant hover:text-primary transition-colors"
-              >
-                <span className="material-symbols-outlined text-[15px]">help</span>
-                <span>帮助</span>
-              </a>
-              {allowBack && onBack && (
-                <button
-                  type="button"
-                  onClick={onBack}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors cursor-pointer border border-surface-container"
-                  title="返回工作台"
-                >
-                  <span className="material-symbols-outlined text-[15px]">arrow_back</span>
-                  <span>返回</span>
-                </button>
-              )}
-            </div>
+            )}
           </div>
 
           {/* Center Wrapper: Main Form */}
-          <div className="w-full mx-auto my-auto py-3 sm:py-4">
+          <div className="w-full mx-auto my-auto py-2">
             {/* Header Brand Identity */}
-            <div className="mb-4 sm:mb-5">
-              <div className="inline-flex items-center gap-2.5 mb-1.5">
-                <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-on-primary shadow-sm">
-                  <span className="material-symbols-outlined text-[20px]">auto_awesome</span>
+            <div className="mb-6">
+              <div className="inline-flex items-center gap-2.5 mb-2">
+                <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-on-primary shadow-sm">
+                  <span className="material-symbols-outlined text-[22px]">auto_awesome</span>
                 </div>
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-on-surface">
+                <h1 className="text-2xl font-bold tracking-tight text-on-surface">
                   ExamCraft AI
                 </h1>
               </div>
               <p className="text-xs sm:text-sm text-on-surface-variant font-medium">
-                下一代智能组卷与沉浸式在线答题系统
+                智能组卷与在线考练工作台
               </p>
             </div>
 
             {/* Mode Switch: Segmented Control Tabs */}
-            <div className="w-full bg-surface-container p-1 rounded-xl flex items-center gap-1 mb-4">
+            <div className="w-full bg-surface-container p-1 rounded-xl flex items-center gap-1 mb-5">
               <button
                 type="button"
                 onClick={() => {
                   setTab('login');
                   setErrorMsg('');
-                  setInfoNotice('');
                 }}
                 className={`flex-1 py-2 text-center rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer ${
                   tab === 'login'
@@ -503,7 +441,6 @@ export default function AuthView({
                 onClick={() => {
                   setTab('register');
                   setErrorMsg('');
-                  setInfoNotice('');
                 }}
                 className={`flex-1 py-2 text-center rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer ${
                   tab === 'register'
@@ -511,74 +448,24 @@ export default function AuthView({
                     : 'text-on-surface-variant hover:text-on-surface'
                 }`}
               >
-                免费注册 (Sign Up)
+                新用户注册 (Sign Up)
               </button>
-            </div>
-
-            {/* Fast University & Social Auth */}
-            <div className="space-y-2 mb-4">
-              <button
-                type="button"
-                onClick={handleCarsiSSO}
-                className="w-full h-10 px-3.5 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface flex items-center justify-between transition-colors shadow-xs group cursor-pointer border border-surface-container"
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="material-symbols-outlined text-[18px] text-primary">account_balance</span>
-                  <span className="text-xs sm:text-sm font-medium">校园网统一认证 (CARSI / EduID)</span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-mono text-[10px] font-semibold">
-                  高校推荐
-                </span>
-              </button>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={handleWechatLogin}
-                  className="h-9 px-3 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface flex items-center justify-center gap-2 transition-colors cursor-pointer border border-surface-container text-xs font-medium"
-                >
-                  <span className="material-symbols-outlined text-[18px] text-secondary">qr_code_scanner</span>
-                  <span>微信扫码登录</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleGithubLogin}
-                  className="h-9 px-3 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface flex items-center justify-center gap-2 transition-colors cursor-pointer border border-surface-container text-xs font-medium"
-                >
-                  <span className="material-symbols-outlined text-[18px] text-on-surface">terminal</span>
-                  <span>GitHub 授权</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Divider */}
-            <div className="relative flex items-center justify-center my-3.5">
-              <div className="w-full h-px bg-surface-container-high"></div>
-              <span className="absolute px-3 bg-surface-container-lowest font-mono text-[11px] text-outline">
-                或使用账号 / 手机号登录
-              </span>
             </div>
 
             {/* Notification & Alerts */}
             {errorMsg && (
-              <div className="mb-3 p-2.5 rounded-xl bg-error/10 border border-error/30 text-error text-xs flex items-center gap-2 animate-shake">
+              <div className="mb-4 p-3 rounded-xl bg-error/10 border border-error/30 text-error text-xs flex items-center gap-2 animate-shake">
                 <span className="material-symbols-outlined text-[18px] shrink-0">error</span>
                 <span>{errorMsg}</span>
               </div>
             )}
-            {infoNotice && (
-              <div className="mb-3 p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary text-xs flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] shrink-0">info</span>
-                <span>{infoNotice}</span>
-              </div>
-            )}
 
             {/* Main Form Fields */}
-            <form onSubmit={handleSubmit} className="space-y-3.5">
+            <form onSubmit={handleSubmit} className="space-y-4">
               {/* Input 1: Identity / Email / Username */}
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-on-surface" htmlFor="identity-input">
-                  账号 / 邮箱 / 学工号
+                  用户名 / 邮箱
                 </label>
                 <div className="relative flex items-center">
                   <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
@@ -589,7 +476,7 @@ export default function AuthView({
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="teacher@university.edu.cn 或手机号"
+                    placeholder="请输入用户名或注册邮箱"
                     required
                     disabled={isLoading}
                     className="w-full h-10 pl-9 pr-3 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
@@ -597,85 +484,42 @@ export default function AuthView({
                 </div>
               </div>
 
-              {/* Input 2: Password or SMS Code */}
-              {!isOtpMode ? (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-semibold text-on-surface" htmlFor="password-input">
-                      登录密码
-                    </label>
-                    {tab === 'login' && (
-                      <button
-                        type="button"
-                        onClick={() => setInfoNotice('请联系考务管理员或使用校园 CARSI 授权重置凭据')}
-                        className="text-[11px] text-primary hover:text-primary-container transition-colors cursor-pointer"
-                      >
-                        忘记密码？
-                      </button>
-                    )}
-                  </div>
-                  <div className="relative flex items-center">
-                    <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
-                      lock
+              {/* Input 2: Password */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-on-surface" htmlFor="password-input">
+                  登录密码
+                </label>
+                <div className="relative flex items-center">
+                  <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
+                    lock
+                  </span>
+                  <input
+                    id="password-input"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={tab === 'register' ? '设置登录密码（至少 6 位）' : '请输入登录密码'}
+                    required
+                    disabled={isLoading}
+                    className="w-full h-10 pl-9 pr-10 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
+                  />
+                  <button
+                    type="button"
+                    aria-label="显示/隐藏密码"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 text-outline hover:text-on-surface cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {showPassword ? 'visibility_off' : 'visibility'}
                     </span>
-                    <input
-                      id="password-input"
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={tab === 'register' ? '设置登录密码（至少 6 位）' : '••••••••••••'}
-                      required
-                      disabled={isLoading}
-                      className="w-full h-10 pl-9 pr-10 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
-                    />
-                    <button
-                      type="button"
-                      aria-label="显示/隐藏密码"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 text-outline hover:text-on-surface cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">
-                        {showPassword ? 'visibility_off' : 'visibility'}
-                      </span>
-                    </button>
-                  </div>
+                  </button>
                 </div>
-              ) : (
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-on-surface">
-                    短信验证码
-                  </label>
-                  <div className="relative flex items-center">
-                    <span className="material-symbols-outlined absolute left-3 text-outline text-[18px]">
-                      sms
-                    </span>
-                    <input
-                      type="text"
-                      value={smsCode}
-                      onChange={(e) => setSmsCode(e.target.value)}
-                      placeholder="请输入 6 位动态验证码"
-                      required
-                      disabled={isLoading}
-                      className="w-full h-10 pl-9 pr-24 rounded-xl bg-surface-container-low text-on-surface placeholder:text-outline text-xs sm:text-sm focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary focus:outline-none transition-all border border-surface-container"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSmsCode('886622');
-                        setInfoNotice('【模拟验证码】已为您填入测试验证码：886622');
-                      }}
-                      className="absolute right-2 px-2.5 py-1 text-[11px] rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-medium cursor-pointer"
-                    >
-                      获取验证码
-                    </button>
-                  </div>
-                </div>
-              )}
+              </div>
 
               {/* Extra Register Fields */}
               {tab === 'register' && (
                 <>
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <label className="block text-xs font-semibold text-on-surface">
                       确认密码
                     </label>
@@ -695,8 +539,8 @@ export default function AuthView({
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="block text-xs font-semibold text-on-surface">身份角色</label>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-on-surface">身份类型</label>
                     <div className="grid grid-cols-2 gap-2">
                       <label
                         className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition-all ${
@@ -713,7 +557,7 @@ export default function AuthView({
                           onChange={() => setRole('teacher')}
                           className="text-primary focus:ring-primary"
                         />
-                        <span className="text-xs">教师 / 考务组</span>
+                        <span className="text-xs">教师 / 考务</span>
                       </label>
                       <label
                         className={`flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition-all ${
@@ -737,7 +581,7 @@ export default function AuthView({
                 </>
               )}
 
-              {/* Options Row: Remember & Security Assurance */}
+              {/* Options Row: Remember login state */}
               <div className="flex items-center justify-between pt-1">
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
@@ -747,13 +591,9 @@ export default function AuthView({
                     className="w-3.5 h-3.5 rounded text-primary focus:ring-primary bg-surface-container border-surface-container"
                   />
                   <span className="text-xs text-on-surface-variant font-medium">
-                    记住此设备 (30天免登录)
+                    记住登录状态
                   </span>
                 </label>
-                <div className="inline-flex items-center gap-1 font-mono text-[11px] text-secondary font-medium">
-                  <span className="material-symbols-outlined text-[13px]">shield</span>
-                  TLS 1.3 金融级加密
-                </div>
               </div>
 
               {/* Submit CTA Button */}
@@ -767,7 +607,7 @@ export default function AuthView({
                     <span className="material-symbols-outlined text-[18px] animate-spin">
                       progress_activity
                     </span>
-                    <span>认证处理中...</span>
+                    <span>处理中...</span>
                   </>
                 ) : (
                   <>
@@ -775,32 +615,14 @@ export default function AuthView({
                       {tab === 'login' ? 'login' : 'how_to_reg'}
                     </span>
                     <span>
-                      {tab === 'login'
-                        ? '立即登录并进入工作台 (Enter Workstation)'
-                        : '创建新账号并配置考务环境 (Create Workspace)'}
+                      {tab === 'login' ? '立即登录' : '创建账号并开启云端体验'}
                     </span>
                   </>
                 )}
               </button>
 
-              {/* Alternative Quick Mode Link */}
-              <div className="text-center pt-1.5">
-                <button
-                  type="button"
-                  onClick={() => setIsOtpMode(!isOtpMode)}
-                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[15px]">sms</span>
-                  <span>
-                    {isOtpMode
-                      ? '返回使用账号密码登录'
-                      : '切换为手机短信验证码快捷登录'}
-                  </span>
-                </button>
-              </div>
-
               {/* Direct Guest Mode Link */}
-              <div className="pt-2 text-center border-t border-surface-container/60">
+              <div className="pt-3 text-center border-t border-surface-container/60">
                 <button
                   type="button"
                   onClick={() => {
@@ -808,38 +630,17 @@ export default function AuthView({
                   }}
                   className="text-xs text-primary hover:text-primary-container hover:underline font-semibold cursor-pointer inline-flex items-center gap-1"
                 >
-                  <span>免登录 · 立即体验全真考场直通 (Guest Mode)</span>
+                  <span>免登录 · 立即以离线游客身份体验</span>
                   <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
                 </button>
               </div>
             </form>
           </div>
 
-          {/* Bottom Disclaimer / Compliance Footer */}
-          <div className="w-full text-center pt-2.5 border-t border-surface-container/50">
+          {/* Clean Footer */}
+          <div className="w-full text-center pt-3 border-t border-surface-container/50">
             <p className="text-[11px] text-outline">
-              登录即代表您已同意{' '}
-              <a
-                href="#terms"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setInfoNotice('已阅读《用户服务协议》：平台保障学术考试数据完整性与高可用。');
-                }}
-                className="text-on-surface-variant underline hover:text-primary"
-              >
-                《用户服务协议》
-              </a>{' '}
-              与{' '}
-              <a
-                href="#privacy"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setInfoNotice('已阅读《AI辅助考场学术诚信与隐私规范》：严禁任何作弊行为，全流程加密。');
-                }}
-                className="text-on-surface-variant underline hover:text-primary"
-              >
-                《AI辅助考场学术诚信与隐私规范》
-              </a>
+              ExamCraft AI Workbench · 数据加密隔离存储
             </p>
           </div>
         </div>
