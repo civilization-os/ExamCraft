@@ -9,6 +9,7 @@ import {
   registerUser,
   authenticateUser,
   findUserById,
+  updateUserProfile,
   changePassword,
   createPasswordResetToken,
   verifyPasswordResetToken,
@@ -1284,6 +1285,23 @@ apiRouter.get('/auth/me', requireAuth, (req, res) => {
     success: true,
     user: req.user
   });
+});
+
+// POST /api/auth/profile — 修改个人信息与头像
+apiRouter.post('/auth/profile', requireAuth, (req, res) => {
+  try {
+    const updated = updateUserProfile(req.user.id, req.body || {});
+    res.json({
+      success: true,
+      user: updated,
+      message: '个人资料保存成功'
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '修改个人信息失败'
+    });
+  }
 });
 
 // POST /api/auth/change-password — 修改密码

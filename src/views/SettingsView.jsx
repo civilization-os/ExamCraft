@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import SelectMenu from '../components/SelectMenu';
+import { APP_VERSION, APP_RELEASE_NAME, APP_BUILD_DATE, APP_CODENAME } from '../config/version';
 
 export default function SettingsView() {
   // Category: 'official' | 'protocol'
@@ -818,6 +819,32 @@ export default function SettingsView() {
               <span className="material-symbols-outlined text-[18px]">delete_forever</span>
               <span>彻底清空所有本地数据并重置</span>
             </button>
+          </div>
+        </section>
+
+        {/* 系统版本与架构发布信息 */}
+        <section className="bg-surface-container-lowest rounded-2xl border border-surface-container p-5 shadow-xs flex items-center justify-between flex-wrap gap-4 select-none">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+              <span className="material-symbols-outlined text-[22px]">neurology</span>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-[14px] text-on-surface">ExamCraft AI 智能试卷与在线考练工作台</h3>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-primary text-white shadow-2xs">
+                  {APP_VERSION}
+                </span>
+              </div>
+              <p className="text-[12px] text-on-surface-variant mt-0.5 font-sans">
+                {APP_RELEASE_NAME} · 编译构建 {APP_BUILD_DATE} ({APP_CODENAME})
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] font-mono text-outline">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-secondary"></span>
+              <span>双入口考练引擎就绪</span>
+            </span>
           </div>
         </section>
       </div>

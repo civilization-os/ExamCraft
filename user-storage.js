@@ -122,7 +122,17 @@ export function requireAuth(req, res, next) {
   if (!user) {
     return res.status(401).json({ success: false, error: '用户账户不存在' });
   }
-  req.user = { id: user.id, username: user.username, role: user.role, roleType: user.roleType || 'teacher' };
+  req.user = {
+    id: user.id,
+    username: user.username,
+    nickname: user.nickname || user.username,
+    avatar: user.avatar || 'scholar',
+    targetExam: user.targetExam || '',
+    motto: user.motto || '',
+    role: user.role,
+    roleType: user.roleType || 'teacher',
+    email: user.email || ''
+  };
   next();
 }
 
@@ -238,6 +248,10 @@ export function authenticateUser(identity, password) {
     user: {
       id: user.id,
       username: user.username,
+      nickname: user.nickname || user.username,
+      avatar: user.avatar || 'scholar',
+      targetExam: user.targetExam || '',
+      motto: user.motto || '',
       email: user.email || '',
       role: user.role,
       roleType: user.roleType || 'teacher',
@@ -253,6 +267,39 @@ export function findUserById(userId) {
   return {
     id: user.id,
     username: user.username,
+    nickname: user.nickname || user.username,
+    avatar: user.avatar || 'scholar',
+    targetExam: user.targetExam || '',
+    motto: user.motto || '',
+    email: user.email || '',
+    role: user.role,
+    roleType: user.roleType || 'teacher',
+    createdAt: user.createdAt
+  };
+}
+
+export function updateUserProfile(userId, { nickname, avatar, targetExam, motto }) {
+  const users = loadUsers();
+  const index = users.findIndex((u) => u.id === userId);
+  if (index < 0) {
+    throw new Error('用户账户不存在');
+  }
+  const user = users[index];
+  if (nickname !== undefined) user.nickname = String(nickname || '').trim().slice(0, 30);
+  if (avatar !== undefined) user.avatar = String(avatar || '').trim().slice(0, 50);
+  if (targetExam !== undefined) user.targetExam = String(targetExam || '').trim().slice(0, 50);
+  if (motto !== undefined) user.motto = String(motto || '').trim().slice(0, 100);
+  user.updatedAt = Date.now();
+  users[index] = user;
+  saveUsers(users);
+
+  return {
+    id: user.id,
+    username: user.username,
+    nickname: user.nickname || user.username,
+    avatar: user.avatar || 'scholar',
+    targetExam: user.targetExam || '',
+    motto: user.motto || '',
     email: user.email || '',
     role: user.role,
     roleType: user.roleType || 'teacher',

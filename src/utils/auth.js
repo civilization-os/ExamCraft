@@ -235,3 +235,44 @@ export async function apiMigrateLocalData(localData) {
   }
   return data.summary;
 }
+
+const GUEST_PROFILE_KEY = 'examcraft_guest_profile';
+
+export function getGuestProfile() {
+  try {
+    const raw = localStorage.getItem(GUEST_PROFILE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {
+    nickname: '考研学神 (游客模式)',
+    avatar: 'scholar',
+    targetExam: '2026 考研数学 + 408 统考',
+    motto: '日拱一卒，功不唐捐，高分上岸！'
+  };
+}
+
+export function setGuestProfile(profile) {
+  try {
+    const current = getGuestProfile();
+    const updated = { ...current, ...profile };
+    localStorage.setItem(GUEST_PROFILE_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('examcraft-profile-updated'));
+    return updated;
+  } catch {
+    return profile;
+  }
+}
+
+export async function apiUpdateProfile(profileData) {
+  const res = await authFetch('/api/auth/profile', {
+    method: 'POST',
+    body: profileData
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '保存个人信息失败');
+  }
+  setStoredUser(data.user);
+  window.dispatchEvent(new CustomEvent('examcraft-profile-updated'));
+  return data.user;
+}

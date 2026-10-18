@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { APP_VERSION } from '../config/version';
+import { UserAvatar } from './UserProfileModal';
+import { getGuestProfile } from '../utils/auth';
 
 export default function Header({
   currentPath,
@@ -7,7 +10,8 @@ export default function Header({
   currentUser = null,
   onOpenAuth,
   onLogout,
-  onTriggerMigrate
+  onTriggerMigrate,
+  onOpenProfile
 }) {
   const [modelStatus, setModelStatus] = useState(null);
   const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
@@ -77,9 +81,14 @@ export default function Header({
             <div className="w-7 h-7 rounded bg-primary-container flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
               <span className="material-symbols-outlined text-on-primary text-[18px]">neurology</span>
             </div>
-            <span className="font-headline-sm text-headline-sm text-on-surface tracking-tight font-semibold">
-              ExamCraft <span className="text-primary-container">AI</span>
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-headline-sm text-headline-sm text-on-surface tracking-tight font-semibold">
+                ExamCraft <span className="text-primary-container">AI</span>
+              </span>
+              <span className="px-1.5 py-0.2 rounded-full font-mono text-[10px] font-bold bg-primary/10 text-primary border border-primary/20 select-none tracking-normal" title={`当前发布版本: ${APP_VERSION}`}>
+                {APP_VERSION}
+              </span>
+            </div>
           </button>
 
           {/* Desktop Nav */}
@@ -172,24 +181,26 @@ export default function Header({
                 <button
                   type="button"
                   onClick={() => setIsUserMenuOpen((prev) => !prev)}
-                  className="flex items-center gap-1.5 py-1 px-2 rounded-lg hover:bg-surface-container transition-all cursor-pointer group"
-                  title={`当前账号: ${currentUser.username} (${currentUser.role === 'admin' ? '管理员' : '成员'})`}
+                  className="flex items-center gap-2 py-1 px-2 rounded-lg hover:bg-surface-container transition-all cursor-pointer group"
+                  title={`当前账号: ${currentUser.nickname || currentUser.username} (${currentUser.role === 'admin' ? '管理员' : '成员'})`}
                 >
-                  <div className="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center font-bold text-xs uppercase shadow-xs group-hover:scale-105 transition-transform">
-                    {currentUser.username.slice(0, 2)}
-                  </div>
+                  <UserAvatar
+                    avatarId={currentUser.avatar || 'scholar'}
+                    className="w-8 h-8 group-hover:scale-105 transition-transform"
+                    textFallback={currentUser.username}
+                  />
                   <div className="hidden sm:flex flex-col text-left">
                     <span className="text-xs font-semibold text-on-surface leading-tight flex items-center gap-1">
-                      {currentUser.username}
+                      {currentUser.nickname || currentUser.username}
                       {currentUser.role === 'admin' && (
                         <span className="px-1 py-0.2 bg-primary/10 text-primary text-[10px] rounded font-mono">
                           管理员
                         </span>
                       )}
                     </span>
-                    <span className="text-[10px] text-secondary flex items-center gap-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
-                      云端同步中
+                    <span className="text-[10px] text-secondary flex items-center gap-0.5 truncate max-w-[120px]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-secondary shrink-0"></span>
+                      <span className="truncate">{currentUser.targetExam || '备考中'}</span>
                     </span>
                   </div>
                   <span className="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_drop_down</span>
@@ -197,16 +208,36 @@ export default function Header({
 
                 {/* Dropdown Menu */}
                 {isUserMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 rounded-xl bg-surface-container-lowest border border-surface-container shadow-xl py-2 z-50 animate-fade-in">
+                  <div className="absolute right-0 mt-2 w-60 rounded-xl bg-surface-container-lowest border border-surface-container shadow-xl py-2 z-50 animate-fade-in">
                     <div className="px-4 py-2 border-b border-surface-container/60">
-                      <p className="text-xs text-on-surface-variant">已登录账号</p>
-                      <p className="text-sm font-semibold text-on-surface truncate">{currentUser.username}</p>
-                      <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-container text-on-surface-variant">
-                        权限: {currentUser.role === 'admin' ? '平台管理员' : '普通用户'}
-                      </span>
+                      <div className="flex items-center gap-2.5 mb-1.5">
+                        <UserAvatar avatarId={currentUser.avatar || 'scholar'} className="w-8 h-8" iconSize="text-[18px]" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-on-surface truncate leading-tight">{currentUser.nickname || currentUser.username}</p>
+                          <p className="text-[10px] text-on-surface-variant truncate">@{currentUser.username}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="px-1.5 py-0.5 rounded font-medium bg-surface-container text-on-surface-variant">
+                          权限: {currentUser.role === 'admin' ? '平台管理员' : '普通用户'}
+                        </span>
+                        <span className="text-outline font-mono">{APP_VERSION}</span>
+                      </div>
                     </div>
 
                     <div className="py-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          if (onOpenProfile) onOpenProfile();
+                        }}
+                        className="w-full text-left px-4 py-2 text-xs text-on-surface hover:bg-surface-container flex items-center gap-2 cursor-pointer transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[16px] text-primary">account_circle</span>
+                        <span>个人中心 / 头像档案</span>
+                      </button>
+
                       {onTriggerMigrate && (
                         <button
                           type="button"
@@ -227,24 +258,40 @@ export default function Header({
                           setIsUserMenuOpen(false);
                           if (onLogout) onLogout();
                         }}
-                        className="w-full text-left px-4 py-2 text-xs text-error hover:bg-error/10 flex items-center gap-2 cursor-pointer transition-colors"
+                        className="w-full text-left px-4 py-2 text-xs text-error hover:bg-error/10 flex items-center gap-2 cursor-pointer transition-colors border-t border-surface-container/40 mt-1 pt-1.5"
                       >
                         <span className="material-symbols-outlined text-[16px]">logout</span>
                         <span>退出当前账号</span>
                       </button>
                     </div>
+
+                    <div className="px-4 py-1.5 border-t border-surface-container/60 text-[10px] font-mono text-outline flex items-center justify-between select-none">
+                      <span>ExamCraft AI</span>
+                      <span>{APP_VERSION}</span>
+                    </div>
                   </div>
                 )}
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={onOpenAuth}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-on-primary hover:bg-primary-hover shadow-xs transition-all cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">login</span>
-                <span>登录 / 注册</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onOpenProfile}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-surface-container text-on-surface-variant transition cursor-pointer"
+                  title="查看或设置备考档案与头像"
+                >
+                  <UserAvatar avatarId={getGuestProfile().avatar || 'scholar'} className="w-7 h-7" iconSize="text-[17px]" />
+                  <span className="text-[11px] hidden xl:inline text-stone-600 font-medium truncate max-w-[100px]">{getGuestProfile().nickname || '备战档案'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenAuth}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-on-primary hover:bg-primary-hover shadow-xs transition-all cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">login</span>
+                  <span>登录 / 注册</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

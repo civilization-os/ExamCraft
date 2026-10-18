@@ -8,6 +8,7 @@ import ExamResultReportView from './views/ExamResultReportView';
 import MistakeNotebookView from './views/MistakeNotebookView';
 import SettingsView from './views/SettingsView';
 import AuthView from './views/AuthView';
+import UserProfileModal from './components/UserProfileModal';
 import {
   getToken,
   clearToken,
@@ -98,8 +99,17 @@ export default function App() {
   const [currentPath, setCurrentPathState] = useState(getPathFromLocation);
   const [currentUser, setCurrentUser] = useState(getStoredUser);
   const [isGuestMode, setIsGuestMode] = useState(() => localStorage.getItem('examcraft_guest_mode') === 'true');
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [migrationNotice, setMigrationNotice] = useState(null);
   const [isMigrating, setIsMigrating] = useState(false);
+
+  useEffect(() => {
+    const handleProfileUpdated = () => {
+      setCurrentUser(getStoredUser());
+    };
+    window.addEventListener('examcraft-profile-updated', handleProfileUpdated);
+    return () => window.removeEventListener('examcraft-profile-updated', handleProfileUpdated);
+  }, []);
 
   const [papers, setPapers] = useState(() => {
     try {
@@ -526,8 +536,20 @@ export default function App() {
           onOpenAuth={() => setCurrentPath('login')}
           onLogout={handleLogout}
           onTriggerMigrate={handleMigrateLocal}
+          onOpenProfile={() => setIsProfileModalOpen(true)}
         />
       )}
+
+      {/* 个人中心与头像选择档案模态框 */}
+      <UserProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        currentUser={currentUser}
+        onUserUpdated={(updated) => {
+          if (updated) setCurrentUser(updated);
+          else setCurrentUser(getStoredUser());
+        }}
+      />
 
       {/* Cloud Migration Notification Banner */}
       {!isFullScreenMode && migrationNotice && (
