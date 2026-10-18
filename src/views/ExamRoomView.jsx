@@ -310,6 +310,7 @@ export default function ExamRoomView({
   const [isPassageModalOpen, setIsPassageModalOpen] = useState(false);
   const [passageInputText, setPassageInputText] = useState('');
   const [isMobileAnswerDrawerOpen, setIsMobileAnswerDrawerOpen] = useState(false);
+  const [isShortcutsHelpOpen, setIsShortcutsHelpOpen] = useState(false);
 
   const handleSavePassageToPaper = () => {
     if (!passageInputText.trim() || !activePaper) return;
@@ -732,6 +733,150 @@ export default function ExamRoomView({
       return next;
     });
   };
+
+  // 全局考场作答键盘快捷键支持 (上一题/下一题/选项填涂/标记复查/草稿纸)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // 1. 若有弹窗处于打开状态，仅响应 Esc 关闭辅助窗口
+      if (
+        isSubmitModalOpen ||
+        isResetExamModalOpen ||
+        isPassageModalOpen ||
+        isClearCurrentAnswerModalOpen ||
+        reminderModalState.isOpen ||
+        isSealed
+      ) {
+        if (e.key === 'Escape') {
+          setIsPassageModalOpen(false);
+          setIsMobileAnswerDrawerOpen(false);
+          setIsShortcutsHelpOpen(false);
+        }
+        return;
+      }
+
+      // 2. 检查输入焦点：如果在文本框、公式编辑器或可编辑区域内，不触发试卷导航/选项单键快捷键
+      const target = e.target;
+      const tagName = target?.tagName?.toUpperCase();
+      const isInputFocused =
+        tagName === 'INPUT' ||
+        tagName === 'TEXTAREA' ||
+        tagName === 'SELECT' ||
+        tagName === 'MATH-FIELD' ||
+        target?.isContentEditable ||
+        Boolean(target?.closest('math-field, [contenteditable="true"], .exam-math-field'));
+
+      if (isInputFocused) {
+        if (e.key === 'Escape') {
+          target.blur();
+        }
+        return;
+      }
+
+      // 忽略 Ctrl 或 Cmd 组合键（避免干扰浏览器复制、刷新等默认行为）
+      if (e.ctrlKey || e.metaKey) return;
+
+      // 3. 下一题快捷键：
+      // - 方向右键 ArrowRight
+      // - PageDown
+      // - Alt + ArrowRight
+      // - Alt + N 或 Alt + J
+      if (
+        e.key === 'ArrowRight' ||
+        e.key === 'PageDown' ||
+        (e.altKey && (e.key === 'n' || e.key === 'N' || e.key === 'j' || e.key === 'J'))
+      ) {
+        e.preventDefault();
+        setCurrentQIndex((idx) => {
+          if (idx < questionList.length - 1) {
+            return idx + 1;
+          }
+          return idx;
+        });
+        return;
+      }
+
+      // 4. 上一题快捷键：
+      // - 方向左键 ArrowLeft
+      // - PageUp
+      // - Alt + ArrowLeft
+      // - Alt + P 或 Alt + K
+      if (
+        e.key === 'ArrowLeft' ||
+        e.key === 'PageUp' ||
+        (e.altKey && (e.key === 'p' || e.key === 'P' || e.key === 'k' || e.key === 'K'))
+      ) {
+        e.preventDefault();
+        setCurrentQIndex((idx) => {
+          if (idx > 0) {
+            return idx - 1;
+          }
+          return idx;
+        });
+        return;
+      }
+
+      // 5. 标记复查：按按键 M
+      if (!e.altKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        toggleCurrentQuestionMark();
+        return;
+      }
+
+      // 6. 快捷开关本题专属草稿纸：Alt + D 或 Alt + S
+      if (e.altKey && (e.key === 'd' || e.key === 'D' || e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        if (isSplitWorkspace) setIsSplitWorkspace(false);
+        setShowScratchpad((prev) => !prev);
+        return;
+      }
+
+      // 7. 打开/关闭快捷键提示：按键 ? (Shift + /)
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setIsShortcutsHelpOpen((prev) => !prev);
+        return;
+      }
+
+      // 8. 选择题快捷填涂 (A, B, C, D, E, F)
+      if (
+        !e.altKey &&
+        currentQ?.options?.length > 0 &&
+        ['a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F'].includes(e.key)
+      ) {
+        const keyUpper = e.key.toUpperCase();
+        const optionExists = currentQ.options.some((opt) => opt.key === keyUpper);
+        if (optionExists) {
+          e.preventDefault();
+          const isMultiple = currentQ.type?.includes('多项选择') || currentQ.type?.includes('多选');
+          if (isMultiple) {
+            const currentSelected = (currentQ.userAnswer || '').split('').filter(Boolean);
+            const nextSelected = currentSelected.includes(keyUpper)
+              ? currentSelected.filter((k) => k !== keyUpper)
+              : [...currentSelected, keyUpper].sort();
+            handleUpdateAnswer(nextSelected.join(''));
+          } else {
+            handleUpdateAnswer(keyUpper);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    questionList.length,
+    currentQ,
+    currentQIndex,
+    isSubmitModalOpen,
+    isResetExamModalOpen,
+    isPassageModalOpen,
+    isClearCurrentAnswerModalOpen,
+    reminderModalState.isOpen,
+    isSealed,
+    isSplitWorkspace,
+    toggleCurrentQuestionMark,
+    handleUpdateAnswer
+  ]);
 
   const handleClearCurrentAnswer = () => {
     const cleared = questionList.map((question, index) => index === currentQIndex
@@ -1678,11 +1823,37 @@ export default function ExamRoomView({
                 <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{isAnswerCardCollapsed ? 'expand_more' : 'expand_less'}</span>
                 <span>{isAnswerCardCollapsed ? '展开答题卡' : '收起答题卡'}</span>
               </button>
-              <button type="button" disabled={currentQIndex === 0} onClick={() => setCurrentQIndex((i) => Math.max(0, i - 1))} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface text-[12px] font-sans font-medium border border-outline-variant/30 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed active:scale-95" title="切换至上一题">
-                <span className="material-symbols-outlined text-[16px]">chevron_left</span><span className="hidden sm:inline">上一题</span>
+              <button
+                type="button"
+                onClick={() => setIsShortcutsHelpOpen(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-low hover:bg-primary/10 text-on-surface-variant hover:text-primary text-[12px] font-sans font-medium border border-outline-variant/30 transition-colors cursor-pointer"
+                title="查看键盘快捷键指南（按 ? 键）"
+              >
+                <span className="material-symbols-outlined text-[15px]">keyboard</span>
+                <span className="hidden sm:inline">快捷键</span>
+                <kbd className="hidden md:inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-surface-container text-[10px] font-mono border border-outline-variant/40 text-on-surface-variant/80">?</kbd>
               </button>
-              <button type="button" disabled={currentQIndex === questionList.length - 1} onClick={() => setCurrentQIndex((i) => Math.min(questionList.length - 1, i + 1))} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-white text-[12px] font-sans font-medium shadow-xs transition-all cursor-pointer disabled:opacity-35 disabled:bg-surface-container-low disabled:text-on-surface-variant disabled:shadow-none disabled:cursor-not-allowed active:scale-95 font-semibold" title="切换至下一题">
-                <span className="hidden sm:inline">下一题</span><span className="material-symbols-outlined text-[16px]">chevron_right</span>
+              <button
+                type="button"
+                disabled={currentQIndex === 0}
+                onClick={() => setCurrentQIndex((i) => Math.max(0, i - 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface text-[12px] font-sans font-medium border border-outline-variant/30 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed active:scale-95"
+                title="切换至上一题 (快捷键: ← 或 PageUp 或 Alt+P)"
+              >
+                <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+                <span className="hidden sm:inline">上一题</span>
+                <kbd className="hidden lg:inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-surface-container text-[10px] font-mono border border-outline-variant/40 text-on-surface-variant/80">←</kbd>
+              </button>
+              <button
+                type="button"
+                disabled={currentQIndex === questionList.length - 1}
+                onClick={() => setCurrentQIndex((i) => Math.min(questionList.length - 1, i + 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-white text-[12px] font-sans font-medium shadow-xs transition-all cursor-pointer disabled:opacity-35 disabled:bg-surface-container-low disabled:text-on-surface-variant disabled:shadow-none disabled:cursor-not-allowed active:scale-95 font-semibold"
+                title="切换至下一题 (快捷键: → 或 PageDown 或 Alt+N)"
+              >
+                <span className="hidden sm:inline">下一题</span>
+                <kbd className="hidden lg:inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-white/20 text-[10px] font-mono border border-white/30 text-white">→</kbd>
+                <span className="material-symbols-outlined text-[16px]">chevron_right</span>
               </button>
             </div>
           </div>
@@ -2567,6 +2738,153 @@ export default function ExamRoomView({
                   保存并应用到题组
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Keyboard Shortcuts Modal */}
+      {isShortcutsHelpOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant/30 flex flex-col overflow-hidden max-h-[90vh] animate-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 border-b border-surface-container flex items-center justify-between bg-surface-container-low/50">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[22px]">keyboard</span>
+                <h3 className="text-title-md font-bold text-on-surface">考场键盘快捷键指南</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsShortcutsHelpOpen(false)}
+                className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg hover:bg-surface-container transition cursor-pointer"
+                title="关闭快捷键指南 (Esc)"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+            <div className="p-5 flex flex-col space-y-4 overflow-y-auto">
+              <div className="p-3 rounded-xl bg-surface-container-low text-on-surface-variant text-[12px] leading-relaxed flex items-start gap-2">
+                <span className="material-symbols-outlined text-primary text-[18px] shrink-0 mt-0.5">tips_and_updates</span>
+                <span>
+                  在考场答题过程中，无需鼠标点击即可快速切题、填涂答案或呼出草稿纸。
+                  <strong className="text-on-surface font-semibold ml-1">在文本框或数学公式编辑器打字时，快捷键会自动暂停响应，绝不干扰输入。</strong>
+                </span>
+              </div>
+
+              {/* Group 1: 题目切换 */}
+              <div className="space-y-2">
+                <h4 className="text-[12px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px]">swap_horiz</span>
+                  <span>题目导航与切换</span>
+                </h4>
+                <div className="space-y-1.5 text-[13px]">
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/20">
+                    <span className="text-on-surface font-medium">下一题</span>
+                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">→</kbd>
+                      <span className="text-outline-variant text-[10px]">或</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">PageDown</kbd>
+                      <span className="text-outline-variant text-[10px]">或</span>
+                      <span className="flex items-center gap-0.5">
+                        <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">Alt</kbd>
+                        <span>+</span>
+                        <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">N</kbd>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/20">
+                    <span className="text-on-surface font-medium">上一题</span>
+                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">←</kbd>
+                      <span className="text-outline-variant text-[10px]">或</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">PageUp</kbd>
+                      <span className="text-outline-variant text-[10px]">或</span>
+                      <span className="flex items-center gap-0.5">
+                        <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">Alt</kbd>
+                        <span>+</span>
+                        <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">P</kbd>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Group 2: 作答与标记 */}
+              <div className="space-y-2">
+                <h4 className="text-[12px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px]">edit_note</span>
+                  <span>快速作答与试题标记</span>
+                </h4>
+                <div className="space-y-1.5 text-[13px]">
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/20">
+                    <div>
+                      <span className="text-on-surface font-medium">选择题快速填涂</span>
+                      <span className="text-[11px] text-on-surface-variant block">单选直接选中，多选题按对应字母追加/取消</span>
+                    </div>
+                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">A</kbd>
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">B</kbd>
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">C</kbd>
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">D</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/20">
+                    <div>
+                      <span className="text-on-surface font-medium">标记复查</span>
+                      <span className="text-[11px] text-on-surface-variant block">在答题卡上高亮此题，便于回头检查</span>
+                    </div>
+                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">M</kbd>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Group 3: 工具与交互 */}
+              <div className="space-y-2">
+                <h4 className="text-[12px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px]">handyman</span>
+                  <span>草稿纸与窗口控制</span>
+                </h4>
+                <div className="space-y-1.5 text-[13px]">
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/20">
+                    <span className="text-on-surface font-medium">打开 / 关闭本题专属草稿纸</span>
+                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                      <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">Alt</kbd>
+                      <span>+</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">D</kbd>
+                      <span className="text-outline-variant text-[10px]">或</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">S</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/20">
+                    <span className="text-on-surface font-medium">打开 / 关闭本快捷键指南</span>
+                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">?</kbd>
+                      <span className="text-outline-variant text-[10px]">(Shift + /)</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/20">
+                    <span className="text-on-surface font-medium">关闭弹窗 / 取消输入焦点</span>
+                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                      <kbd className="px-2 py-0.5 rounded bg-surface-container text-on-surface border border-outline-variant/40 shadow-2xs">Esc</kbd>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 bg-surface-container-low border-t border-surface-container flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setIsShortcutsHelpOpen(false)}
+                className="px-5 py-2 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-label-md font-semibold cursor-pointer shadow-xs active:scale-95 transition-all"
+              >
+                我知道了
+              </button>
             </div>
           </div>
         </div>
