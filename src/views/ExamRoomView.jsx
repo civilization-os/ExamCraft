@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import ScratchpadCanvas from '../components/ScratchpadCanvas';
+import ExamTimerReminderModal from '../components/ExamTimerReminderModal';
 import { getQuestionDifficulty } from '../utils/paperMetrics';
 import { getQuestionTypeClass, normalizeQuestionType, stripAnswerMaterial, healQuestionOptions, deduplicateQuestions } from '../utils/questionTypes';
+import {
+  getExamTimerSettings,
+  saveExamTimerSettings,
+  getTimerColorStage,
+  playReminderChime,
+  DEFAULT_REMINDER_MINUTES,
+  REMINDER_PRESET_OPTIONS
+} from '../utils/examTimer';
 
 const prefersSplitExamLayout = () => {
   try { return window.matchMedia('(min-width: 1024px)').matches && localStorage.getItem('examcraft_exam_default_layout') !== 'stacked'; }
@@ -130,6 +139,41 @@ export default function ExamRoomView({
   secondsLeftRef.current = secondsLeft;
   sealedRef.current = isSealed;
   timerRunningRef.current = isTimerRunning;
+
+  // 考试总时长推导 (用于计算倒计时百分比与颜色梯度：绿 -> 黄 -> 红)
+  const totalExamDurationSeconds = useMemo(() => {
+    if (activePaper?.totalDurationSeconds) return Number(activePaper.totalDurationSeconds);
+    if (activePaper?.duration) return Number(activePaper.duration) * 60;
+    if (activePaper?.totalSeconds) return Number(activePaper.totalSeconds);
+    return Math.max(initialDurationSeconds, 5400);
+  }, [activePaper, initialDurationSeconds]);
+
+  // 考时提醒配置与触发状态
+  const [reminderSettings, setReminderSettings] = useState(getExamTimerSettings);
+  const [showTimerMenu, setShowTimerMenu] = useState(false);
+  const [disableReminderForThisExam, setDisableReminderForThisExam] = useState(false);
+  const [snoozeSecondsRemaining, setSnoozeSecondsRemaining] = useState(null);
+  const [reminderModalState, setReminderModalState] = useState({
+    isOpen: false,
+    minutesLeft: 15,
+    stage: 'warning',
+    formattedTime: '00:15:00'
+  });
+  const triggeredReminderKeysRef = useRef(new Set());
+  const prevSecondsLeftRef = useRef(initialDurationSeconds);
+
+  useEffect(() => {
+    const handleSettingsUpdated = () => {
+      setReminderSettings(getExamTimerSettings());
+    };
+    window.addEventListener('examcraft-exam-reminder-updated', handleSettingsUpdated);
+    return () => window.removeEventListener('examcraft-exam-reminder-updated', handleSettingsUpdated);
+  }, []);
+
+  // 倒计时颜色梯度阶段：绿 (>50%) -> 黄 (20%~50%) -> 红 (<=20% 或达设定预警阈值)
+  const timerStage = useMemo(() => {
+    return getTimerColorStage(secondsLeft, totalExamDurationSeconds, reminderSettings.reminderMinutes);
+  }, [secondsLeft, totalExamDurationSeconds, reminderSettings.reminderMinutes]);
 
   // Submitting state for AI grading
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -482,6 +526,88 @@ export default function ExamRoomView({
     const secs = totalSec % 60;
     return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
+
+  // 倒计时到达设定阈值时自动弹出专属考试时间提醒弹窗 MSG
+  useEffect(() => {
+    if (!isTimerRunning || isSealed || disableReminderForThisExam || !reminderSettings.enabled) {
+      prevSecondsLeftRef.current = secondsLeft;
+      return;
+    }
+
+    const prevSec = prevSecondsLeftRef.current;
+    const currSec = secondsLeft;
+    prevSecondsLeftRef.current = currSec;
+
+    const paperKey = activePaper?.id || 'current_paper';
+    const primaryThresholdSec = reminderSettings.reminderMinutes * 60;
+    const secondThresholdSec = reminderSettings.secondReminderMinutes * 60;
+
+    // 1. 首要提醒阈值触发（如剩余 15 分钟）
+    const primaryKey = `${paperKey}_primary_${reminderSettings.reminderMinutes}`;
+    if (
+      prevSec > primaryThresholdSec &&
+      currSec <= primaryThresholdSec &&
+      !triggeredReminderKeysRef.current.has(primaryKey)
+    ) {
+      triggeredReminderKeysRef.current.add(primaryKey);
+      const stageInfo = getTimerColorStage(currSec, totalExamDurationSeconds, reminderSettings.reminderMinutes);
+      setReminderModalState({
+        isOpen: true,
+        minutesLeft: Math.max(1, Math.ceil(currSec / 60)),
+        stage: stageInfo.stage,
+        formattedTime: formatTimer(currSec)
+      });
+      if (reminderSettings.soundEnabled) {
+        playReminderChime('warning');
+      }
+      showExamToast(`⏰ 考试时间提醒：当前剩余 ${Math.ceil(currSec / 60)} 分钟！`, 'warn');
+    }
+
+    // 2. 二次冲刺阈值触发（如剩余 5 分钟）
+    const secondKey = `${paperKey}_second_${reminderSettings.secondReminderMinutes}`;
+    if (
+      reminderSettings.secondReminderEnabled &&
+      prevSec > secondThresholdSec &&
+      currSec <= secondThresholdSec &&
+      !triggeredReminderKeysRef.current.has(secondKey)
+    ) {
+      triggeredReminderKeysRef.current.add(secondKey);
+      setReminderModalState({
+        isOpen: true,
+        minutesLeft: Math.max(1, Math.ceil(currSec / 60)),
+        stage: 'critical',
+        formattedTime: formatTimer(currSec)
+      });
+      if (reminderSettings.soundEnabled) {
+        playReminderChime('urgent');
+      }
+      showExamToast(`🚨 冲刺预警：考试仅剩最后 ${Math.ceil(currSec / 60)} 分钟！`, 'warn');
+    }
+
+    // 3. 稍后提醒 (Snooze) 触发
+    if (snoozeSecondsRemaining !== null && currSec <= snoozeSecondsRemaining) {
+      setSnoozeSecondsRemaining(null);
+      setReminderModalState({
+        isOpen: true,
+        minutesLeft: Math.max(1, Math.ceil(currSec / 60)),
+        stage: currSec <= 300 ? 'critical' : 'danger',
+        formattedTime: formatTimer(currSec)
+      });
+      if (reminderSettings.soundEnabled) {
+        playReminderChime('warning');
+      }
+      showExamToast(`⏰ 稍后提醒：考试仅剩 ${Math.ceil(currSec / 60)} 分钟！`, 'warn');
+    }
+  }, [
+    secondsLeft,
+    isTimerRunning,
+    isSealed,
+    disableReminderForThisExam,
+    reminderSettings,
+    totalExamDurationSeconds,
+    activePaper?.id,
+    snoozeSecondsRemaining
+  ]);
 
   const answeredCount = questionList.filter((q) => q.userAnswer && q.userAnswer.trim().length > 0).length;
   const questionGroups = useMemo(() => {
@@ -1119,33 +1245,136 @@ export default function ExamRoomView({
             <span>{isSealed ? '已封卷 (封盘)' : '考试作答中'}</span>
           </span>
 
-          {/* Countdown Timer with 封卷 / 启封 Toggle */}
-          <div className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1 rounded-lg border transition-all ${
-            isTimerRunning
-              ? 'bg-surface-container-low border-outline-variant/40 text-tertiary'
-              : 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
-          }`}>
-            <span className="material-symbols-outlined text-[18px]">
-              {isTimerRunning ? 'timer' : 'lock'}
-            </span>
-            <span className="font-code-md text-code-md font-semibold tracking-wider font-mono">
-              {formatTimer(secondsLeft)}
-            </span>
-            <button
-              type="button"
-              onClick={isTimerRunning ? handleSealExam : handleUnsealExam}
-              className={`ml-1 px-2 py-0.5 rounded text-[11px] font-sans font-medium flex items-center gap-1 transition-colors cursor-pointer ${
-                isTimerRunning
-                  ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
-                  : 'bg-primary text-white font-bold shadow-xs hover:bg-primary-container'
-              }`}
-              title={isTimerRunning ? '正式封卷并冻结倒计时（如同围棋封盘规则）' : '启封考卷并继续作答'}
-            >
-              <span className="material-symbols-outlined text-[14px]">
-                {isTimerRunning ? 'lock' : 'lock_open'}
+          {/* Countdown Timer with 动态颜色渐变 (绿 -> 黄 -> 红) and 封卷 / 启封 Toggle */}
+          <div className="relative">
+            <div className={`relative flex items-center space-x-1.5 px-2.5 sm:px-3 py-1 rounded-lg border transition-all ${
+              isSealed
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                : timerStage.badgeClass
+            }`}>
+              {/* Bottom Subtle Progress Track */}
+              {!isSealed && (
+                <div className="absolute -bottom-[1px] left-1.5 right-1.5 h-[2px] rounded-full overflow-hidden bg-outline-variant/20 pointer-events-none">
+                  <div
+                    className={`h-full transition-all duration-700 ${timerStage.barColor}`}
+                    style={{ width: `${timerStage.progressRatio}%` }}
+                  />
+                </div>
+              )}
+
+              <span className={`material-symbols-outlined text-[18px] ${!isSealed ? timerStage.iconClass : ''}`}>
+                {isSealed ? 'lock' : timerStage.iconName}
               </span>
-              <span>{isTimerRunning ? <><span className="hidden sm:inline">封卷 (封盘)</span><span className="sm:hidden">封卷</span></> : '启封'}</span>
-            </button>
+              <span className="font-code-md text-code-md font-semibold tracking-wider font-mono">
+                {formatTimer(secondsLeft)}
+              </span>
+
+              {/* Quick Reminder Bell Indicator & Popover Trigger */}
+              <button
+                type="button"
+                onClick={() => setShowTimerMenu((prev) => !prev)}
+                className={`p-0.5 rounded hover:bg-surface-container-high transition cursor-pointer flex items-center justify-center ${
+                  reminderSettings.enabled ? 'text-primary' : 'text-on-surface-variant opacity-60'
+                }`}
+                title={`考时提醒设置 (当前: 剩余 ${reminderSettings.reminderMinutes} 分钟提醒)`}
+              >
+                <span className="material-symbols-outlined text-[15px]">
+                  {reminderSettings.enabled ? 'notifications_active' : 'notifications_off'}
+                </span>
+              </button>
+
+              {/* Seal / Unseal Button */}
+              <button
+                type="button"
+                onClick={isTimerRunning ? handleSealExam : handleUnsealExam}
+                className={`ml-1 px-2 py-0.5 rounded text-[11px] font-sans font-medium flex items-center gap-1 transition-colors cursor-pointer ${
+                  isTimerRunning
+                    ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                    : 'bg-primary text-white font-bold shadow-xs hover:bg-primary-container'
+                }`}
+                title={isTimerRunning ? '正式封卷并冻结倒计时（如同围棋封盘规则）' : '启封考卷并继续作答'}
+              >
+                <span className="material-symbols-outlined text-[14px]">
+                  {isTimerRunning ? 'lock' : 'lock_open'}
+                </span>
+                <span>{isTimerRunning ? <><span className="hidden sm:inline">封卷 (封盘)</span><span className="sm:hidden">封卷</span></> : '启封'}</span>
+              </button>
+            </div>
+
+            {/* Quick Reminder Settings Dropdown */}
+            {showTimerMenu && (
+              <div className="absolute right-0 top-full mt-2 w-56 p-3 rounded-xl bg-surface-container-lowest border border-outline-variant/40 shadow-2xl z-60 text-[12px] space-y-2 animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-center justify-between font-semibold text-on-surface pb-1.5 border-b border-surface-container">
+                  <span className="flex items-center gap-1 text-primary">
+                    <span className="material-symbols-outlined text-[16px]">timer</span>
+                    <span>剩余时间提醒</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowTimerMenu(false)}
+                    className="text-on-surface-variant hover:text-on-surface p-0.5 rounded"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">close</span>
+                  </button>
+                </div>
+                <div className="text-[11px] text-on-surface-variant">
+                  到达指定剩余时间时，自动弹出全景答题提醒：
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[30, 15, 10, 5].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        const next = { ...reminderSettings, enabled: true, reminderMinutes: m };
+                        setReminderSettings(next);
+                        saveExamTimerSettings(next);
+                        setShowTimerMenu(false);
+                        showExamToast(`已设为剩余 ${m} 分钟自动提醒`, 'info');
+                      }}
+                      className={`px-2 py-1.5 rounded-lg text-center font-medium transition cursor-pointer border ${
+                        reminderSettings.enabled && reminderSettings.reminderMinutes === m
+                          ? 'border-primary bg-primary text-white font-bold shadow-xs'
+                          : 'border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface'
+                      }`}
+                    >
+                      剩余 {m} 分钟
+                    </button>
+                  ))}
+                </div>
+                <div className="pt-1.5 border-t border-surface-container flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = { ...reminderSettings, enabled: !reminderSettings.enabled };
+                      setReminderSettings(next);
+                      saveExamTimerSettings(next);
+                      showExamToast(next.enabled ? '已开启考时提醒' : '已关闭考时提醒', 'info');
+                    }}
+                    className="text-[11px] text-primary hover:underline font-medium cursor-pointer"
+                  >
+                    {reminderSettings.enabled ? '关闭本场提醒' : '开启提醒'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTimerMenu(false);
+                      if (reminderSettings.soundEnabled) playReminderChime('warning');
+                      setReminderModalState({
+                        isOpen: true,
+                        minutesLeft: Math.max(1, Math.ceil(secondsLeft / 60)),
+                        stage: timerStage.stage,
+                        formattedTime: formatTimer(secondsLeft)
+                      });
+                    }}
+                    className="text-[11px] text-on-surface-variant hover:text-on-surface cursor-pointer flex items-center gap-0.5"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">visibility</span>
+                    <span>试看弹窗</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Quick Scratchpad Toggle with Active Indicator */}
@@ -1935,6 +2164,27 @@ export default function ExamRoomView({
           </div>
         </div>
       )}
+
+      {/* Exam Timer Remaining Time Alert Modal (Our Custom UI MSG) */}
+      <ExamTimerReminderModal
+        isOpen={reminderModalState.isOpen}
+        onClose={() => setReminderModalState((prev) => ({ ...prev, isOpen: false }))}
+        minutesLeft={reminderModalState.minutesLeft}
+        formattedTime={reminderModalState.formattedTime}
+        stage={reminderModalState.stage}
+        answeredCount={answeredCount}
+        totalQuestions={questionList.length}
+        onSnooze={() => {
+          setSnoozeSecondsRemaining(secondsLeft - 300);
+          setReminderModalState((prev) => ({ ...prev, isOpen: false }));
+          showExamToast('已设置 5 分钟后再次提醒', 'info');
+        }}
+        onDisableThisExam={() => {
+          setDisableReminderForThisExam(true);
+          setReminderModalState((prev) => ({ ...prev, isOpen: false }));
+          showExamToast('本场考试已关闭弹窗提醒', 'info');
+        }}
+      />
     </div>
   );
 }

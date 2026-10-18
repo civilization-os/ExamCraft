@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import SelectMenu from '../components/SelectMenu';
+import ExamTimerReminderModal from '../components/ExamTimerReminderModal';
 import { APP_VERSION, APP_RELEASE_NAME, APP_BUILD_DATE, APP_CODENAME } from '../config/version';
+import {
+  getExamTimerSettings,
+  saveExamTimerSettings,
+  DEFAULT_REMINDER_MINUTES,
+  DEFAULT_SECOND_REMINDER_MINUTES,
+  REMINDER_PRESET_OPTIONS,
+  playReminderChime
+} from '../utils/examTimer';
 
 export default function SettingsView() {
   // Category: 'official' | 'protocol'
@@ -77,6 +86,41 @@ export default function SettingsView() {
   const handleScratchpadAgentToneChange = (tone) => {
     setScratchpadAgentTone(tone);
     try { localStorage.setItem('examcraft_scratchpad_agent_tone', tone); } catch {}
+  };
+
+  // Exam timer & remaining time reminder settings
+  const [examReminderSettings, setExamReminderSettings] = useState(getExamTimerSettings);
+  const [customReminderInput, setCustomReminderInput] = useState(() => {
+    const current = getExamTimerSettings().reminderMinutes;
+    return REMINDER_PRESET_OPTIONS.some((opt) => opt.value === current) ? '' : String(current);
+  });
+  const [isTestReminderModalOpen, setIsTestReminderModalOpen] = useState(false);
+
+  const handleUpdateReminderSettings = (partial) => {
+    const next = { ...examReminderSettings, ...partial };
+    setExamReminderSettings(next);
+    saveExamTimerSettings(next);
+  };
+
+  const handleSelectReminderMinutes = (val) => {
+    setCustomReminderInput('');
+    handleUpdateReminderSettings({ reminderMinutes: val });
+  };
+
+  const handleCustomReminderMinutesChange = (e) => {
+    const text = e.target.value.replace(/[^0-9]/g, '');
+    setCustomReminderInput(text);
+    const num = parseInt(text, 10);
+    if (!isNaN(num) && num > 0 && num <= 180) {
+      handleUpdateReminderSettings({ reminderMinutes: num });
+    }
+  };
+
+  const handleTestReminderAlert = () => {
+    if (examReminderSettings.soundEnabled) {
+      playReminderChime(examReminderSettings.reminderMinutes <= 5 ? 'urgent' : 'warning');
+    }
+    setIsTestReminderModalOpen(true);
   };
 
   // Local storage stats & clear
@@ -381,6 +425,172 @@ export default function SettingsView() {
             ))}
           </div>
           <div className="text-label-sm text-secondary" aria-live="polite">语气偏好已保存在本机设置中。</div>
+        </section>
+
+        {/* Exam Timer & Remaining Time Alert Settings */}
+        <section className="bg-surface-container-lowest p-4 sm:p-space-xl rounded-xl shadow-sm border border-outline-variant/30 space-y-space-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[24px] text-primary">timer</span>
+                <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold">
+                  考试倒计时与剩余时间提醒
+                </h2>
+              </div>
+              <p className="mt-1 text-body-sm text-on-surface-variant">
+                全真考场倒计时随作答进程由绿色渐变至黄色与红色。可在下方设定剩余时间弹窗提醒阈值与音效。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleTestReminderAlert}
+              className="px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary text-label-sm font-semibold transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto shrink-0"
+              title="点击在当前页面立即试看提醒弹窗与提示音"
+            >
+              <span className="material-symbols-outlined text-[16px]">notifications_active</span>
+              <span>测试弹出提示效果</span>
+            </button>
+          </div>
+
+          {/* Color Gradient Visual Rule Explanation */}
+          <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-2">
+            <div className="text-[12px] font-semibold text-on-surface flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px] text-outline">palette</span>
+              <span>倒计时颜色渐变阶梯规则</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                <span className="font-medium">充足：绿色 (&gt;50%)</span>
+              </div>
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300">
+                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
+                <span className="font-medium">过半：黄色 (20%~50%)</span>
+              </div>
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300">
+                <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
+                <span className="font-medium">紧迫：红色 (&le;20%/达阈值)</span>
+              </div>
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-700 dark:text-rose-300 ring-1 ring-rose-500/30">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping shrink-0"></span>
+                <span className="font-medium">收卷：脉冲红 (&le;5分)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Master Toggle */}
+          <div className="flex items-center justify-between p-3.5 rounded-xl border border-outline-variant/40 bg-surface-container-lowest">
+            <div>
+              <span className="block text-label-md font-semibold text-on-surface">开启考试剩余时间弹窗提醒</span>
+              <span className="text-label-sm text-on-surface-variant">当考场倒计时到达设定阈值时，自动弹出提醒模态窗口提示作答节奏</span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={examReminderSettings.enabled}
+              onClick={() => handleUpdateReminderSettings({ enabled: !examReminderSettings.enabled })}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                examReminderSettings.enabled ? 'bg-primary' : 'bg-surface-container-highest'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  examReminderSettings.enabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {examReminderSettings.enabled && (
+            <div className="space-y-4 pt-1">
+              <div>
+                <label className="block text-label-md font-semibold text-on-surface mb-2">
+                  设定首要提醒阈值（考试剩余多少时间时弹出提示）
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {REMINDER_PRESET_OPTIONS.map((opt) => {
+                    const isSelected = examReminderSettings.reminderMinutes === opt.value && !customReminderInput;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => handleSelectReminderMinutes(opt.value)}
+                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 ring-2 ring-primary/20 text-primary'
+                            : 'border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container-low text-on-surface'
+                        }`}
+                      >
+                        <div className="font-bold text-label-md flex items-center justify-between">
+                          <span>{opt.label}</span>
+                          {isSelected && (
+                            <span className="material-symbols-outlined text-[16px] text-primary">check_circle</span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-on-surface-variant mt-0.5">{opt.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Input */}
+                <div className="mt-2.5 flex items-center gap-2">
+                  <span className="text-[12px] text-on-surface-variant">或自定义分钟数：</span>
+                  <div className="relative w-32">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={customReminderInput}
+                      onChange={handleCustomReminderMinutesChange}
+                      placeholder="如: 20"
+                      className="w-full px-3 py-1.5 text-body-sm font-mono rounded-lg border border-outline-variant/40 bg-surface-container-lowest text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] text-on-surface-variant pointer-events-none">
+                      分钟
+                    </span>
+                  </div>
+                  {customReminderInput && (
+                    <span className="text-[12px] text-primary font-medium">
+                      当前已设定为剩余 {examReminderSettings.reminderMinutes} 分钟弹出提示
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Second Stage & Sound options */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-outline-variant/20">
+                <div className="flex items-center justify-between p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low">
+                  <div>
+                    <span className="block text-label-sm font-semibold text-on-surface">冲刺二次提醒 (最后 5 分钟)</span>
+                    <span className="text-[11px] text-on-surface-variant">在考试还剩 5 分钟时再次弹出紧急预警</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={examReminderSettings.secondReminderEnabled}
+                    onChange={(e) => handleUpdateReminderSettings({ secondReminderEnabled: e.target.checked })}
+                    className="h-4 w-4 rounded text-primary focus:ring-primary accent-primary cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low">
+                  <div>
+                    <span className="block text-label-sm font-semibold text-on-surface">播放轻柔提示音效</span>
+                    <span className="text-[11px] text-on-surface-variant">弹窗出现时播放两段温和考场提示音</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={examReminderSettings.soundEnabled}
+                    onChange={(e) => handleUpdateReminderSettings({ soundEnabled: e.target.checked })}
+                    className="h-4 w-4 rounded text-primary focus:ring-primary accent-primary cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="text-label-sm text-secondary" aria-live="polite">
+            倒计时提醒偏好已保存在本机，考场中亦可随时调节。
+          </div>
         </section>
 
         {/* Main Model Core Configuration Deck */}
@@ -896,6 +1106,25 @@ export default function SettingsView() {
           </div>
         </div>
       )}
+
+      {/* Test Exam Reminder Modal Preview */}
+      <ExamTimerReminderModal
+        isOpen={isTestReminderModalOpen}
+        onClose={() => setIsTestReminderModalOpen(false)}
+        minutesLeft={examReminderSettings.reminderMinutes}
+        formattedTime={`00:${String(examReminderSettings.reminderMinutes).padStart(2, '0')}:00`}
+        stage={examReminderSettings.reminderMinutes <= 5 ? 'critical' : examReminderSettings.reminderMinutes <= 15 ? 'danger' : 'warning'}
+        answeredCount={12}
+        totalQuestions={23}
+        onSnooze={() => {
+          setIsTestReminderModalOpen(false);
+          alert('测试成功：稍后 5 分钟再次提醒逻辑已触发');
+        }}
+        onDisableThisExam={() => {
+          setIsTestReminderModalOpen(false);
+          alert('测试成功：已标记本场考试不再提醒');
+        }}
+      />
     </div>
   );
 }

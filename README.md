@@ -69,6 +69,13 @@
 ### 4. Focus-Mode Proctored Online Exam Room
 - **Minimalist Proctored Status Header**:
   - High-precision countdown timer with **Pause / Seal State** support (simulating tournament adjournment).
+  - **Dynamic Color Gradient (Green $\to$ Yellow $\to$ Red)**: The countdown pill smoothly transitions from calm green (>50%) to warning yellow (20%~50%), urgent red ($\le$20% or alert threshold), and pulsating alarm red ($\le$5 min), with an embedded live progress track.
+  - **Configurable Remaining Time Alert (Custom UI MSG)**:
+    - Customizable alert threshold in System Settings (30m / 15m default / 10m / 5m / custom minute entry).
+    - Automatically pops up our dedicated full-view modal when crossing the threshold, displaying big countdown clock, answered vs. unanswered count, and rhythm advice.
+    - Supports "Snooze 5 minutes" and "Mute for this exam session".
+    - In-room top bar quick-control dropdown to preview or adjust reminder threshold on the fly.
+    - Pure Web Audio harmonic chime alert without external asset overhead.
   - Global answer sheet matrix tracking completion progress.
 - **Dual Modality Submission**:
   - **Modality A · Photo / QR Code Upload**: Mobile camera snapshot upload for handwritten work.
