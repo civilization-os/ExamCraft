@@ -2585,13 +2585,19 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
       && /(?:誊写|抄写|抄下来|写下来|写出来|列出|列出来|记录|整理排版|排版)/i.test(message.content))
     : null;
   const followsTranscriptionRequest = Boolean(priorTranscriptionRequest);
+  const explicitSolveCommand = /(?:帮我|替我|请你|请|直接|给我).{0,12}(?:计算|求导|求积分|求极限|解方程|证明|推导|求答案|给答案|解题|提示|讲解|解释)|(?:算一下|计算一下|求导一下|求积分一下|求极限一下|帮我求)|(?:答案是什么|等于多少|怎么做这道题|把这题解出来|代我做题)/i.test(spokenText);
+  // 明确的上一条誊写请求 + 当前公式材料，是代码可确定的续写输入，不交给模型分类器否决。
+  const deterministicTranscriptionContinuation = followsTranscriptionRequest
+    && suppliedMathContent
+    && !explicitSolveCommand
+    && !explicitSolveRequest;
   const explicitSolveRequest = /(?:帮我|替我|给我|请|直接|求|计算|算一下|算出|解出|求出|推导|证明|解释|说明|提示|告诉我).{0,18}(?:答案|结果|怎么做|怎么解|解题|求导|导数|积分|极限|方程|逆矩阵|特征值|步骤|思路|下一步|展开)|(?:答案是什么|等于多少|怎么做这道题|把这题解出来|代我做题|直接给答案|求积分值|求极限值|求特征值)/i.test(spokenText);
   const deterministicBlock = explicitSolveRequest && !(explicitTranscription && suppliedMathContent);
-  let isSuspicious = deterministicBlock;
+  let isSuspicious = deterministicTranscriptionContinuation ? false : deterministicBlock;
   let intentClassification = null;
 
   // 语义安全审核使用当前系统配置的同一个官方模型；仅发送本轮原话，不携带题干、画板或聊天历史。
-  if (currentConfig.apiKey?.trim()) {
+  if (currentConfig.apiKey?.trim() && !deterministicTranscriptionContinuation) {
     try {
       const classifier = createTrackedChatModel('scratchpad.intent-classifier');
       const classificationResponse = await classifier.invoke([
@@ -2864,7 +2870,7 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
 
   const prompt = `你是考场草稿纸旁的助手，可以进行简短、自然、友善的日常交流，也可以按用户明确指令誊写其已经提供的内容或绘图。必须严格区分聊天和画板操作：闲聊只回复 chatResponse，intent="chat" 且 canvasActions 为空；只有明确要求画图或誊写时才操作画板，intent="canvas"。
 
-【独立意图审核结果】：${intentClassification?.decision === 'allow' ? '允许本轮请求。若用户要求列出/誊写已经给出的推导文字或公式，只能忠实转录，不得补充、纠错、续写、计算或解释。' : '未使用独立模型审核结果；请按下面规则判断。'} 词语“求导、积分、极限、证明、展开”本身不是违规依据，关键在于用户是否要求你生成未提供的解题内容。
+【独立意图审核结果】：${deterministicTranscriptionContinuation ? '代码已确认：这是上一条誊写/排版请求的公式材料续传，直接允许忠实转录。' : intentClassification?.decision === 'allow' ? '允许本轮请求。若用户要求列出/誊写已经给出的推导文字或公式，只能忠实转录，不得补充、纠错、续写、计算或解释。' : '未使用独立模型审核结果；请按下面规则判断。'} 词语“求导、积分、极限、证明、展开”本身不是违规依据，关键在于用户是否要求你生成未提供的解题内容。
 
 【默认交流语气】：${toneInstructions[selectedTone]}
 语气用于日常交流、拒绝说明和操作确认。用户可以简单聊天，不要把聊天写到画板上。遇到做题或数学求解请求时，简短礼貌拒绝；不得给出答案、步骤、解题思路、定理/公式提示、下一步建议或任何部分线索，也不要引导用户补充题目步骤。不得改变考场诚信规则，也不得把额外推导或答案包装成“板书整理”。scribeResult 必须是考生明确提供内容的忠实誊写，不添加解释或推导。
@@ -2959,7 +2965,7 @@ ${spokenText}
       parsed.chatResponse = String(parsed.chatResponse || '你好呀。').slice(0, 500);
     }
 
-    if (isSuspicious || (!parsed.audit.passed && intentClassification?.decision !== 'allow')) {
+    if (isSuspicious || (!parsed.audit.passed && intentClassification?.decision !== 'allow' && !deterministicTranscriptionContinuation)) {
       parsed.audit.passed = false;
       parsed.intent = 'blocked';
       parsed.chatResponse = '抱歉，我不能帮助解题或提供答案、步骤及提示。';
@@ -2968,7 +2974,7 @@ ${spokenText}
     }
 
     // 意图审核允许的“忠实誊写”若被主助手误判为违规，退回本地原文转录，避免静态审计再次误拦。
-    if (!isSuspicious && intentClassification?.decision === 'allow' && parsed.audit?.passed === false && (explicitTranscription || followsTranscriptionRequest) && suppliedMathContent) {
+    if (!isSuspicious && (intentClassification?.decision === 'allow' || deterministicTranscriptionContinuation) && parsed.audit?.passed === false && (explicitTranscription || followsTranscriptionRequest) && suppliedMathContent) {
       parsed = executeDeterministicFallback(spokenText);
     }
 
