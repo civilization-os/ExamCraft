@@ -1,5 +1,34 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import katex from 'katex';
 import SelectMenu from './SelectMenu';
+import MathMarkdown from './MathMarkdown';
+
+/**
+ * 高性能 KaTeX 内联数学表达式渲染组件
+ */
+export function KatexInline({ math = '', className = '' }) {
+  const html = useMemo(() => {
+    if (!math) return '';
+    const clean = String(math).replace(/^\$+|\$+$/g, '').trim();
+    try {
+      return katex.renderToString(clean, {
+        displayMode: false,
+        throwOnError: false,
+        strict: false
+      });
+    } catch {
+      return clean;
+    }
+  }, [math]);
+
+  if (!html) return null;
+  return (
+    <span
+      className={`inline-flex items-center leading-none ${className}`}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
 
 /**
  * 数学公式 Unicode 转换与上下标符号美化映射器
@@ -2722,7 +2751,9 @@ export default function ScratchpadCanvas({
                                 题干
                               </span>
                             )}
-                            <span className="truncate">{formatMathExpression(chip.label || chip.latex)}</span>
+                            <span className="truncate inline-flex items-center">
+                              {chip.latex ? <KatexInline math={chip.latex} /> : formatMathExpression(chip.label)}
+                            </span>
                           </button>
 
                           {/* 右侧快捷微操作：一键直接抄入画板 */}
@@ -2772,7 +2803,11 @@ export default function ScratchpadCanvas({
                         : 'bg-white/80 text-on-surface rounded-2xl rounded-bl-sm shadow-sm'
                     }`}>
                       {message.role !== 'user' && <div className="font-semibold text-[10px] mb-0.5">{message.status === 'blocked' ? '安全提示' : message.status === 'error' ? '执行未完成' : '草稿纸助手'}</div>}
-                      <div>{message.content}</div>
+                      {message.role === 'user' ? (
+                        <div>{message.content}</div>
+                      ) : (
+                        <MathMarkdown content={message.content} className="text-[11px] leading-relaxed" />
+                      )}
                       {message.details?.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{message.details.map((detail) => <span key={detail} className="rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px]">{detail}</span>)}</div>}
                     </div>
                   </div>
@@ -2782,27 +2817,29 @@ export default function ScratchpadCanvas({
 
               {/* 已算等式快速代换胶囊 */}
               {boardEquivalenceChips.length > 0 && (
-                <div className="flex items-center gap-1 flex-wrap px-1.5 py-1 mb-1.5 rounded-md bg-primary/5 border border-primary/15 text-[10px]">
-                  <div className="flex items-center gap-0.5 text-primary font-semibold shrink-0">
-                    <span className="material-symbols-outlined text-[12px]">swap_horiz</span>
+                <div className="flex items-center gap-1.5 flex-wrap px-2 py-1.5 mb-1.5 rounded-lg bg-primary/5 border border-primary/15 text-[11px]">
+                  <div className="flex items-center gap-1 text-primary font-semibold shrink-0">
+                    <span className="material-symbols-outlined text-[13px]">swap_horiz</span>
                     <span>已算等式 (点击代换):</span>
                   </div>
-                  {boardEquivalenceChips.slice(-4).map((eq) => (
-                    <button
-                      key={eq.id}
-                      type="button"
-                      onClick={() => {
-                        setSpokenInput((prev) => {
-                          const prefix = prev ? `${prev.trim()} ` : '';
-                          return `${prefix}等量代换：用 ${eq.lhs} 等式替换一下`;
-                        });
-                      }}
-                      className="px-1.5 py-0.5 rounded bg-surface-container-lowest border border-outline-variant/40 hover:border-primary text-[10px] font-mono text-on-surface hover:text-primary transition cursor-pointer shadow-2xs truncate max-w-[160px]"
-                      title={`点击代换: ${eq.raw}`}
-                    >
-                      {eq.raw}
-                    </button>
-                  ))}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {boardEquivalenceChips.slice(-6).map((eq) => (
+                      <button
+                        key={eq.id}
+                        type="button"
+                        onClick={() => {
+                          setSpokenInput((prev) => {
+                            const prefix = prev ? `${prev.trim()} ` : '';
+                            return `${prefix}等量代换：用 ${eq.lhs} 等式替换一下`;
+                          });
+                        }}
+                        className="px-2 py-1 rounded-md bg-surface-container-lowest border border-outline-variant/40 hover:border-primary hover:bg-primary/5 text-on-surface hover:text-primary transition cursor-pointer shadow-2xs inline-flex items-center min-h-[26px] max-w-[260px] overflow-hidden whitespace-nowrap"
+                        title={`点击生成代换口述: 用 ${eq.lhs} 代换 (${eq.raw})`}
+                      >
+                        <KatexInline math={eq.raw} />
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
