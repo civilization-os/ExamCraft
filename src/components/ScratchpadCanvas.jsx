@@ -2438,9 +2438,10 @@ export default function ScratchpadCanvas({
         else if (actionTypes.has('axes')) details.push('已绘制直角坐标系');
         if (actionTypes.has('plot')) details.push('已绘制函数曲线');
         if (actionTypes.has('shape') || actionTypes.has('shape3d') || actionTypes.has('circle')) details.push('已绘制几何图形');
-        const completionMessage = details.length
+        const defaultCompletion = details.length
           ? `已按指令完成：${[...new Set(details)].join('；')}。`
           : '已处理完成。';
+        const completionMessage = agentData.chatResponse?.trim() || defaultCompletion;
         appendAgentChatMessage({ role: 'assistant', status: 'success', content: completionMessage, details: [...new Set(details)] });
         showToast('AI 已在草稿板上为您完成画图与写字！', 'success');
       }

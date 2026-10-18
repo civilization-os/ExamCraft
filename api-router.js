@@ -364,23 +364,53 @@ function createTrackedChatModel(operation, config = currentConfig) {
   return model;
 }
 
-function extractJsonFromAiResponse(text) {
+export function extractJsonFromAiResponse(text) {
   if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {}
+  let clean = String(text).trim()
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
 
-  let clean = text.replace(/```json\s*|```\s*$/g, '').trim();
   try {
     return JSON.parse(clean);
   } catch {}
 
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    const candidate = text.slice(firstBrace, lastBrace + 1);
+  const firstObj = clean.indexOf('{');
+  const lastObj = clean.lastIndexOf('}');
+  const firstArr = clean.indexOf('[');
+  const lastArr = clean.lastIndexOf(']');
+
+  let start = -1;
+  let end = -1;
+
+  if (firstObj !== -1 && (firstArr === -1 || firstObj < firstArr) && lastObj > firstObj) {
+    start = firstObj;
+    end = lastObj;
+  } else if (firstArr !== -1 && lastArr > firstArr) {
+    start = firstArr;
+    end = lastArr;
+  }
+
+  if (start !== -1 && end > start) {
+    const candidate = clean.slice(start, end + 1);
     try {
       return JSON.parse(candidate);
+    } catch {}
+
+    // 修复大模型输出 LaTeX 数学符号时未进行反斜杠双转义的问题（如 \cos, \sin, \sqrt, \frac, \because 等）
+    try {
+      const repaired = candidate.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, '\\\\');
+      return JSON.parse(repaired);
+    } catch {}
+
+    // 处理字符串内部的未转义换行控制符
+    try {
+      const repaired2 = candidate
+        .replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, '\\\\')
+        .replace(/\r?\n/g, '\\n');
+      return JSON.parse(repaired2);
     } catch {}
   }
   return null;
@@ -2599,12 +2629,21 @@ function formatSpokenMathToScratchpad(spokenText) {
   text = text.replace(/\bln\s*x\b|lnx/gi, '\\ln x');
   text = text.replace(/\bln\s*y\b|lny/gi, '\\ln y');
 
-  // 3. 导数口语化规范
+  // 3. 导数与操作指令口语化规范
+  text = text.replace(/(?:直接)?(?:替换|代入|回代|代换)(?:一下)?/g, '');
   text = text.replace(/([a-zA-Z])导数?/g, "$1'");
   text = text.replace(/\\(sin|cos|tan)\s*([a-zA-Z])求导/g, (match, fn, v) => `(\\${fn} ${v})'`);
   text = text.replace(/([a-zA-Z])求导/g, "$1'");
 
-  // 4. 运算符号口语化规范
+  // 4. 根号与幂次口语化规范
+  text = text.replace(/(?:根号下|根号)\s*[(（]([\s\S]+?)[)）]/g, '\\sqrt{$1}');
+  text = text.replace(/(?:根号下|根号)\s*([a-zA-Z0-9\\^_\-]+)/g, '\\sqrt{$1}');
+  text = text.replace(/\\(sin|cos|tan)\s*([a-zA-Z])\s*(?:的)?平方/g, '\\$1^2 $2');
+  text = text.replace(/([a-zA-Z0-9)\]])\s*的平方/g, '$1^2');
+  text = text.replace(/(?:平方)/g, '^2');
+  text = text.replace(/(?:立方)/g, '^3');
+
+  // 5. 运算符号口语化规范
   text = text.replace(/(?:等于|＝)/g, ' = ');
   text = text.replace(/(?:不等于|≠)/g, ' \\neq ');
   text = text.replace(/(?:大于等于|≥)/g, ' \\ge ');
@@ -2612,16 +2651,14 @@ function formatSpokenMathToScratchpad(spokenText) {
   text = text.replace(/(?:大于|>)/g, ' > ');
   text = text.replace(/(?:小于|<)/g, ' < ');
   text = text.replace(/(?:乘以|乘|\*)/g, ' \\cdot ');
-  text = text.replace(/(?:平方)/g, '^2');
-  text = text.replace(/(?:立方)/g, '^3');
 
-  // 5. 分数处理（如 1/cosy, 1/cos, 1除以cosy）
+  // 6. 分数处理（如 1/cosy, 1/cos, 1除以cosy）
   text = text.replace(/1\s*(?:除以|\/)\s*cos\b/gi, '\\frac{1}{\\cos y}');
   text = text.replace(/1\s*(?:除以|\/)\s*\\cos\s*y\b/gi, '\\frac{1}{\\cos y}');
   text = text.replace(/(\d+|[a-zA-Z]+|\w+)\s*(?:除以|\/)\s*(\\(?:sin|cos|tan)\s*[a-zA-Z]?|\w+)/g, '\\frac{$1}{$2}');
   text = text.replace(/(\\(?:sin|cos|tan)\s*[a-zA-Z]?|\w+)\s*分之\s*(\d+|[a-zA-Z]+|\w+)/g, '\\frac{$2}{$1}');
 
-  // 6. 逻辑关系切分与符号化
+  // 7. 逻辑关系切分与符号化
   text = text.replace(/(?:又因为|因为|由于)/g, '\n\\because ');
   text = text.replace(/(?:那么|所以|因此)/g, '\n\\therefore ');
   text = text.replace(/(?:可以写为|可以化为|可得|推出|即)/g, ' \\implies ');
@@ -3013,10 +3050,14 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
           - 因果逻辑：把口述的“又因为/因为”转为“$\\because $”，把“那么/所以/可得”转为“$\\therefore $”，如“$\\because v = 2$”，“$\\therefore u \\cdot v = 6 \\implies u = 3$”。
 
    - 【考生显式代换/回代指令的合规执行（必须坚决执行，绝非违规代算）】：
-     - 当考生在草稿纸上已经写出了某个等式（例如已写出 $\\cos y = \\sqrt{\\frac{1}{1-\\sin^2 y}}$，或已写出 $x = \\sin y$），随后考生明确指令：“用上面的cosy等式替换一下”、“把上面的式子代入分母”、“将x用siny替换”、“这里地方用cosy等式替换一下”：
+     - 当考生在草稿纸上已经写出了某个等式（例如已写出 $\\cos y = \\sqrt{\\frac{1}{1-\\sin^2 y}}$，或已写出 $x = \\sin y$），随后考生明确指令：“用上面的cosy等式替换一下”、“把上面的式子代入分母”、“将x用siny替换”、“这里地方用cosy等式替换一下”、“因为siny等于x 直接替换”：
      - 【这是考生的显式板书代换指令，完全合规，必须坚决执行】！
      - 必须将考生指定的已有等式完整代入对应位置，例如写出完整的：
        $\\therefore y' = \\frac{1}{\\cos y} = \\frac{1}{\\sqrt{\\frac{1}{1-\\sin^2 y}}}$
+       或 $\\therefore \\cos y = \\sqrt{\\frac{1}{1-x^2}}$
+     - 【操作指令识别与绝不将动词抄入公式（铁律）】：
+       考生的口述中常常夹杂给你的操作指令词（例如：“直接替换”、“把这个代进去”、“替换一下”、“换一行写”）。
+       这是给你的操作指令，而不是数学公式！你应当在板书动作中【切实执行该操作】（例如在下一步中将变量代换为对应表达式），【绝对不能】将“直接替换”、“代入”等指令字样当成数学式抄写在板书上（绝对禁止输出类似 $\\because \\sin y = x 直接替换$ 这种式子，而应输出 $\\because \\sin y = x$，并在下一步得出代入结果）！
      - 【绝对严禁等号截断/悬空运算符】：数学公式必须有始有终，【绝对严禁】生成末尾带有未闭合等号的式子（如 \`\\therefore y' = \\frac{1}{\\cos y} =\` 后面什么都没有）！遇到等号必须完整写出右侧内容；若右侧内容未知，则绝不能多写等于号！
      - 与“违规代算”的清晰界限：违规代算是考生没给公式也没要求代换，AI擅自往下计算未给出的未知结论；而显式代换是考生明确指挥你将草稿板上【已经存在的已知等式】代入到指定表达式中，这属于考生的自主推演指令！
 
@@ -3138,17 +3179,10 @@ ${spokenText}
       { role: 'user', content: agentUserPrompt }
     ]);
 
-    let raw = response.content?.trim() || '';
-    raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
-
-    let parsed = null;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = extractJsonFromAiResponse(response.content);
-    }
+    let parsed = extractJsonFromAiResponse(response.content);
 
     if (!parsed || !parsed.intent) {
+      console.warn('[scratchpad] AI 返回内容无法解析为有效 JSON，启动降级容错:', response.content);
       parsed = executeDeterministicFallback(spokenText);
     }
 
@@ -3262,13 +3296,34 @@ ${spokenText}
       modelName: currentConfig.modelName
     });
   } catch (err) {
-    console.warn('[scratchpad] AI Agent 执行异常，启动智能回退：', err.message);
-    const fallbackData = executeDeterministicFallback(spokenText);
-    res.json({
-      success: true,
-      agentData: fallbackData,
-      provider: 'deterministic-compiler',
-      modelName: 'scratchpad-fallback-v1'
+    console.warn('[scratchpad] AI Agent 执行异常：', err.message);
+    const providerError = String(err?.message || '');
+    if (/\b402\b|insufficient balance|余额不足/i.test(providerError)) {
+      return res.status(402).json({
+        success: false,
+        error: 'AI 模型服务账户余额不足，请充值或更换 API Key。'
+      });
+    }
+    if (/\b401\b|unauthorized|invalid api key|无效.*key/i.test(providerError)) {
+      return res.status(401).json({
+        success: false,
+        error: 'AI 模型服务认证失败，请检查 API Key。'
+      });
+    }
+
+    if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+      const fallbackData = executeDeterministicFallback(spokenText);
+      return res.json({
+        success: true,
+        agentData: fallbackData,
+        provider: 'deterministic-compiler',
+        modelName: 'scratchpad-fallback-v1'
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: `草稿助手连接模型失败: ${err.message || '网络超时，请重试'}`
     });
   }
 });
