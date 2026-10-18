@@ -977,14 +977,6 @@ export default function ScratchpadCanvas({
     }
   }, [agentChatStorageKey, agentChatRevision]);
 
-  // 从当前草稿板所有板书图元中动态提取已知等式，作为快捷代换工具胶囊
-  const boardEquivalenceChips = useMemo(() => {
-    const allBoardText = elements
-      .flatMap((el) => (el.actions || []).map((a) => a.content || ''))
-      .filter(Boolean)
-      .join('\n');
-    return extractBoardEquivalencePool(allBoardText);
-  }, [elements]);
   const appendAgentChatMessage = useCallback((message) => {
     try {
       const stored = JSON.parse(localStorage.getItem(agentChatStorageKey) || '[]');
@@ -3250,34 +3242,6 @@ export default function ScratchpadCanvas({
                 ))}
                 {isAgentRunning && <div className="flex justify-start"><div className="rounded-xl rounded-bl-sm bg-surface-container px-2.5 py-1.5 text-[10px] text-primary flex items-center gap-1.5"><span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>{agentLoopStage || '正在处理指令…'}</div></div>}
               </div>
-
-              {/* 已算等式快速代换胶囊 */}
-              {boardEquivalenceChips.length > 0 && (
-                <div className="flex items-center gap-1.5 flex-wrap px-2 py-1.5 mb-1.5 rounded-lg bg-primary/5 border border-primary/15 text-[11px]">
-                  <div className="flex items-center gap-1 text-primary font-semibold shrink-0">
-                    <span className="material-symbols-outlined text-[13px]">swap_horiz</span>
-                    <span>已算等式 (点击代换):</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {boardEquivalenceChips.slice(-6).map((eq) => (
-                      <button
-                        key={eq.id}
-                        type="button"
-                        onClick={() => {
-                          setSpokenInput((prev) => {
-                            const prefix = prev ? `${prev.trim()} ` : '';
-                            return `${prefix}等量代换：用 ${eq.lhs} 等式替换一下`;
-                          });
-                        }}
-                        className="px-2 py-1 rounded-md bg-surface-container-lowest border border-outline-variant/40 hover:border-primary hover:bg-primary/5 text-on-surface hover:text-primary transition cursor-pointer shadow-2xs inline-flex items-center min-h-[26px] max-w-[260px] overflow-hidden whitespace-nowrap"
-                        title={`点击生成代换口述: 用 ${eq.lhs} 代换 (${eq.raw})`}
-                      >
-                        <KatexInline math={eq.raw} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               {/* 口述/需求输入框 */}
               <div className="relative">
