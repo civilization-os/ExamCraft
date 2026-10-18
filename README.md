@@ -1,6 +1,7 @@
 # ExamCraft AI Workbench
 
 <p align="center">
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/Release-v1.0.0-blue.svg?logo=github" alt="Release v1.0.0"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Publish CI"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub Container Registry"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -53,8 +54,19 @@
   - Prohibits external theorem leaks, unsolicited Taylor expansions, or equivalent infinitesimal shortcuts.
 - **Per-Question Persistent Storage**:
   - Every problem possesses its own independent Canvas ink archive, automatically saved and restored when switching questions or reviewing submissions.
+- **Agent Loop Board Derivation & Interactive Control**:
+  - **Free Board Dragging & Font Scaling**: Drag board elements anywhere on screen and scale math typography from 80% to 160%.
+  - **In-Place Board Editing**: Click and edit or delete chalk text directly on the board anytime.
+  - **Strict Agent "Read-Before-Write" Law**: The AI assistant inspects current canvas state before applying changes, preventing destructive overwrites of user modifications.
+  - **Silent Math Equivalence Substitution**: Resolves expressions like "substitute with cosy equation" silently in the background without UI clutter.
 
-### 3. Focus-Mode Proctored Online Exam Room
+### 3. User Profile & Avatar Archive Center 🆕
+- **12 Curated Gradient Theme Avatars**: High-fidelity artistic avatars (Scholar, Geek, Geometry, Rocket, Owl, Koi, etc.) with real-time selection.
+- **Profile Customization**: Personalize nicknames, target examinations (Postgraduate Math, CET-4/6, College Transfer, Custom), and motivational mottoes.
+- **Full Guest & Auth Cloud Sync**: Seamlessly works for both anonymous guests (local storage) and authenticated cloud accounts, displaying real-time metrics for created exams, test submissions, and mistake logs.
+- **Global Version Indicators**: Prominently shows release version `v1.0.0` on the top navigation bar, user dropdown menu, and system settings panel.
+
+### 4. Focus-Mode Proctored Online Exam Room
 - **Minimalist Proctored Status Header**:
   - High-precision countdown timer with **Pause / Seal State** support (simulating tournament adjournment).
   - Global answer sheet matrix tracking completion progress.
@@ -62,14 +74,14 @@
   - **Modality A · Photo / QR Code Upload**: Mobile camera snapshot upload for handwritten work.
   - **Modality B · AI Mathematical Transcription**: Scribes quick shorthand drafts into publication-grade KaTeX mathematical steps with automated step score previews (+3, +3, +4 points).
 
-### 4. AI Automated Grading & Diagnostic Review Reports
+### 5. AI Automated Grading & Diagnostic Review Reports
 - **Instant Objective & Step-by-Step Subjective Grading**:
   - Instant submission evaluation with total score, percentage, elapsed time, and simulated national percentile.
   - **Teacher Insights & Defense Analysis**: Automatic extraction of candidate strengths vs. typical cognitive misconceptions.
   - **Answer Sheet Mini-Map**: Color-coded matrix (Emerald Green = Correct, Coral Red = Incorrect, Slate = Skipped) with smooth scroll navigation.
   - **Selective Question Archiving**: Archive chosen correct or incorrect problems directly into personal mistake notebooks with variant question generation.
 
-### 5. Universal Vector Math Typography (KaTeX)
+### 6. Universal Vector Math Typography (KaTeX)
 - Deep integration of KaTeX 0.19 across all views: matrices (`pmatrix`, `bmatrix`, `vmatrix`), limits, integrals, summations, and multiline proofs.
 
 ---

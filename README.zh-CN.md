@@ -1,6 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/Release-v1.0.0-blue.svg?logo=github" alt="Release v1.0.0"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -54,8 +55,21 @@
   - 快捷公式胶囊 100% 局限于原题已白纸黑字写出的式子与选项参数；
   - 坚决杜绝任何擅自联想的泰勒展开式或等价无穷小外部定理，确保学术诚信。
 - **题卷独立持久化**：每一道题均拥有独立的草稿画板存档，切换题目或回看历史记录时完整还原。
+- **Agent Loop 规范板书演算与双向交互**：
+  - **板书自由缩放与拖拽**：支持手动拖拽板书位置与调整字体缩放比例（80% ~ 160%）；
+  - **用户直接在板编辑**：用户可随时直接点选板书就地修改或删除；
+  - **Agent「先读后写」铁律**：草稿纸助手在执行任何增删改操作前必须先调用工具读取当前画板的真实状态，杜绝覆盖用户手动更改；
+  - **等量代换智能推导**：后台静默解析已知等式池，支持口述“用cosy等式替换”精准等量代换，界面无多余繁杂按钮干扰。
 
-### 3. 专注模式在线答题考场 (Focus Mode Exam Room)
+### 3. 个人中心与个性化档案系统 (User Profile & Avatar Center) 🆕
+- **12 款精美渐变主题头像**：涵盖学者、极客、数理几何、火箭、猫头鹰、锦鲤等高质感头像，点击即时预览；
+- **个人档案定制**：支持定制考生昵称、备考目标考试（考研数学、四六级、专升本、自主命题等）及励志座右铭；
+- **全场景同步与统计**：
+  - 访客（Guest）模式与注册账户全兼容，支持本地持久化与云端保存；
+  - 个人中心一键汇聚生成试卷数、实战模考交卷数与错题本积累进度；
+- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.0.0`）。
+
+### 4. 专注模式在线答题考场 (Focus Mode Exam Room)
 - **极简顶栏状态监考**：
   - 闭卷监考模式状态指示；
   - 高精度实时答题倒计时（支持格式化显示）；
@@ -65,7 +79,7 @@
   - **模式 A · 拍照扫码识图录入**：手机端微信/浏览器扫码拍照草稿纸极速回传，或本地图片拖拽上传。
   - **模式 B · AI 规范代笔排版**：考生自拟速记推导草稿，AI 实时规整转录为 LaTeX 标准数学分步卷面，并自动核对分步赋分标签（+3分、+3分、+4分步骤预估自核）。
 
-### 4. 全真 AI 智能判卷与结果全景复盘报告 (Exam Diagnostics)
+### 5. 全真 AI 智能判卷与结果全景复盘报告 (Exam Diagnostics)
 - **客观题/主观题全自动判分**：
   - 交卷瞬间启动判题引擎，客观题标准化比对，主观题按关键演算步骤估算得分。
   - **顶部全景考情仪表盘**：得分、满分、正确率、用时、击败同考考生百分比一览无余。
@@ -73,7 +87,7 @@
   - **答题卡矩阵快览 (Mini-Map)**：按对错实时着色，点击瞬间平滑滚动定位高亮对应题目。
   - **全卷自由勾选沉淀转题集**：支持将对题作为「典题」收录，错题作为「攻坚项」存入错题本并支持一键衍生变式题。
 
-### 5. 全场景 KaTeX 数学矢量公式排版
+### 6. 全场景 KaTeX 数学矢量公式排版
 - 全站无死角集成 KaTeX 数学渲染引擎；
 - 完美渲染高等数学极限、微积分、定积分、矩阵变换（`pmatrix`, `bmatrix`, `vmatrix`）与多行推导。
 
