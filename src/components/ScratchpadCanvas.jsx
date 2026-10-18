@@ -31,7 +31,6 @@ const subMap = {
   'v': 'ᵥ', 'x': 'ₓ'
 };
 
-const SCRATCHPAD_PROBLEM_SOLVING_PATTERN = /(?:泰勒|麦克劳林).{0,12}(?:展开|多项式|级数)|(?:求导|求积分|求极限|解方程|证明(?:一下|过程|该)?|推导(?:一下|过程)?)/i;
 
 /**
  * 数学公式 Unicode 转换与上下标符号美化映射器
@@ -1772,13 +1771,6 @@ export default function ScratchpadCanvas({
     appendAgentChatMessage({ role: 'user', content: textToRun });
     setSpokenInput('');
 
-    if (SCRATCHPAD_PROBLEM_SOLVING_PATTERN.test(textToRun)) {
-      const blockedMessage = '抱歉，我不能帮助解题，也不能提供答案、步骤或提示。';
-      appendAgentChatMessage({ role: 'assistant', status: 'blocked', content: blockedMessage });
-      showToast('这属于解题推导请求，已拦截，未调用模型。', 'warn');
-      return;
-    }
-
     agentRequestInFlightRef.current = true;
     setIsAgentRunning(true);
     setAgentLoopStage('THINK · 正在处理你的消息…');
@@ -2685,7 +2677,7 @@ export default function ScratchpadCanvas({
                 </div>
               </div></div>}
 
-              <div ref={agentChatScrollRef} role="log" aria-live="polite" aria-label="草稿纸助手对话" className="flex-1 min-h-[72px] overflow-y-auto px-1 py-2 space-y-3">
+              <div ref={agentChatScrollRef} role="log" aria-live="polite" aria-label="草稿纸助手对话" className="flex-1 min-h-[72px] overflow-y-auto px-1 py-2 space-y-3 select-text">
                 {agentChatMessages.length === 0 ? (
                   <div className="h-full min-h-[100px] flex flex-col items-center justify-center gap-2 text-center px-2">
                     <div className="w-9 h-9 rounded-2xl bg-primary/10 text-primary flex items-center justify-center"><span className="material-symbols-outlined text-[20px]">draw</span></div>
@@ -2701,7 +2693,7 @@ export default function ScratchpadCanvas({
                   </div>
                 ) : agentChatMessages.map((message) => (
                   <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[92%] rounded-xl px-2.5 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words ${
+                    <div className={`max-w-[92%] rounded-xl px-2.5 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words select-text ${
                       message.role === 'user'
                           ? 'bg-primary text-on-primary rounded-2xl rounded-br-sm shadow-sm'
                         : message.status === 'blocked'

@@ -123,6 +123,13 @@ export default function ExamRoomView({
     : (activePaper?.duration ? activePaper.duration * 60 : 5400);
   const [secondsLeft, setSecondsLeft] = useState(initialDurationSeconds);
   const [isTimerRunning, setIsTimerRunning] = useState(!isInitiallySealed);
+  const secondsLeftRef = useRef(initialDurationSeconds);
+  const sealedRef = useRef(isInitiallySealed);
+  const timerRunningRef = useRef(!isInitiallySealed);
+  const submittingRef = useRef(false);
+  secondsLeftRef.current = secondsLeft;
+  sealedRef.current = isSealed;
+  timerRunningRef.current = isTimerRunning;
 
   // Submitting state for AI grading
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -130,6 +137,60 @@ export default function ExamRoomView({
   const [submitProgressText, setSubmitProgressText] = useState('');
   const [submitProgressStage, setSubmitProgressStage] = useState(0);
   const [submitElapsedSeconds, setSubmitElapsedSeconds] = useState(0);
+  submittingRef.current = isSubmitting;
+
+  // Keep the latest countdown in local persistence so a reload never restores the
+  // original duration. The parent paper list is updated on seal/exit, not every tick.
+  useEffect(() => {
+    if (!activePaper?.id) return;
+    const status = isSealed ? '已封卷' : '考试中';
+    const snapshot = {
+      ...activePaper,
+      status,
+      secondsLeft,
+      sealedAt: isSealed ? (sealedAt || activePaper.sealedAt || '') : null
+    };
+    try {
+      localStorage.setItem('examcraft_active_paper', JSON.stringify(snapshot));
+      const raw = localStorage.getItem('examcraft_papers');
+      if (raw) {
+        const papers = JSON.parse(raw);
+        if (Array.isArray(papers)) {
+          localStorage.setItem('examcraft_papers', JSON.stringify(papers.map((paper) => (
+            paper.id === activePaper.id ? { ...paper, status, secondsLeft, sealedAt: snapshot.sealedAt } : paper
+          ))));
+        }
+      }
+    } catch {}
+  }, [activePaper?.id, secondsLeft, isSealed, sealedAt]);
+
+  // Closing or reloading the page also seals the exam. pagehide is synchronous, so
+  // the snapshot is written before the browser discards the current page.
+  useEffect(() => {
+    if (!activePaper?.id) return undefined;
+    const sealOnPageExit = () => {
+      if (!timerRunningRef.current || sealedRef.current || submittingRef.current) return;
+      const nowStr = new Date().toLocaleString('zh-CN', { hour12: false });
+      const remaining = secondsLeftRef.current;
+      const snapshot = { ...activePaper, status: '已封卷', secondsLeft: remaining, sealedAt: nowStr };
+      sealedRef.current = true;
+      timerRunningRef.current = false;
+      try {
+        localStorage.setItem('examcraft_active_paper', JSON.stringify(snapshot));
+        const raw = localStorage.getItem('examcraft_papers');
+        if (raw) {
+          const papers = JSON.parse(raw);
+          if (Array.isArray(papers)) {
+            localStorage.setItem('examcraft_papers', JSON.stringify(papers.map((paper) => (
+              paper.id === activePaper.id ? snapshot : paper
+            ))));
+          }
+        }
+      } catch {}
+    };
+    window.addEventListener('pagehide', sealOnPageExit);
+    return () => window.removeEventListener('pagehide', sealOnPageExit);
+  }, [activePaper?.id]);
   const [submitAiUsage, setSubmitAiUsage] = useState({ checked: 0, total: 0, calls: 0, totalTokens: 0, estimatedCostCny: 0, costKnown: true });
 
   useEffect(() => {
@@ -528,10 +589,12 @@ export default function ExamRoomView({
   const handleUnsealExam = () => {
     setIsSealed(false);
     setIsTimerRunning(true);
+    setSealedAt('');
     const updated = {
       ...activePaper,
       status: '考试中',
-      secondsLeft
+      secondsLeft,
+      sealedAt: null
     };
     if (onUpdatePaper) onUpdatePaper(updated);
     try {
@@ -539,12 +602,17 @@ export default function ExamRoomView({
       if (raw) {
         const list = JSON.parse(raw);
         const next = list.map((p) =>
-          p.id === activePaper?.id ? { ...p, status: '考试中', secondsLeft } : p
+            p.id === activePaper?.id ? { ...p, status: '考试中', secondsLeft, sealedAt: null } : p
         );
         localStorage.setItem('examcraft_papers', JSON.stringify(next));
       }
     } catch {}
     showExamToast('✨ 考卷已成功启封，继续作答并恢复倒计时', 'success');
+  };
+
+  const handleExitExam = () => {
+    if (isTimerRunning && !isSealed) handleSealExam();
+    onExit();
   };
 
   // Call real model_core AI scribe
@@ -978,9 +1046,9 @@ export default function ExamRoomView({
         <div className="flex flex-1 items-center space-x-1 sm:space-x-space-md min-w-0">
           <button
             type="button"
-            onClick={onExit}
+            onClick={handleExitExam}
             className="flex items-center text-outline hover:text-on-surface p-1 rounded-lg hover:bg-surface-container transition-colors cursor-pointer mr-1"
-            title="退出考场返回工作台"
+            title="退出时自动封卷并冻结倒计时"
           >
             <span className="material-symbols-outlined text-[20px]">arrow_back</span>
           </button>
