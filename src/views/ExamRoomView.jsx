@@ -318,6 +318,7 @@ export default function ExamRoomView({
   });
   const splitWorkspaceRef = useRef(null);
   const [scratchpadDraftRevision, setScratchpadDraftRevision] = useState(0);
+  const [examResetCounter, setExamResetCounter] = useState(0);
   const questionMarksStorageKey = `examcraft_question_marks_${activePaper?.id || 'paper'}`;
   const getQuestionMarkKey = (question, index) => `qmark_${index}_${question?.id || question?.num || 'question'}`;
   const normalizeSavedQuestionMarks = (savedKeys) => {
@@ -732,8 +733,9 @@ export default function ExamRoomView({
       }
     }
 
-    // 7. 递增草稿版本以强制彻底卸载并重置草稿画板与组件缓存
+    // 7. 递增草稿版本与重置计数器以强制卸载并重置草稿画板与组件缓存
     setScratchpadDraftRevision((rev) => rev + 1);
+    setExamResetCounter((cnt) => cnt + 1);
 
     // 8. 更新 activePaper 试卷快照与试卷列表
     if (activePaper?.id) {
@@ -1198,7 +1200,7 @@ export default function ExamRoomView({
 
   const renderScratchpadCanvas = (docked = false) => (
     <ScratchpadCanvas
-      key={`${activePaper?.id || 'paper'}_${currentQKey}_rev_${scratchpadDraftRevision}`}
+      key={`${activePaper?.id || 'paper'}_${currentQKey}_reset_${examResetCounter}`}
       questionNum={currentQ?.num}
       questionData={currentQ}
       questionIndex={currentQIndex}

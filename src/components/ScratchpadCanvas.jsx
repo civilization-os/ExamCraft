@@ -893,12 +893,15 @@ export default function ScratchpadCanvas({
     }
   });
 
+  const lastSavedElementsStrRef = useRef(JSON.stringify(elements));
+  const prevElementsStorageKeyRef = useRef(storageKey);
+
   // 当切换题目或存储 Key 变动时，实时载入该题的专属图元
   useEffect(() => {
     try {
       const saved = localStorage.getItem(`${storageKey}_elements`);
       const parsed = saved ? JSON.parse(saved) : [];
-      setElements((Array.isArray(parsed) ? parsed : []).map((el) => {
+      const loaded = (Array.isArray(parsed) ? parsed : []).map((el) => {
         const isWrite = (el.actions || []).some((a) => a.type === 'write');
         if (isWrite && (el.width < 460 || !el.width)) {
           const content = el.actions.find((a) => a.type === 'write')?.content || '';
@@ -910,15 +913,28 @@ export default function ScratchpadCanvas({
           };
         }
         return el;
-      }));
+      });
+      lastSavedElementsStrRef.current = JSON.stringify(loaded);
+      prevElementsStorageKeyRef.current = storageKey;
+      setElements(loaded);
     } catch {
+      lastSavedElementsStrRef.current = '[]';
+      prevElementsStorageKeyRef.current = storageKey;
       setElements([]);
     }
   }, [storageKey]);
 
   useEffect(() => {
+    const elementsStr = JSON.stringify(elements);
+    // 首次加载或数据未实质改变时，避免重复写入 localStorage 并阻断 onDraftChange 引起的重渲风暴
+    if (prevElementsStorageKeyRef.current === storageKey && lastSavedElementsStrRef.current === elementsStr) {
+      return;
+    }
+    prevElementsStorageKeyRef.current = storageKey;
+    lastSavedElementsStrRef.current = elementsStr;
+
     try {
-      localStorage.setItem(`${storageKey}_elements`, JSON.stringify(elements));
+      localStorage.setItem(`${storageKey}_elements`, elementsStr);
       updateSaveStatus('elements', false);
       if (elements.length) onDraftChange?.();
     } catch (e) {
