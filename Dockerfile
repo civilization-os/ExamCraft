@@ -44,6 +44,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.js ./server.js
 COPY --from=builder /app/api-router.js ./api-router.js
 COPY --from=builder /app/user-storage.js ./user-storage.js
+COPY --from=builder /app/mail-sender.js ./mail-sender.js
 COPY --from=builder /app/src ./src
 
 # 标注 OCI 镜像元数据，自动绑定 GitHub 仓库与 Packages
