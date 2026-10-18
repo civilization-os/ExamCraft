@@ -504,38 +504,49 @@ export const isElementFormula = (elem) => {
 };
 
 /**
- * 纯净纸质图元（无生硬外框与白底，墨水直接落在稿纸上，支持整体拖拽与橡皮擦除）
+ * 纯净纸质图元（无生硬外框与白底，墨水直接落在稿纸上，支持整体拖拽、尺寸缩放与橡皮擦除）
  */
 function DraggableCanvasElement({
   element,
   tool,
   onUpdatePosition,
+  onUpdateSize,
   onDelete,
+  onOpenEditor,
   drawActions
 }) {
   const canvasRef = useRef(null);
   const dragStartRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0, currentX: 0, currentY: 0, moved: false });
   const [isDragging, setIsDragging] = useState(false);
+
+  const resizeStartRef = useRef({ startX: 0, startY: 0, initialW: 0, initialH: 0, currentW: 0, currentH: 0, resizing: false });
+  const [isResizing, setIsResizing] = useState(false);
+  const [previewSize, setPreviewSize] = useState(null);
+
   const isMoveTool = tool === 'select';
   const isEraserTool = tool === 'eraser';
+  const isWrite = (element.actions || []).some((a) => a.type === 'write');
+
+  const baseWidth = previewSize?.width || element.width || 520;
+  const currentScale = Number(element.scale) > 0 ? Number(element.scale) : 1.0;
 
   const dynamicHeight = useMemo(() => {
-    const isWrite = (element.actions || []).some((a) => a.type === 'write');
-    if (!isWrite) return element.height || 260;
-    const writeContent = element.actions.find((a) => a.type === 'write')?.content || '';
-    return Math.max(element.height || 260, estimateBoardHeight(writeContent, element.width || 520));
-  }, [element.actions, element.height, element.width]);
+    if (!isWrite) return previewSize?.height || element.height || 260;
+    const writeContent = element.actions?.find((a) => a.type === 'write')?.content || '';
+    const estimatedH = estimateBoardHeight(writeContent, baseWidth);
+    return previewSize?.height ? Math.max(previewSize.height, estimatedH) : Math.max(element.height || 260, estimatedH);
+  }, [isWrite, previewSize, element.height, element.actions, baseWidth]);
 
   useEffect(() => {
     if (canvasRef.current && element.actions) {
-      drawActions(canvasRef.current, element.actions, element.width, dynamicHeight);
+      drawActions(canvasRef.current, element.actions, baseWidth, dynamicHeight, currentScale);
     }
-  }, [element.actions, element.width, dynamicHeight, drawActions]);
+  }, [element.actions, baseWidth, dynamicHeight, currentScale, drawActions]);
 
   const handlePointerDown = (e) => {
     // 橡皮擦模式下完全穿透，不拦截事件
     if (isEraserTool) return;
-    // 工具按钮需要保留自己的完整 pointer/click 生命周期，不能被图元拖动层捕获。
+    // 工具按钮与调整手柄需要保留自己的完整 pointer/click 生命周期，不能被图元拖动层捕获。
     if (e.target.closest('button, [data-no-drag="true"]')) return;
 
     const isHandle = e.target.closest('[data-drag-handle="true"]');
@@ -585,6 +596,57 @@ function DraggableCanvasElement({
     setIsDragging(false);
   };
 
+  const handleResizePointerDown = (e) => {
+    e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    const curW = element.width || 520;
+    const curH = dynamicHeight;
+    resizeStartRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initialW: curW,
+      initialH: curH,
+      currentW: curW,
+      currentH: curH,
+      resizing: true
+    };
+    setIsResizing(true);
+  };
+
+  const handleResizePointerMove = (e) => {
+    if (!resizeStartRef.current.resizing) return;
+    e.stopPropagation();
+    const dx = (e.clientX - resizeStartRef.current.startX) / currentScale;
+    const dy = (e.clientY - resizeStartRef.current.startY) / currentScale;
+    const minW = isWrite ? 380 : 200;
+    const maxW = 1100;
+    const minH = 120;
+    const maxH = 2000;
+    const newW = Math.round(Math.max(minW, Math.min(maxW, resizeStartRef.current.initialW + dx)));
+    const newH = Math.round(Math.max(minH, Math.min(maxH, resizeStartRef.current.initialH + dy)));
+    resizeStartRef.current.currentW = newW;
+    resizeStartRef.current.currentH = newH;
+    setPreviewSize({ width: newW, height: newH });
+  };
+
+  const handleResizePointerUp = (e) => {
+    if (!resizeStartRef.current.resizing) return;
+    e.stopPropagation();
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+    resizeStartRef.current.resizing = false;
+    setIsResizing(false);
+    const finalW = resizeStartRef.current.currentW;
+    const finalH = resizeStartRef.current.currentH;
+    setPreviewSize(null);
+    if (finalW !== element.width || finalH !== element.height) {
+      onUpdateSize?.(element.id, finalW, finalH, currentScale);
+    }
+  };
+
   return (
     <div
       onPointerDown={handlePointerDown}
@@ -594,8 +656,8 @@ function DraggableCanvasElement({
       style={{
         position: 'absolute',
         transform: `translate3d(${element.x}px, ${element.y}px, 0)`,
-        width: `${element.width}px`,
-        height: `${dynamicHeight}px`,
+        width: `${Math.ceil(baseWidth * currentScale)}px`,
+        height: `${Math.ceil(dynamicHeight * currentScale)}px`,
         touchAction: 'none'
       }}
       className={`group select-none transition-[box-shadow,border-color,background-color] duration-150 ${
@@ -605,25 +667,80 @@ function DraggableCanvasElement({
           ? 'cursor-grab active:cursor-grabbing'
           : ''
       } ${
-        isDragging ? 'shadow-md ring-1 ring-primary/25 z-40' : 'z-20'
+        isDragging || isResizing ? 'shadow-md ring-1 ring-primary/25 z-40' : 'z-20'
       }`}
     >
-      {/* 顶部轻量浮动操作手柄（平时完全透明无框，仅在 hover 或移动模式下显示） */}
+      {/* 顶部轻量浮动操作手柄（平时完全透明无框，仅在 hover 或移动/拖拽模式下显示） */}
       {!isEraserTool && (
         <div
           data-drag-handle="true"
-          className={`absolute -top-7 left-0 right-0 flex items-center justify-between px-2 py-0.5 rounded-lg bg-surface-container-highest/90 backdrop-blur-xs text-[11px] font-medium border border-outline-variant/40 shadow-xs transition-opacity duration-150 cursor-grab active:cursor-grabbing ${
-            isMoveTool || isDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          className={`absolute -top-8 left-0 right-0 flex items-center justify-between px-2 py-0.5 rounded-lg bg-surface-container-highest/95 backdrop-blur-xs text-[11px] font-medium border border-outline-variant/40 shadow-xs transition-opacity duration-150 cursor-grab active:cursor-grabbing z-30 ${
+            isMoveTool || isDragging || isResizing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
-          title="按住此处可整体拖动画入图形"
+          title="按住此处可整体拖动画入图形或板书"
         >
-          <div className="flex items-center gap-1.5 truncate pointer-events-none text-primary">
-            <span className="material-symbols-outlined text-[14px]">drag_pan</span>
-            <span className="truncate font-semibold text-[11px]">{element.title || '草稿图形'}</span>
+          <div className="flex items-center gap-1.5 truncate pointer-events-none text-primary min-w-0">
+            <span className="material-symbols-outlined text-[14px] shrink-0">drag_pan</span>
+            <span className="truncate font-semibold text-[11px]">{element.title || (isWrite ? '规范板书' : '草稿图形')}</span>
+            {currentScale !== 1.0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-primary/10 text-primary font-bold shrink-0">
+                {Math.round(currentScale * 100)}%
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="text-[10px] text-outline hidden sm:inline pointer-events-none">可拖拽</span>
+          <div className="flex items-center gap-1 shrink-0 ml-1">
+            {/* 比例与字号缩放微调 */}
+            <div className="flex items-center bg-surface-container rounded-md p-0.5 border border-outline-variant/30" data-no-drag="true">
+              <button
+                type="button"
+                data-no-drag="true"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextScale = Math.max(0.7, Number((currentScale - 0.15).toFixed(2)));
+                  onUpdateSize?.(element.id, element.width, element.height, nextScale);
+                }}
+                className="p-0.5 rounded hover:bg-surface-container-high text-stone-600 hover:text-primary transition cursor-pointer"
+                title="缩小字号/板书 (Scale -)"
+              >
+                <span className="material-symbols-outlined text-[13px]">remove</span>
+              </button>
+              <button
+                type="button"
+                data-no-drag="true"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextScale = Math.min(1.8, Number((currentScale + 0.15).toFixed(2)));
+                  onUpdateSize?.(element.id, element.width, element.height, nextScale);
+                }}
+                className="p-0.5 rounded hover:bg-surface-container-high text-stone-600 hover:text-primary transition cursor-pointer"
+                title="放大字号/板书 (Scale +)"
+              >
+                <span className="material-symbols-outlined text-[13px]">add</span>
+              </button>
+            </div>
+
+            {/* 用户手动打字编辑板书按钮（仅限 write 板书） */}
+            {isWrite && (
+              <button
+                type="button"
+                data-no-drag="true"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenEditor?.(element);
+                }}
+                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary hover:text-white transition cursor-pointer text-[10px] font-semibold"
+                title="直接打字修改板书推导与公式"
+              >
+                <span className="material-symbols-outlined text-[12px]">edit</span>
+                <span>编辑</span>
+              </button>
+            )}
+
+            {/* 擦除/移除按钮 */}
             <button
               type="button"
               data-no-drag="true"
@@ -632,7 +749,7 @@ function DraggableCanvasElement({
                 e.stopPropagation();
                 onDelete(element.id);
               }}
-              className="p-0.5 rounded hover:bg-error/15 hover:text-error text-outline transition cursor-pointer"
+              className="p-0.5 rounded hover:bg-error/15 hover:text-error text-outline transition cursor-pointer ml-0.5"
               title="擦除/移除该图元"
             >
               <span className="material-symbols-outlined text-[13px]">close</span>
@@ -645,6 +762,32 @@ function DraggableCanvasElement({
       <div className="relative w-full h-full overflow-hidden rounded-xl flex items-center justify-center pointer-events-none">
         <canvas ref={canvasRef} className="block w-full h-full bg-transparent" />
       </div>
+
+      {/* 右下角拖拽拉大手柄（支持鼠标/触摸直接拉大拉宽板书） */}
+      {!isEraserTool && (
+        <div
+          data-no-drag="true"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerUp}
+          onPointerCancel={handleResizePointerUp}
+          className={`absolute -bottom-2 -right-2 w-6 h-6 rounded-full bg-surface-container-highest/95 border border-outline-variant/60 shadow-xs flex items-center justify-center cursor-nwse-resize select-none transition-opacity duration-150 z-30 ${
+            isResizing || isMoveTool ? 'opacity-100 ring-2 ring-primary/40' : 'opacity-0 group-hover:opacity-100'
+          }`}
+          title="按住拖拽：调整板书卡片宽高"
+        >
+          <span className="material-symbols-outlined text-[13px] text-stone-600 rotate-90 pointer-events-none">
+            open_in_full
+          </span>
+        </div>
+      )}
+
+      {/* 拖拽调整时的实时尺寸提示浮层 */}
+      {isResizing && (
+        <div className="absolute -bottom-8 right-0 bg-stone-900/90 text-white text-[10px] font-mono px-2 py-0.5 rounded shadow pointer-events-none z-50">
+          {baseWidth} × {dynamicHeight} px
+        </div>
+      )}
     </div>
   );
 }
@@ -1170,8 +1313,13 @@ export default function ScratchpadCanvas({
     // 3. 合成各个可拖拽整体图元
     elements.forEach((el) => {
       const tempCanvas = document.createElement('canvas');
-      drawActionsOnCanvas(tempCanvas, el.actions, el.width, el.height);
-      expCtx.drawImage(tempCanvas, el.x * dpr, el.y * dpr, el.width * dpr, el.height * dpr);
+      const s = Number(el.scale) > 0 ? Number(el.scale) : 1.0;
+      const isWrite = (el.actions || []).some((a) => a.type === 'write');
+      const dynamicH = isWrite
+        ? Math.max(el.height || 260, estimateBoardHeight(el.actions.find((a) => a.type === 'write')?.content || '', el.width || 520))
+        : (el.height || 260);
+      drawActionsOnCanvas(tempCanvas, el.actions, el.width, dynamicH, s);
+      expCtx.drawImage(tempCanvas, el.x * dpr, el.y * dpr, Math.ceil(el.width * s) * dpr, Math.ceil(dynamicH * s) * dpr);
     });
 
     const link = document.createElement('a');
@@ -1274,23 +1422,27 @@ export default function ScratchpadCanvas({
 
   // ==================== 智能 Canvas 绘图与矢量渲染核心 ====================
   // 在指定尺寸的 canvas 内部精准居中绘制各项动作（支持自适应居中与高保真矢量排版）
-  const drawActionsOnCanvas = useCallback((canvas, actions, width, height) => {
+  const drawActionsOnCanvas = useCallback((canvas, actions, width, height, scale = 1.0) => {
     if (!canvas || !actions || actions.length === 0) return;
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
+    const s = Math.max(0.6, Math.min(2.0, Number(scale) || 1.0));
 
     // 针对数学板书推导演算，智能根据板书内容与行数保障充足的高度，杜绝多层分式或长等式链被画布边缘裁切
     const writeAct = actions.find((a) => a.type === 'write');
     const dynamicMinHeight = writeAct ? estimateBoardHeight(writeAct.content, width) : height;
     const effectiveHeight = Math.max(height, dynamicMinHeight);
 
-    canvas.width = width * dpr;
-    canvas.height = effectiveHeight * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${effectiveHeight}px`;
+    const pixelW = Math.ceil(width * s);
+    const pixelH = Math.ceil(effectiveHeight * s);
+
+    canvas.width = pixelW * dpr;
+    canvas.height = pixelH * dpr;
+    canvas.style.width = `${pixelW}px`;
+    canvas.style.height = `${pixelH}px`;
 
     ctx.save();
-    ctx.scale(dpr, dpr);
+    ctx.scale(dpr * s, dpr * s);
     ctx.clearRect(0, 0, width, effectiveHeight);
 
     const cx = width / 2;
@@ -1822,6 +1974,55 @@ export default function ScratchpadCanvas({
     );
   }, []);
 
+  // 更新图元尺寸与缩放系数（支持拖拽调整宽高与比例缩放）
+  const handleUpdateElementSize = useCallback((id, width, height, scale) => {
+    setElements((prev) =>
+      prev.map((el) => {
+        if (el.id !== id) return el;
+        const updated = { ...el };
+        if (width !== undefined && width !== null) updated.width = Math.round(width);
+        if (height !== undefined && height !== null) updated.height = Math.round(height);
+        if (scale !== undefined && scale !== null) updated.scale = Number(Number(scale).toFixed(2));
+        updated.updatedAt = Date.now();
+        return updated;
+      })
+    );
+  }, []);
+
+  // 用户手动直接编辑板书模态框状态与处理器
+  const [editingBoardElement, setEditingBoardElement] = useState(null);
+  const [editingBoardText, setEditingBoardText] = useState('');
+
+  const handleOpenBoardEditor = useCallback((element) => {
+    const writeAct = (element.actions || []).find((a) => a.type === 'write');
+    setEditingBoardElement(element);
+    setEditingBoardText(writeAct?.content || '');
+  }, []);
+
+  const handleSaveEditedBoard = useCallback(() => {
+    if (!editingBoardElement) return;
+    const newContent = editingBoardText.trim();
+    setElements((prev) =>
+      prev.map((el) => {
+        if (el.id !== editingBoardElement.id) return el;
+        const writeIndex = (el.actions || []).findIndex((a) => a.type === 'write');
+        const updatedActions = writeIndex >= 0
+          ? el.actions.map((a, i) => (i === writeIndex ? { ...a, content: newContent } : a))
+          : [{ type: 'write', content: newContent }, ...(el.actions || [])];
+        const effectiveW = el.width || 520;
+        const newHeight = estimateBoardHeight(newContent, effectiveW);
+        return {
+          ...el,
+          actions: updatedActions,
+          height: newHeight,
+          updatedAt: Date.now()
+        };
+      })
+    );
+    showToast('已保存手动修改的板书，Agent 下一步将基于最新板书进行推导', 'success');
+    setEditingBoardElement(null);
+  }, [editingBoardElement, editingBoardText, showToast]);
+
   // 删除单个画入图元
   const handleDeleteElement = useCallback((id) => {
     setElements((prev) => prev.filter((el) => el.id !== id));
@@ -2005,6 +2206,13 @@ export default function ScratchpadCanvas({
                   next = next.filter((element) => element.id !== target.id);
                   continue;
                 }
+
+                // 提取可能的尺寸与缩放参数（来自大模型指令：width, height, scale）
+                const hasWidth = Number(edit.width) > 0;
+                const hasHeight = Number(edit.height) > 0;
+                const hasScale = Number(edit.scale) > 0;
+                const targetScale = hasScale ? Number(Number(edit.scale).toFixed(2)) : (target.scale || 1.0);
+
                 const operation = ['append', 'replace', 'consolidate'].includes(edit.operation) ? edit.operation : 'append';
                 const isWriteElement = (target.actions || []).some((action) => action.type === 'write')
                   && (target.actions || []).every((action) => action.type === 'write');
@@ -2015,20 +2223,27 @@ export default function ScratchpadCanvas({
                   if (operation === 'append') {
                     const existingLines = new Set(oldContent.split('\n').map((line) => line.trim()).filter(Boolean));
                     const newLines = content.split('\n').map((line) => line.trim()).filter((line) => line && !existingLines.has(line));
-                    if (!newLines.length) continue;
-                    content = [oldContent.trim(), ...newLines].filter(Boolean).join('\n');
+                    if (!newLines.length && !hasWidth && !hasScale) continue;
+                    if (newLines.length) {
+                      content = [oldContent.trim(), ...newLines].filter(Boolean).join('\n');
+                    } else {
+                      content = oldContent;
+                    }
                   }
 
                   const writeIndex = target.actions.findIndex((action) => action.type === 'write');
                   const updatedActions = target.actions.map((action, index) => index === writeIndex
                     ? { ...action, content }
                     : action);
-                  const formulaBoardW = Math.max(target.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
-                  const newHeight = estimateBoardHeight(content, formulaBoardW);
+                  const formulaBoardW = hasWidth
+                    ? Number(edit.width)
+                    : Math.max(target.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
+                  const newHeight = hasHeight ? Number(edit.height) : estimateBoardHeight(content, formulaBoardW);
                   next[targetIndex] = {
                     ...target,
                     width: formulaBoardW,
                     height: newHeight,
+                    scale: targetScale,
                     actions: updatedActions,
                     updatedAt: Date.now()
                   };
@@ -2051,7 +2266,24 @@ export default function ScratchpadCanvas({
                   next[targetIndex] = {
                     ...target,
                     title: newTitle,
+                    width: hasWidth ? Number(edit.width) : target.width,
+                    height: hasHeight ? Number(edit.height) : target.height,
+                    scale: targetScale,
                     actions: operation === 'append' ? [...(target.actions || []), ...safeActions] : safeActions,
+                    updatedAt: Date.now()
+                  };
+                } else if (hasWidth || hasScale || hasHeight) {
+                  // 纯尺寸或比例调整（模型仅下发 width / scale / height，例如考生口述“把板书放大/拉宽/缩小”）
+                  const newW = hasWidth ? Number(edit.width) : (target.width || 520);
+                  const writeAction = (target.actions || []).find((a) => a.type === 'write');
+                  const newH = hasHeight
+                    ? Number(edit.height)
+                    : (writeAction ? estimateBoardHeight(writeAction.content, newW) : target.height);
+                  next[targetIndex] = {
+                    ...target,
+                    width: newW,
+                    height: newH,
+                    scale: targetScale,
                     updatedAt: Date.now()
                   };
                 }
@@ -2269,6 +2501,129 @@ export default function ScratchpadCanvas({
               >
                 {confirmDialog.confirmText}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 用户直接编辑草稿板书模态框 */}
+      {editingBoardElement && (
+        <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 animate-in fade-in duration-150">
+          <div className="bg-surface-container-lowest border border-outline-variant/60 shadow-2xl rounded-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90%]">
+            {/* 模态框顶部 */}
+            <div className="px-4 py-3 bg-surface-container-low border-b border-outline-variant/30 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[17px]">edit_note</span>
+                </div>
+                <div>
+                  <h4 className="text-[13px] font-semibold text-on-surface">直接编辑规范板书演算</h4>
+                  <p className="text-[10px] text-on-surface-variant">修改后画布即时重绘，后续 Agent Loop 将强制先阅读此最新板书（先读后写规则）</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingBoardElement(null)}
+                className="p-1 rounded-lg hover:bg-surface-container text-outline hover:text-on-surface transition cursor-pointer"
+                title="关闭"
+              >
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            </div>
+
+            {/* 模态框主体 */}
+            <div className="p-4 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
+              <div className="flex items-center justify-between flex-wrap gap-1">
+                <span className="text-[11px] font-medium text-stone-600">板书内容 (支持 LaTeX 与分步换行)：</span>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {[
+                    { label: '分式', code: '\\frac{1}{u}' },
+                    { label: '根号', code: '\\sqrt{x}' },
+                    { label: '所以', code: '\\therefore' },
+                    { label: '因为', code: '\\because' },
+                    { label: '求导', code: "y'" },
+                    { label: 'sin', code: '\\sin y' },
+                    { label: 'cos', code: '\\cos y' }
+                  ].map((snippet) => (
+                    <button
+                      key={snippet.label}
+                      type="button"
+                      onClick={() => setEditingBoardText((prev) => (prev ? prev + ' ' + snippet.code : snippet.code))}
+                      className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-surface-container border border-outline-variant/30 hover:bg-primary/10 hover:text-primary transition cursor-pointer"
+                      title={`插入 ${snippet.code}`}
+                    >
+                      {snippet.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <textarea
+                value={editingBoardText}
+                onChange={(e) => setEditingBoardText(e.target.value)}
+                rows={8}
+                placeholder="例如：&#10;令 $y = \arcsin x$，则 $\sin y = x$&#10;$\therefore \cos y \cdot y' = 1$&#10;$\therefore y' = \frac{1}{\cos y}$"
+                className="w-full p-3 font-mono text-[13px] leading-relaxed rounded-xl border border-outline-variant/50 bg-surface-container-lowest focus:border-primary focus:ring-1 focus:ring-primary outline-hidden resize-y min-h-[140px]"
+              />
+
+              {/* 实时渲染效果预览 */}
+              {editingBoardText.trim() && (
+                <div className="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low/50 border border-outline-variant/30 max-h-[140px] overflow-y-auto">
+                  <div className="text-[10px] font-semibold text-outline">实时公式渲染预览：</div>
+                  {editingBoardText.split('\n').filter(Boolean).map((line, idx) => (
+                    <div key={idx} className="text-[13px] font-serif text-primary flex items-center gap-1.5 py-0.5">
+                      <span className="text-[10px] text-outline font-mono select-none">{idx + 1}.</span>
+                      {/\$([^\$]+)\$/.test(line) ? (
+                        <span>
+                          {line.split(/(\$[^\$]+\$)/).map((part, pIdx) => {
+                            if (part.startsWith('$') && part.endsWith('$')) {
+                              return <KatexInline key={pIdx} math={part.slice(1, -1)} />;
+                            }
+                            return <span key={pIdx} className="font-sans text-stone-700 text-[12px]">{part}</span>;
+                          })}
+                        </span>
+                      ) : (
+                        <KatexInline math={line} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="text-[11px] text-stone-500 bg-surface-container-low/60 rounded-lg p-2.5 flex items-start gap-2 border border-outline-variant/20">
+                <span className="material-symbols-outlined text-[15px] text-primary shrink-0 mt-0.5">verified_user</span>
+                <div className="leading-normal">
+                  <strong>先读后写规则保障：</strong>您在此处手动修正或补充的内容，将作为当前草稿纸的【唯一真实事实】同步至 Agent。Agent 在执行下一步前必须先阅读此内容，绝不推翻您的手动修改。
+                </div>
+              </div>
+            </div>
+
+            {/* 模态框底部按钮 */}
+            <div className="px-4 py-2.5 bg-surface-container-low border-t border-outline-variant/30 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setEditingBoardText('')}
+                className="px-2.5 py-1 text-[11px] text-outline hover:text-error transition cursor-pointer"
+              >
+                清空内容
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingBoardElement(null)}
+                  className="px-3 py-1.5 rounded-lg border border-outline-variant/60 text-[12px] font-medium text-stone-700 hover:bg-surface-container transition cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditedBoard}
+                  className="px-4 py-1.5 rounded-lg bg-primary text-white text-[12px] font-semibold hover:bg-primary/90 shadow-xs transition cursor-pointer flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-[14px]">save</span>
+                  <span>保存并同步草稿</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2659,7 +3014,9 @@ export default function ScratchpadCanvas({
               element={el}
               tool={tool}
               onUpdatePosition={handleUpdateElementPosition}
+              onUpdateSize={handleUpdateElementSize}
               onDelete={handleDeleteElement}
+              onOpenEditor={handleOpenBoardEditor}
               drawActions={drawActionsOnCanvas}
             />
           ))}

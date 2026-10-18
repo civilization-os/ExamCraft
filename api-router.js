@@ -3051,12 +3051,25 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
      - 三维几何图形：\`{"type": "shape3d", "shapeType": "circle"|"square", "plane": "xy"|"xz"|"yz", "color": "#1d4ed8"}\`
      - 删除图元：\`{"type": "delete_element", "targetElementId": "已有图元ID"}\`
 
+   - 【板书尺寸与字号缩放指令（当考生要求调大、拉宽、缩小、放大字号时）】：
+     - 当考生口述要求“把板书调大一点/放大”、“把板书拉宽”、“字号调大”、“缩小板书”、“字太小了”等尺寸调整需求时，在 update_element 动作中输出 width 或 scale 参数：
+       - 拉宽/变大卡片：\`{"type": "update_element", "targetElementId": "已有板书ID", "width": 660}\`（建议宽度 480~750px）
+       - 缩放/字号调整：\`{"type": "update_element", "targetElementId": "已有板书ID", "scale": 1.25}\`（缩放系数：0.8x~1.5x，默认 1.0）
+       - 同时调整：\`{"type": "update_element", "targetElementId": "已有板书ID", "width": 680, "scale": 1.2}\`
+
 4. 【绝对交流禁令（彻底消除官僚甩锅与长篇说教）】：
    - 严禁任何形式的推诿或自证：“当前板书是严格按照您上一句口述记录的”、“我先如实汇报现在板上的情况”、“为避免又改错我不擅自增删”、“请您再口述一次准确式子”等官僚话术【一律绝对禁止】！
    - 严禁在聊天区与考生辩论对线，严禁长篇大论！
    - 面对考生的任何意见、疑问、指责或质问：
      ① 第一准则：动手改板！永远通过 canvasActions 在画板上落实修改，行动大于语言！
-     ② 聊天回复（chatResponse）必须极度简短温和，严格控制在 1-2 句话、20字以内（例如：“好的，已为您将 $\\cos y$ 等式代入分母。”、“已修复末尾格式。”、“已去除多余推导。”）。`;
+     ② 聊天回复（chatResponse）必须极度简短温和，严格控制在 1-2 句话、20字以内（例如：“好的，已为您将 $\\cos y$ 等式代入分母。”、“已修复末尾格式。”、“已去除多余推导。”）。
+
+5. 【强制先读后写铁律（Read-Before-Write，画板随时可能被考生手动修改或重写）】：
+   - 【极端重要背景】：考生的草稿板随时可能已经被考生本人在画板上手动修改、直接打字编辑、删减或重排过！
+   - 每次处理指令时，你的第一步【必须且强制】先通读【考生当前草稿板已有内容】的最新实时文本：
+     ① 必须以当前收到的最新草稿板内容为唯一事实依据，绝不能凭上几轮对话的历史记忆自行脑补！
+     ② 哪怕考生在草稿板上手动把公式改了、删除了某几行、或者添加了新式子，你必须无条件接受当前画板的新状态，并在其基础上顺承推演或按需更新。
+     ③ 在输出的 loopLogs 第一条必须体现阅读结论（例如："Loop 1: 已通读画板最新状态，检测到当前板书包含3行推导，最后一式为..."）。`;
 
   const equivalencePool = extractBoardEquivalencePool(currentBoardContent);
   const substitutionResolution = resolveEquivalenceSubstitution(spokenText, currentBoardContent);
