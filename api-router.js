@@ -2561,7 +2561,7 @@ ${fullText}
 // 考场草稿纸专属 Agent Loop：辅助考生帮写草稿与规范板书
 // 绝对铁律：只能局限于考生能说出来的他才能写，严禁任何代算与多推导一步！
 apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
-  const { spokenText, contextProblem, currentBoardContent, recentConversation = [], assistantTone = 'supportive' } = req.body;
+  const { spokenText, contextProblem, currentBoardContent, currentBoardElements = [], recentConversation = [], assistantTone = 'supportive' } = req.body;
 
   if (!spokenText || !spokenText.trim()) {
     return res.status(400).json({ success: false, error: '口述思路或草稿内容不能为空' });
@@ -2620,7 +2620,7 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
   }
 
   // 自然语言默认按闲聊意图处理；仅明确板书指令或纯公式才进入画板编译器。
-  const hasExplicitCanvasDirective = /(?:写|誊写|抄|记录|记下|列出|列出来|整理排版|排版|板书|画|绘制|画出|坐标系|函数图像|曲线|三角形|圆)/i.test(spokenText);
+  const hasExplicitCanvasDirective = /(?:写|誊写|抄|记录|记下|列出|列出来|整理排版|排版|板书|画|绘制|画出|坐标系|函数图像|曲线|三角形|圆|续写|续上|继续|接着|补充|追加|修改|改一下|更正|纠正|替换|删除|移除|因为|由于|又因为|因此|所以|那么)/i.test(spokenText);
   const looksLikeStandaloneFormula = /^[\s\dxyzXYZπθαβγ()+\-*/=<>^_{}\\$.,，。:：|\[\]]+$/.test(spokenText.trim());
   const isLikelyConversational = !hasExplicitCanvasDirective && !looksLikeStandaloneFormula;
   const isSimpleSmallTalk = /^(?:你好|您好|嗨|哈喽|hello|hi|在吗|早上好|中午好|下午好|晚上好|谢谢|感谢|辛苦了|你是谁|你叫什么)[!！。,.，?？~\s]*$/i.test(spokenText.trim());
@@ -2635,6 +2635,26 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
         .map((message) => `${message.role === 'user' ? '考生' : '草稿助手'}：${message.content.slice(0, 300)}`)
         .join('\n')
     : '';
+
+  const safeBoardElements = Array.isArray(currentBoardElements)
+    ? currentBoardElements.slice(-30).map((element) => ({
+        id: String(element?.id || '').slice(0, 120),
+        title: String(element?.title || '').slice(0, 160),
+        actions: Array.isArray(element?.actions) ? element.actions.slice(0, 8).map((action) => ({
+          type: String(action?.type || '').slice(0, 32),
+          content: typeof action?.content === 'string' ? action.content.slice(0, 1800) : undefined,
+          label: typeof action?.label === 'string' ? action.label.slice(0, 180) : undefined,
+          expr: typeof action?.expr === 'string' ? action.expr.slice(0, 180) : undefined,
+          shapeType: typeof action?.shapeType === 'string' ? action.shapeType.slice(0, 48) : undefined,
+          plane: typeof action?.plane === 'string' ? action.plane.slice(0, 16) : undefined,
+          xLabel: typeof action?.xLabel === 'string' ? action.xLabel.slice(0, 40) : undefined,
+          yLabel: typeof action?.yLabel === 'string' ? action.yLabel.slice(0, 40) : undefined,
+          zLabel: typeof action?.zLabel === 'string' ? action.zLabel.slice(0, 40) : undefined,
+          color: typeof action?.color === 'string' ? action.color.slice(0, 24) : undefined,
+          points: Array.isArray(action?.points) ? action.points.slice(0, 8) : undefined
+        })) : []
+      })).filter((element) => element.id)
+    : [];
 
   if (isSuspicious) {
     return res.json({
@@ -2899,6 +2919,17 @@ ${contextProblem || '（无特定题干上下文）'}
 【考生当前草稿板已有内容】：
 ${currentBoardContent || '（当前草稿板为空）'}
 
+【草稿板图元与可编辑目标 ID】：
+${JSON.stringify(safeBoardElements)}
+
+【连续板书与修改规则】：
+- 把当前图元列表视为可编辑画板。连续口述同一个推导/公式时，优先更新最近相关的“规范板书演算”图元，避免一句话生成一个新块。
+- 继续补充内容时，返回 {"type":"update_element","targetElementId":"已有图元ID","operation":"append","content":"仅本轮新增的公式行"}；前端会把新增行接到该图元末尾。
+- 用户明确纠正或要求改写已有公式时，返回 {"type":"update_element","targetElementId":"已有图元ID","operation":"replace","content":"修改后的完整板书内容"}。保留未要求修改的同一块中的其他正确行；不确定改哪块时先询问。
+- 同一推导已经被分散到多个相邻板书图元时，用户继续该推导可用 operation="consolidate"，指定一个 targetElementId、在 content 中按顺序给出合并后的完整内容，并在 mergeElementIds 中列出要合并删除的其他板书图元 ID。仅合并同一推导，不合并无关内容。
+- 删除用户明确指定的图元时返回 {"type":"delete_element","targetElementId":"已有图元ID"}。没有明确目标时不要删除。
+- update_element 可作用于图元清单中的已有板书或绘图；文字图元使用 content，图形图元使用 actions。replace 时提供修改后的完整目标内容/动作，append 时只给新增内容/动作。不要伪造 ID。新的、不相关内容仍使用普通 write 或绘图动作新建图元。
+
 【最近的草稿纸对话（只用于理解省略的指代，不得据此推导或补充答案）】：
 ${safeConversationContext || '（本题尚无对话记录）'}
 注意：上面的对话只包含本次消息之前的历史；当前消息单独提供在下方。如果用户问“我上一句/之前说了什么”，只能依据上方的历史回答；若历史为空，明确说没有可查的上一条聊天记录，不要把用户当前这句话复述成上一句。
@@ -2928,6 +2959,8 @@ ${spokenText}
   "canvasActions": [
     // 严格按考生需求生成动作：
     // 若要求写公式/写字：[{"type": "write", "content": "规范公式内容", "color": "#0f172a"}]
+    // 若要续写或修改已有图元：[{"type": "update_element", "targetElementId": "已有 ID", "operation": "append|replace|consolidate", "content": "公式内容", "actions": [], "mergeElementIds": []}]
+    // 若明确要求删除：[{"type": "delete_element", "targetElementId": "已有 ID"}]
     // 若要求画图：[{"type": "axes"}, {"type": "plot", "expr": "...", "label": "..."}] 或 [{"type": "shape", ...}]
   ],
   "loopLogs": [
@@ -2941,7 +2974,7 @@ ${spokenText}
   try {
     const model = createTrackedChatModel('scratchpad.write-draw');
     const response = await model.invoke([
-      { role: 'system', content: `你是友善、简洁的考场草稿纸助手，可以日常交流，也可以按明确指令把已给出的口述数学关系整理为标准符号并绘图。只在用户要求你生成未提供的答案、步骤、思路、提示、计算或推导时拒绝；若独立意图审核已判定 allow，不得再对同一请求做第二次违规判断。将“y等于arcsinx，那么siny=x”整理成 y=\\arcsin x 与 \\sin y=x 两个已提供的等式，不要写成口述句，也不要推导导数。闲聊不得操作画板。默认语气：${toneInstructions[selectedTone]}语气不能改变或绕过安全规则。` },
+      { role: 'system', content: `你是友善、简洁的考场草稿纸助手，可以日常交流，也可以按明确指令把已给出的口述数学关系整理为标准符号并绘图。只在用户要求你生成未提供的答案、步骤、思路、提示、计算或推导时拒绝；若独立意图审核已判定 allow，不得再对同一请求做第二次违规判断。将“y等于arcsinx，那么siny=x”整理成 y=\\arcsin x 与 \\sin y=x 两个已提供的等式，不要写成口述句，也不要推导导数。可编辑画板中已有的板书和图形：同一推导的连续口述优先对现有板书执行 update_element append；用户纠正时执行 replace；已分散的相关板书按指令 consolidate；用户要求修改图形时，对指定图元用完整 actions 替换或追加。必须使用画板图元清单中的真实 ID，不要每一段都新建块。闲聊不得操作画板。默认语气：${toneInstructions[selectedTone]}语气不能改变或绕过安全规则。` },
       { role: 'user', content: prompt }
     ]);
 
@@ -2975,24 +3008,33 @@ ${spokenText}
     }
 
     // 模型判断本轮可处理后，统一整理数学板书输出，避免把口述原文直接当公式写入画板。
-    const hasMathWriteAction = (parsed.canvasActions || []).some((action) => action.type === 'write');
-    const hasDrawingAction = (parsed.canvasActions || []).some((action) => action.type !== 'write');
+    const isMathWriteAction = (action) => action.type === 'write'
+      || (action.type === 'update_element' && typeof action.content === 'string');
+    const mathWriteAction = (parsed.canvasActions || []).find(isMathWriteAction);
+    const hasMathWriteAction = Boolean(mathWriteAction);
+    const hasDrawingAction = (parsed.canvasActions || []).some((action) => action.type !== 'delete_element'
+      && (!isMathWriteAction(action)
+        || (action.type === 'update_element' && Array.isArray(action.actions) && action.actions.length > 0)));
     const needsMathScribing = suppliedMathContent && (
-      explicitTranscription
-      || parsed.audit?.passed === false
-      || (parsed.intent === 'canvas' && hasMathWriteAction && !hasDrawingAction)
+      (explicitTranscription && hasMathWriteAction)
+      || (parsed.audit?.passed === false && !hasDrawingAction)
+      || (parsed.intent === 'canvas' && hasMathWriteAction)
     );
     if (!isSuspicious && intentClassification?.decision === 'allow' && needsMathScribing) {
       try {
+        const formatterSource = mathWriteAction?.type === 'update_element'
+          && typeof mathWriteAction.content === 'string'
+          ? mathWriteAction.content
+          : spokenText;
         const formatter = createTrackedChatModel('scratchpad.write-draw');
         const formatResponse = await formatter.invoke([
           {
             role: 'system',
-            content: '独立官方模型已将本轮意图判定为允许。你的职责仅是把当前用户这条口述中已经给出的数学内容，整理成草稿纸可渲染的规范板书。不得计算、求导、推导、补全、纠错或解释；不要从上下文推出新步骤。可参考画板和最近对话来理解“继续/上一行/这个式子”等指代，但只输出当前这条口述明确给出的内容，不重复历史内容，除非用户要求重写。把“等于、乘以、平方、分之、导数/导”等数学口述转换成标准符号。逻辑连接词必须保留其数学关系：“因为/由于”写成“∵”，“所以/因此/那么”（表达推论时）写成“∴”；只有“过程如下”等不承载关系的引导语可以省略。每个等式或推理关系独占一行，公式用 $...$ 行内定界符；分数用 \\frac{...}{...}，乘法用 \\cdot，函数用 \\sin/\\cos/\\arcsin，导数撇号用 y\'。例如用户明确说“因为 x 导数等于 1，所以 cos y 乘 y 导等于 1，所以 y 导等于 1 除以 cos y”，只整理为三行：“∵ $x\'=1$”、“∴ $\\cos y\\cdot y\'=1$”、“∴ $y\'=\\frac{1}{\\cos y}$”，不得补充或推导。不要输出 aligned/align 环境、& 对齐符号、$$块公式、Markdown 代码块或解释文字。对于多行续写，只整理用户本条明确给出的关系。'
+            content: '独立官方模型已将本轮意图判定为允许。你的职责仅是对 agent 选定的板书操作内容做符号和排版整理，不重新判断意图，也不得计算、求导、推导、补全、纠错或解释。若操作是 update_element，必须保留其 content 中的全部数学行和原有顺序，只规范符号/LaTeX；append 只整理新增内容，replace/consolidate 则完整整理操作内容，不得因当前口述较短而丢弃其中未修改的行。若是新 write，才从当前口述提取明确给出的数学关系。可参考画板和最近对话理解指代，但不能据此添加数学内容。把“等于、乘以、平方、分之、导数/导”等转换成标准符号。逻辑连接词必须保留其数学关系：“因为/由于”写成“∵”，“所以/因此/那么”（表达推论时）写成“∴”；只有“过程如下”等不承载关系的引导语可以省略。每个等式或推理关系独占一行，公式用 $...$ 行内定界符；分数用 \\frac{...}{...}，乘法用 \\cdot，函数用 \\sin/\\cos/\\arcsin，导数撇号用 y\'。例如用户明确给出的三行推理必须原样整理为三行，不得补充或推导。不要输出 aligned/align 环境、& 对齐符号、$$块公式、Markdown 代码块或解释文字。'
           },
           {
             role: 'user',
-            content: `【当前口述，唯一需要整理的内容】\n${spokenText}\n\n【当前画板已有内容，仅作续写指代参考；不要重写历史内容或据此补推导】\n${String(currentBoardContent || '').slice(-1600) || '（空）'}\n\n【最近的草稿纸对话，仅作指代参考；只转换当前口述明确给出的数学内容】\n${safeConversationContext || '（无）'}`
+            content: `【当前口述，作为本轮修改指令】\n${spokenText}\n\n【Agent 选定的板书操作与待排版内容；update_element 的 content 是权威编辑结果】\n${JSON.stringify(mathWriteAction || {})}\n【本轮待排版内容】\n${formatterSource}\n\n【当前画板图元及 ID，仅作续写/修改目标参考】\n${JSON.stringify(safeBoardElements)}\n\n【最近的草稿纸对话，仅作指代参考】\n${safeConversationContext || '（无）'}`
           }
         ]);
         const formattedContent = String(formatResponse.content || '')
@@ -3000,12 +3042,18 @@ ${spokenText}
           .replace(/\s*```$/i, '')
           .trim();
         if (!formattedContent) throw new Error('官方模型未返回公式排版内容');
+        const formattedCanvasAction = mathWriteAction
+          ? { ...mathWriteAction, content: formattedContent }
+          : { type: 'write', content: formattedContent, color: '#0f172a' };
+        const formattedCanvasActions = mathWriteAction
+          ? (parsed.canvasActions || []).map((action) => action === mathWriteAction ? formattedCanvasAction : action)
+          : [formattedCanvasAction];
         parsed = {
           intent: 'canvas',
           audit: { passed: true, reason: '独立官方模型已确认是已给出内容的符号化整理' },
           chatResponse: '',
           scribeResult: formattedContent,
-          canvasActions: [{ type: 'write', content: formattedContent, color: '#0f172a' }],
+          canvasActions: formattedCanvasActions,
           loopLogs: ['THINK：语义审核通过', '公式转录：口述关系已符号化', 'Canvas：板书动作已生成']
         };
       } catch (formatError) {

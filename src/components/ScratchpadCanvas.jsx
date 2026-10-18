@@ -1783,6 +1783,23 @@ export default function ScratchpadCanvas({
           spokenText: textToRun,
           contextProblem: contextProblem,
           currentBoardContent: elements.flatMap((element) => (element.actions || []).map((action) => action.content || action.label || '')).filter(Boolean).join('\n').slice(-2000),
+          currentBoardElements: elements.slice(-30).map((element) => ({
+            id: element.id,
+            title: element.title,
+            actions: (element.actions || []).slice(0, 8).map((action) => ({
+              type: action.type,
+              content: typeof action.content === 'string' ? action.content.slice(0, 1800) : undefined,
+              label: typeof action.label === 'string' ? action.label.slice(0, 180) : undefined,
+              expr: typeof action.expr === 'string' ? action.expr.slice(0, 180) : undefined,
+              shapeType: action.shapeType,
+              plane: action.plane,
+              xLabel: action.xLabel,
+              yLabel: action.yLabel,
+              zLabel: action.zLabel,
+              color: action.color,
+              points: Array.isArray(action.points) ? action.points.slice(0, 8) : undefined
+            }))
+          })),
           recentConversation: priorConversation,
           assistantTone: (() => {
             try { return localStorage.getItem('examcraft_scratchpad_agent_tone') || 'supportive'; }
@@ -1839,7 +1856,74 @@ export default function ScratchpadCanvas({
         // 1. 将 AI 绘图动作写入草稿图元；后续函数图像优先叠加到已有坐标系。
         if (agentData.canvasActions && agentData.canvasActions.length > 0) {
           const acts = agentData.canvasActions;
+          const editActions = acts.filter((action) => action.type === 'update_element' || action.type === 'delete_element');
+          if (editActions.length) {
+            setElements((previous) => {
+              let next = [...previous];
+              for (const edit of editActions) {
+                const targetIndex = next.findIndex((element) => element.id === edit.targetElementId);
+                if (targetIndex < 0) continue;
+                const target = next[targetIndex];
+                if (edit.type === 'delete_element') {
+                  next = next.filter((element) => element.id !== target.id);
+                  continue;
+                }
+                const operation = ['append', 'replace', 'consolidate'].includes(edit.operation) ? edit.operation : 'append';
+                const isWriteElement = (target.actions || []).some((action) => action.type === 'write')
+                  && (target.actions || []).every((action) => action.type === 'write');
+                if (isWriteElement && typeof edit.content === 'string' && edit.content.trim()) {
+                  const existingWrite = target.actions.find((action) => action.type === 'write');
+                  const oldContent = String(existingWrite?.content || '');
+                  let content = edit.content.trim();
+                  if (operation === 'append') {
+                    const existingLines = new Set(oldContent.split('\n').map((line) => line.trim()).filter(Boolean));
+                    const newLines = content.split('\n').map((line) => line.trim()).filter((line) => line && !existingLines.has(line));
+                    if (!newLines.length) continue;
+                    content = [oldContent.trim(), ...newLines].filter(Boolean).join('\n');
+                  }
 
+                  const writeIndex = target.actions.findIndex((action) => action.type === 'write');
+                  const updatedActions = target.actions.map((action, index) => index === writeIndex
+                    ? { ...action, content }
+                    : action);
+                  const lineCount = content.split('\n').length;
+                  next[targetIndex] = {
+                    ...target,
+                    actions: updatedActions,
+                    height: Math.max(120, Math.min(680, lineCount * 32 + 55)),
+                    updatedAt: Date.now()
+                  };
+                } else if (Array.isArray(edit.actions) && edit.actions.length) {
+                  const editableTypes = new Set(['write', 'axes', 'axes3d', 'plot', 'shape', 'shape3d', 'circle']);
+                  const safeActions = edit.actions.filter((action) => editableTypes.has(action?.type));
+                  if (!safeActions.length) continue;
+                  next[targetIndex] = {
+                    ...target,
+                    title: typeof edit.title === 'string' ? edit.title.slice(0, 100) : target.title,
+                    actions: operation === 'append' ? [...(target.actions || []), ...safeActions] : safeActions,
+                    updatedAt: Date.now()
+                  };
+                } else {
+                  continue;
+                }
+
+                if (operation === 'consolidate' && isWriteElement && Array.isArray(edit.mergeElementIds)) {
+                  const mergeableIds = new Set(next
+                    .filter((element) => element.id !== target.id
+                      && edit.mergeElementIds.includes(element.id)
+                      && (element.actions || []).some((action) => action.type === 'write')
+                      && (element.actions || []).every((action) => action.type === 'write'))
+                    .map((element) => element.id));
+                  if (mergeableIds.size) next = next.filter((element) => !mergeableIds.has(element.id));
+                }
+              }
+              return next;
+            });
+          }
+
+          const actionsToCreate = acts.filter((action) => action.type !== 'update_element' && action.type !== 'delete_element');
+          if (actionsToCreate.length) {
+            const acts = actionsToCreate;
           if (replacesExistingAxes) {
             upgradedExistingAxes = true;
             const axisOnlyElementIds = new Set(elements
@@ -1991,7 +2075,7 @@ export default function ScratchpadCanvas({
             const lineCount = (writeAct?.content || '').split('\n').length;
             elemTitle = '📝 规范板书演算';
             elemWidth = Math.min(340, maxZoneW);
-            elemHeight = Math.max(120, Math.min(340, lineCount * 32 + 55));
+            elemHeight = Math.max(120, Math.min(680, lineCount * 32 + 55));
           }
 
           // 精准分区寻址（画图归 1 区，写公式归 2 区，0 重叠）
@@ -2012,11 +2096,14 @@ export default function ScratchpadCanvas({
 
           setElements((prev) => [...prev, newElem]);
           }
+          }
         }
 
         const actionTypes = new Set((agentData.canvasActions || []).map((action) => action.type));
         const details = [];
         if (actionTypes.has('write')) details.push('已誊写到草稿纸');
+        if (actionTypes.has('update_element')) details.push('已续写或修改板书');
+        if (actionTypes.has('delete_element')) details.push('已删除指定板书');
         if (actionTypes.has('axes3d')) details.push(upgradedExistingAxes ? '已将现有坐标系更新为三维' : '已绘制三维坐标系');
         else if (actionTypes.has('axes') && !attachToExistingAxes) details.push('已添加坐标系');
         if (actionTypes.has('plot')) details.push(detachedExistingPlot ? '已将函数图像从原坐标系拆出' : attachToExistingAxes ? '已叠加到现有坐标系' : requestsSeparateDrawing ? '已单独绘制函数图像' : '已绘制函数图像');
