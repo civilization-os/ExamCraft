@@ -1835,32 +1835,10 @@ export default function ScratchpadCanvas({
       } else {
         setAgentLoopStage('THINK · 正在同步画板…');
         const incomingActions = agentData.canvasActions || [];
-        const onlyPlotActions = incomingActions.length > 0 && incomingActions.every((action) => action.type === 'plot');
-        const incomingHasPlot = incomingActions.some((action) => action.type === 'plot');
-        const incomingHas3DAxes = incomingActions.some((action) => action.type === 'axes3d');
-        const incomingIsOnlyPlotOrAxes = incomingActions.every((action) => action.type === 'plot' || action.type === 'axes' || action.type === 'axes3d');
-        const refersToExistingDrawing = /在(?:这个|该|当前|已有|上面|刚才的?)?(?:坐标系|图|曲线)(?:上|中|内)?|在(?:其|它)上|接着画|继续画/i.test(textToRun);
-        const requestsSeparateDrawing = /单独|独立|分开|另画|另起|不要叠加|不要画在/i.test(textToRun);
-        const requestsDetachDrawing = /移出|拆出|拆分|从.{0,8}(?:图|坐标系|曲线).{0,5}分开|单独移动出来/i.test(textToRun);
-        let detachedExistingPlot = false;
-        let upgradedExistingAxes = false;
-        let existingAxesIndex = -1;
-        for (let index = elements.length - 1; index >= 0; index -= 1) {
-          if ((elements[index].actions || []).some((action) => action.type === 'axes' || action.type === 'axes3d')) {
-            existingAxesIndex = index;
-            break;
-          }
-        }
-        const existingAxesId = existingAxesIndex >= 0 ? elements[existingAxesIndex].id : null;
-        const replacesExistingAxes = incomingHas3DAxes && existingAxesIndex >= 0 && !requestsSeparateDrawing;
-        const attachToExistingAxes = incomingHasPlot && existingAxesIndex >= 0 && (
-          !requestsSeparateDrawing && (onlyPlotActions || (incomingIsOnlyPlotOrAxes && refersToExistingDrawing))
-        );
 
-        // 1. 将 AI 绘图动作写入草稿图元；后续函数图像优先叠加到已有坐标系。
-        if (agentData.canvasActions && agentData.canvasActions.length > 0) {
-          const acts = agentData.canvasActions;
-          const editActions = acts.filter((action) => action.type === 'update_element' || action.type === 'delete_element');
+        // 1. 先由 editActions 处理 update_element 与 delete_element（由 AI 明确指定 targetElementId 进行精准增改删）
+        if (incomingActions.length > 0) {
+          const editActions = incomingActions.filter((action) => action.type === 'update_element' || action.type === 'delete_element');
           if (editActions.length) {
             setElements((previous) => {
               let next = [...previous];
@@ -1894,21 +1872,31 @@ export default function ScratchpadCanvas({
                   next[targetIndex] = {
                     ...target,
                     actions: updatedActions,
-                    height: Math.max(120, Math.min(680, lineCount * 32 + 55)),
+                    height: Math.max(130, Math.min(720, lineCount * 36 + 60)),
                     updatedAt: Date.now()
                   };
                 } else if (Array.isArray(edit.actions) && edit.actions.length) {
                   const editableTypes = new Set(['write', 'axes', 'axes3d', 'plot', 'shape', 'shape3d', 'circle']);
                   const safeActions = edit.actions.filter((action) => editableTypes.has(action?.type));
                   if (!safeActions.length) continue;
+
+                  let newTitle = typeof edit.title === 'string' ? edit.title.slice(0, 100) : target.title;
+                  if (operation === 'append' && safeActions.some((a) => a.type === 'plot') && !edit.title) {
+                    const allPlotLabels = [...(target.actions || []), ...safeActions]
+                      .filter((a) => a.type === 'plot')
+                      .map((a) => formatMathExpression(a.label || a.expr || ''))
+                      .filter(Boolean);
+                    if (allPlotLabels.length) {
+                      newTitle = `📈 坐标系 · ${allPlotLabels.join(' & ')}`;
+                    }
+                  }
+
                   next[targetIndex] = {
                     ...target,
-                    title: typeof edit.title === 'string' ? edit.title.slice(0, 100) : target.title,
+                    title: newTitle,
                     actions: operation === 'append' ? [...(target.actions || []), ...safeActions] : safeActions,
                     updatedAt: Date.now()
                   };
-                } else {
-                  continue;
                 }
 
                 if (operation === 'consolidate' && isWriteElement && Array.isArray(edit.mergeElementIds)) {
@@ -1925,196 +1913,106 @@ export default function ScratchpadCanvas({
             });
           }
 
-          const actionsToCreate = acts.filter((action) => action.type !== 'update_element' && action.type !== 'delete_element');
+          // 2. 处理 actionsToCreate：由 AI 明确指示新建的独立图元动作，不依靠前端正则二次猜测
+          const actionsToCreate = incomingActions.filter((action) => action.type !== 'update_element' && action.type !== 'delete_element');
           if (actionsToCreate.length) {
-            const acts = actionsToCreate;
-          if (replacesExistingAxes) {
-            upgradedExistingAxes = true;
-            const axisOnlyElementIds = new Set(elements
-              .filter((element) => element.id !== existingAxesId
-                && (element.actions || []).length > 0
-                && element.actions.every((action) => action.type === 'axes' || action.type === 'axes3d'))
-              .map((element) => element.id));
-            setElements((previous) => previous
-              .filter((element) => !axisOnlyElementIds.has(element.id))
-              .map((element) => element.id === existingAxesId
-                ? {
-                    ...element,
-                    title: '📐 三维坐标系',
-                    actions: [
-                      ...(element.actions || []).filter((action) => action.type !== 'axes' && action.type !== 'axes3d'),
-                      ...acts.filter((action) => action.type === 'axes3d'),
-                      ...acts.filter((action) => action.type !== 'axes' && action.type !== 'axes3d')
-                    ],
-                    updatedAt: Date.now()
-                  }
-                : element));
-          } else if (requestsDetachDrawing && incomingHasPlot && existingAxesIndex >= 0) {
-            const plotActions = acts.filter((action) => action.type === 'plot');
-            const normalizeExpr = (value) => String(value || '').toLowerCase()
-              .replace(/\\(?:left|right)\s*/g, '')
-              .replace(/\s+/g, '')
-              .replace(/^y=/, '')
-              .replace(/[{}$]/g, '');
-            const sourceAxes = elements[existingAxesIndex];
-            const sourcePlots = (sourceAxes.actions || []).filter((action) => action.type === 'plot');
-            const requestedExprs = new Set(plotActions.map((action) => normalizeExpr(action.expr || action.label)));
-            let plotsToDetach = sourcePlots.filter((action) => requestedExprs.has(normalizeExpr(action.expr || action.label)));
-            if (!plotsToDetach.length && sourcePlots.length === 1) plotsToDetach = sourcePlots;
-
-            if (plotsToDetach.length) {
-              detachedExistingPlot = true;
-              const detachedElementWidth = 310;
-              const detachedElementHeight = 270;
-              const position = findNextAvailablePosition(detachedElementWidth, detachedElementHeight, 'draw');
-              const detachedElement = {
-                id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                title: `📈 独立函数图像: ${formatMathExpression(plotActions[0]?.label || plotActions[0]?.expr || '')}`,
-                x: position.x,
-                y: position.y,
-                width: detachedElementWidth,
-                height: detachedElementHeight,
-                actions: plotActions,
-                zone: 'draw',
-                detachedFromAxes: true,
-                createdAt: Date.now()
-              };
-              setElements((previous) => [
-                  ...previous.map((element) => element.id === existingAxesId
-                  ? {
-                      ...element,
-                      title: '📈 直角坐标系',
-                      actions: (element.actions || []).filter((action) => !plotsToDetach.includes(action)),
-                      updatedAt: Date.now()
-                    }
-                  : element),
-                detachedElement
-              ]);
-            } else {
-              showToast('没有在已有坐标系中找到可拆分的对应曲线，已为你单独新建图像。', 'info');
-              const detachedElementWidth = 310;
-              const detachedElementHeight = 270;
-              const position = findNextAvailablePosition(detachedElementWidth, detachedElementHeight, 'draw');
-              setElements((previous) => [...previous, {
-                id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                title: `📈 独立函数图像: ${formatMathExpression(plotActions[0]?.label || plotActions[0]?.expr || '')}`,
-                x: position.x,
-                y: position.y,
-                width: detachedElementWidth,
-                height: detachedElementHeight,
-                actions: plotActions,
-                zone: 'draw',
-                detachedFromAxes: true,
-                createdAt: Date.now()
-              }]);
+            let elemActs = actionsToCreate;
+            // 确保新建的函数曲线具备直角坐标系
+            if (elemActs.some((a) => a.type === 'plot') && !elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d')) {
+              elemActs = [{ type: 'axes', xLabel: 'x', yLabel: 'y' }, ...elemActs];
             }
-          } else if (attachToExistingAxes) {
-            const plotLabel = acts.find((action) => action.type === 'plot')?.label;
-            setElements((previous) => previous.map((element) => element.id === existingAxesId
-              ? {
-                  ...element,
-                  title: plotLabel ? `📈 坐标系 · ${formatMathExpression(plotLabel)}` : '📈 坐标系与函数图像',
-                  actions: [...(element.actions || []), ...acts.filter((action) => action.type !== 'axes')],
-                  updatedAt: Date.now()
-                }
-              : element));
-          } else {
-          let elemTitle = '草稿演算图元';
 
-          const hasPlot = acts.some(a => a.type === 'plot');
-          const hasAxes = acts.some(a => a.type === 'axes' || a.type === 'axes3d');
-          const has3DAxes = acts.some(a => a.type === 'axes3d');
-            const hasShape = acts.some(a => a.type === 'shape' || a.type === 'shape3d');
-          const hasWrite = acts.some(a => a.type === 'write');
-          const isCircleAct = acts.some(
-            (a) =>
-              a.type === 'circle' ||
-              (a.type === 'shape' &&
-                (a.shapeType === 'circle' ||
-                  a.shapeType === 'round' ||
-                  String(a.shapeType || '').includes('圆')))
-          );
+            let elemTitle = '草稿演算图元';
+            const hasPlot = elemActs.some((a) => a.type === 'plot');
+            const hasAxes = elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d');
+            const has3DAxes = elemActs.some((a) => a.type === 'axes3d');
+            const hasShape = elemActs.some((a) => a.type === 'shape' || a.type === 'shape3d');
+            const hasWrite = elemActs.some((a) => a.type === 'write');
+            const isCircleAct = elemActs.some(
+              (a) =>
+                a.type === 'circle' ||
+                (a.type === 'shape' &&
+                  (a.shapeType === 'circle' ||
+                    a.shapeType === 'round' ||
+                    String(a.shapeType || '').includes('圆')))
+            );
 
-          // 核心判定：这是画图还是写公式？
-          const isDraw = hasPlot || hasAxes || hasShape || isCircleAct;
-          const targetZone = isDraw ? 'draw' : 'formula';
+            const isDraw = hasPlot || hasAxes || hasShape || isCircleAct;
+            const targetZone = isDraw ? 'draw' : 'formula';
 
-          const containerW = containerRef.current?.clientWidth || 700;
-          const midX = Math.floor(containerW / 2);
-          const maxZoneW = Math.max(200, (isDraw ? midX : containerW - midX) - 36);
+            const containerW = containerRef.current?.clientWidth || 700;
+            const midX = Math.floor(containerW / 2);
+            const maxZoneW = Math.max(200, (isDraw ? midX : containerW - midX) - 36);
 
-          let elemWidth = Math.min(320, maxZoneW);
-          let elemHeight = 270;
+            let elemWidth = Math.min(320, maxZoneW);
+            let elemHeight = 270;
 
-          if (isCircleAct) {
-            elemTitle = '⭕ 几何图形: 圆 O 与半径 r';
-            elemWidth = Math.min(270, maxZoneW);
-            elemHeight = 250;
-          } else if (hasPlot) {
-            const plotAct = acts.find((a) => a.type === 'plot');
-            const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
-            elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
-            elemWidth = Math.min(310, maxZoneW);
-            elemHeight = 270;
-          } else if (has3DAxes) {
-            elemTitle = '📐 三维坐标系';
-            elemWidth = Math.min(320, maxZoneW);
-            elemHeight = 290;
-          } else if (hasAxes) {
-            elemTitle = '📈 直角坐标系';
-            elemWidth = Math.min(300, maxZoneW);
-            elemHeight = 270;
-          } else if (hasShape) {
-            const shapeAct = acts.find((a) => a.type === 'shape');
-            const shapeNameMap = {
-              right_triangle: '直角三角形',
-              circle: '圆形与半径',
-              triangle: '三角形'
+            if (isCircleAct) {
+              elemTitle = '⭕ 几何图形: 圆 O 与半径 r';
+              elemWidth = Math.min(270, maxZoneW);
+              elemHeight = 250;
+            } else if (hasPlot) {
+              const plotAct = elemActs.find((a) => a.type === 'plot');
+              const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
+              elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
+              elemWidth = Math.min(310, maxZoneW);
+              elemHeight = 270;
+            } else if (has3DAxes) {
+              elemTitle = '📐 三维坐标系';
+              elemWidth = Math.min(320, maxZoneW);
+              elemHeight = 290;
+            } else if (hasAxes) {
+              elemTitle = '📈 直角坐标系';
+              elemWidth = Math.min(300, maxZoneW);
+              elemHeight = 270;
+            } else if (hasShape) {
+              const shapeAct = elemActs.find((a) => a.type === 'shape');
+              const shapeNameMap = {
+                right_triangle: '直角三角形',
+                circle: '圆形与半径',
+                triangle: '三角形'
+              };
+              elemTitle = `📐 几何图形: ${shapeNameMap[shapeAct?.shapeType] || '几何图形'}`;
+              elemWidth = Math.min(270, maxZoneW);
+              elemHeight = 240;
+            } else if (hasWrite) {
+              const writeAct = elemActs.find((a) => a.type === 'write');
+              const lineCount = (writeAct?.content || '').split('\n').length;
+              elemTitle = '📝 规范板书演算';
+              elemWidth = Math.min(380, maxZoneW);
+              elemHeight = Math.max(130, Math.min(720, lineCount * 36 + 60));
+            }
+
+            const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
+
+            const newElem = {
+              id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              title: elemTitle,
+              x: pos.x,
+              y: pos.y,
+              width: elemWidth,
+              height: elemHeight,
+              actions: elemActs,
+              zone: targetZone,
+              createdAt: Date.now()
             };
-            elemTitle = `📐 几何图形: ${shapeNameMap[shapeAct?.shapeType] || '几何图形'}`;
-            elemWidth = Math.min(270, maxZoneW);
-            elemHeight = 240;
-          } else if (hasWrite) {
-            const writeAct = acts.find((a) => a.type === 'write');
-            const lineCount = (writeAct?.content || '').split('\n').length;
-            elemTitle = '📝 规范板书演算';
-            elemWidth = Math.min(380, maxZoneW);
-            elemHeight = Math.max(130, Math.min(720, lineCount * 36 + 60));
-          }
 
-          // 精准分区寻址（画图归 1 区，写公式归 2 区，0 重叠）
-          const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
-
-          const newElem = {
-            id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            title: elemTitle,
-            x: pos.x,
-            y: pos.y,
-            width: elemWidth,
-            height: elemHeight,
-            actions: acts,
-            zone: targetZone,
-            detachedFromAxes: requestsSeparateDrawing,
-            createdAt: Date.now()
-          };
-
-          setElements((prev) => [...prev, newElem]);
-          }
+            setElements((prev) => [...prev, newElem]);
           }
         }
 
         const actionTypes = new Set((agentData.canvasActions || []).map((action) => action.type));
         const details = [];
-        if (actionTypes.has('write')) details.push('已誊写到草稿纸');
-        if (actionTypes.has('update_element')) details.push('已续写或修改板书');
-        if (actionTypes.has('delete_element')) details.push('已删除指定板书');
-        if (actionTypes.has('axes3d')) details.push(upgradedExistingAxes ? '已将现有坐标系更新为三维' : '已绘制三维坐标系');
-        else if (actionTypes.has('axes') && !attachToExistingAxes) details.push('已添加坐标系');
-        if (actionTypes.has('plot')) details.push(detachedExistingPlot ? '已将函数图像从原坐标系拆出' : attachToExistingAxes ? '已叠加到现有坐标系' : requestsSeparateDrawing ? '已单独绘制函数图像' : '已绘制函数图像');
-        if (actionTypes.has('shape') || actionTypes.has('circle')) details.push('已绘制几何图形');
+        if (actionTypes.has('write')) details.push('已誊写规范板书');
+        if (actionTypes.has('update_element')) details.push('已同步更新画板图元');
+        if (actionTypes.has('delete_element')) details.push('已删除指定图元');
+        if (actionTypes.has('axes3d')) details.push('已绘制三维坐标系');
+        else if (actionTypes.has('axes')) details.push('已绘制直角坐标系');
+        if (actionTypes.has('plot')) details.push('已绘制函数曲线');
+        if (actionTypes.has('shape') || actionTypes.has('shape3d') || actionTypes.has('circle')) details.push('已绘制几何图形');
         const completionMessage = details.length
           ? `已按指令完成：${[...new Set(details)].join('；')}。`
-          : '已处理这条指令；没有生成需要写入草稿纸的内容。';
+          : '已处理完成。';
         appendAgentChatMessage({ role: 'assistant', status: 'success', content: completionMessage, details: [...new Set(details)] });
         showToast('AI 已在草稿板上为您完成画图与写字！', 'success');
       }

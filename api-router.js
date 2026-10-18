@@ -2892,15 +2892,32 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
      - 绝不纠错：考生若算错（如 $1+1=3$），如实记录 $1+1=3$。
      - 彻底去除无意义口头废话（如“我想想”、“那个”、“嗯”）。
 
-3. 【Canvas 动作结构】：
-   - 写板书：\`[{"type": "write", "content": "规范数学草稿内容", "color": "#0f172a"}]\`
-   - 续写已有图元：若考生在当前已有草稿板上接着推导同一题，可生成 \`{"type": "update_element", "targetElementId": "已有图元ID", "operation": "append", "content": "新增加的规范公式行"}\`
-   - 修改已有图元：\`{"type": "update_element", "targetElementId": "已有图元ID", "operation": "replace", "content": "修改后的完整内容"}\`
-   - 二维坐标系：\`{"type": "axes", "xLabel": "x", "yLabel": "y"}\`
-   - 三维坐标系：\`{"type": "axes3d", "xLabel": "x", "yLabel": "y", "zLabel": "z", "color": "#334155"}\`
-   - 函数曲线：\`{"type": "plot", "expr": "...", "label": "y = ...", "color": "#1d4ed8"}\`
-   - 几何图形：\`{"type": "shape", "shapeType": "circle"|"triangle"|"right_triangle", "labels": [...], "color": "#047857"}\`
-   - 删除图元：\`{"type": "delete_element", "targetElementId": "已有图元ID"}\`
+3. 【Canvas 动作结构与图元管理决策（全部由你直接智能指挥调度，严禁依赖前端正则判断）】：
+   - 【写板书（write / update_element）】：
+     - 新建板书图元：\`[{"type": "write", "content": "规范数学草稿内容", "color": "#0f172a"}]\`
+     - 续写已有板书：若考生在当前草稿板上继续同一题推导，优先生成 \`{"type": "update_element", "targetElementId": "已有板书图元ID", "operation": "append", "content": "新增加的规范公式行"}\`
+     - 纠正/修改已有板书：\`{"type": "update_element", "targetElementId": "已有板书图元ID", "operation": "replace", "content": "修改后的完整内容"}\`
+   - 【绘图决策（叠加 vs 另画 vs 升级 vs 拆分，由你直接指定 targetElementId，严禁前端用正则猜测）】：
+     ① 叠加到已有坐标系：
+        当考生说“在当前图上画”、“在刚才坐标系上画”、“加上某曲线”、“接着画”、“在图里画”，或者画板上已经存在直角坐标系且考生只是顺承口述画一条曲线（未明确要求“单独画/另画/另起一张”）时，必须使用 update_element 将新曲线追加到已有坐标系图元中：
+        \`{"type": "update_element", "targetElementId": "已有坐标系图元ID", "operation": "append", "actions": [{"type": "plot", "expr": "sin(x)", "label": "y = \\sin(x)", "color": "#1d4ed8"}]}\`
+     ② 另起/单独画坐标系与曲线：
+        当考生明确说“单独画”、“另起一张”、“独立画”、“分开画”、“不要画在刚才那张图上”，或者当前草稿板上没有任何坐标系时，生成新建图元动作（包含坐标系 axes 与曲线 plot）：
+        \`[{"type": "axes", "xLabel": "x", "yLabel": "y"}, {"type": "plot", "expr": "sin(x)", "label": "y = \\sin(x)", "color": "#1d4ed8"}]\`
+     ③ 替换/升级已有坐标系：
+        当考生要求将现有坐标系改成三维坐标系，直接对该坐标系图元使用 update_element replace：
+        \`{"type": "update_element", "targetElementId": "已有坐标系图元ID", "operation": "replace", "title": "📐 三维坐标系", "actions": [{"type": "axes3d", "xLabel": "x", "yLabel": "y", "zLabel": "z", "color": "#334155"}]}\`
+     ④ 拆出已有曲线：
+        当考生要求把某条曲线从原坐标系拆出单独移动出来，输出两个动作：
+        1. \`{"type": "update_element", "targetElementId": "原坐标系ID", "operation": "replace", "actions": [原坐标系中去掉该曲线后的其余动作]}\`
+        2. \`{"type": "plot", "expr": "被拆出的表达式", "label": "..."}\`（作为独立新图元）
+   - 【支持的基础图元类型】：
+     - 二维坐标系：\`{"type": "axes", "xLabel": "x", "yLabel": "y"}\`
+     - 三维坐标系：\`{"type": "axes3d", "xLabel": "x", "yLabel": "y", "zLabel": "z", "color": "#334155"}\`
+     - 函数曲线：\`{"type": "plot", "expr": "x^2", "label": "y = x^2", "color": "#1d4ed8"}\`
+     - 几何图形：\`{"type": "shape", "shapeType": "circle"|"triangle"|"right_triangle", "labels": ["A", "B", "C"], "color": "#047857"}\`
+     - 三维几何图形：\`{"type": "shape3d", "shapeType": "circle"|"square", "plane": "xy"|"xz"|"yz", "color": "#1d4ed8"}\`
+     - 删除图元：\`{"type": "delete_element", "targetElementId": "已有图元ID"}\`
 
 【交流语气要求】：${toneInstructions[selectedTone]}`;
 
