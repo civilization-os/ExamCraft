@@ -74,8 +74,12 @@ const formatMathExpression = (str) => {
   s = s.replace(/\\equiv/g, '≡');
   s = s.replace(/\\to|\\rightarrow/g, '→');
   s = s.replace(/\\leftarrow/g, '←');
-  s = s.replace(/\\Rightarrow/g, '⇒');
-  s = s.replace(/\\Leftrightarrow|\\iff/g, '⇔');
+  s = s.replace(/\\implies\b|\\Rightarrow\b/g, '⇒');
+  s = s.replace(/\\iff\b|\\Leftrightarrow\b/g, '⇔');
+  s = s.replace(/\\because\b/g, '∵');
+  s = s.replace(/\\therefore\b/g, '∴');
+  s = s.replace(/\\(arcsin|arccos|arctan)\b/g, '$1 ');
+  s = s.replace(/\\(sin|cos|tan|cot|sec|csc|ln|lg|log|exp)\b/g, '$1 ');
   s = s.replace(/\\infty/g, '∞');
   s = s.replace(/\\in\b/g, '∈');
   s = s.replace(/\\notin\b/g, '∉');
@@ -1247,7 +1251,7 @@ export default function ScratchpadCanvas({
 
             const chars = seg.isMath
               ? (seg.text.split(/(\s+|[=+\-×÷≤≥≠≈<>]+|[()])/).filter(Boolean))
-              : seg.text.split('');
+              : (seg.text.match(/[a-zA-Z0-9_.'"-]+|[\u4e00-\u9fa5]|[\s\S]/g) || []);
 
             for (let i = 0; i < chars.length; i++) {
               const piece = chars[i];
@@ -2074,8 +2078,8 @@ export default function ScratchpadCanvas({
             const writeAct = acts.find((a) => a.type === 'write');
             const lineCount = (writeAct?.content || '').split('\n').length;
             elemTitle = '📝 规范板书演算';
-            elemWidth = Math.min(340, maxZoneW);
-            elemHeight = Math.max(120, Math.min(680, lineCount * 32 + 55));
+            elemWidth = Math.min(380, maxZoneW);
+            elemHeight = Math.max(130, Math.min(720, lineCount * 36 + 60));
           }
 
           // 精准分区寻址（画图归 1 区，写公式归 2 区，0 重叠）
