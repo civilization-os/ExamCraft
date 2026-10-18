@@ -77,6 +77,7 @@
     - In-room top bar quick-control dropdown to preview or adjust reminder threshold on the fly.
     - Pure Web Audio harmonic chime alert without external asset overhead.
   - Global answer sheet matrix tracking completion progress.
+  - **One-Click Reset Entire Exam**: Prominently accessible from both the top header and answer sheet toolbar, allowing candidates to reset all answers, purge all scratchpad canvas ink, restore the full countdown clock, and unseal the session to restart from scratch.
 - **Dual Modality Submission**:
   - **Modality A · Photo / QR Code Upload**: Mobile camera snapshot upload for handwritten work.
   - **Modality B · AI Mathematical Transcription**: Scribes quick shorthand drafts into publication-grade KaTeX mathematical steps with automated step score previews (+3, +3, +4 points).

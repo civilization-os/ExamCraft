@@ -503,6 +503,7 @@ export default function ExamRoomView({
   // Submit Modal
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [isClearCurrentAnswerModalOpen, setIsClearCurrentAnswerModalOpen] = useState(false);
+  const [isResetExamModalOpen, setIsResetExamModalOpen] = useState(false);
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
 
   // Sync draft when switching question
@@ -659,6 +660,104 @@ export default function ExamRoomView({
     setStepScores([]);
     setIsClearCurrentAnswerModalOpen(false);
     showExamToast(`已清空第 ${currentQ?.num || currentQIndex + 1} 题答案；其他题目和草稿纸内容已保留。`, 'success');
+  };
+
+  // 重置整场考试（清空全部答案、全部草稿纸与恢复初始考试倒计时）
+  const handleResetEntireExam = () => {
+    // 1. 获取初始考试时长
+    const pristineDuration = activePaper?.duration
+      ? Number(activePaper.duration) * 60
+      : (activePaper?.totalDurationSeconds || activePaper?.totalSeconds || 5400);
+
+    // 2. 清空所有题目的答题记录与 AI 转录
+    const resetQuestions = questionList.map((question) => ({
+      ...question,
+      userAnswer: '',
+      aiTranscription: '',
+      stepScores: [],
+      status: 'unanswered'
+    }));
+    setQuestionList(resetQuestions);
+    setCurrentQIndex(0);
+    setCandidateDraft('');
+    setScribedLatex('');
+    setStepScores([]);
+
+    // 3. 清空所有题目的复查标记
+    setMarkedQuestionKeys([]);
+
+    // 4. 重置考时倒计时与状态
+    setSecondsLeft(pristineDuration);
+    secondsLeftRef.current = pristineDuration;
+    prevSecondsLeftRef.current = pristineDuration;
+    setIsTimerRunning(true);
+    setIsSealed(false);
+    setSealedAt('');
+    sealedRef.current = false;
+    timerRunningRef.current = true;
+
+    // 5. 重置提醒状态与已触发记录
+    triggeredReminderKeysRef.current.clear();
+    setDisableReminderForThisExam(false);
+    setSnoozeSecondsRemaining(null);
+    setReminderModalState({
+      isOpen: false,
+      minutesLeft: 15,
+      stage: 'warning',
+      formattedTime: formatTimer(pristineDuration)
+    });
+
+    // 6. 清理本地持久化中该试卷的答题卡、草稿纸与标记缓存
+    if (activePaper?.id) {
+      try {
+        localStorage.removeItem(`examcraft_answers_${activePaper.id}`);
+        localStorage.removeItem(questionMarksStorageKey);
+
+        const paperId = String(activePaper.id);
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (
+            key &&
+            (key.includes(`scratchpad_${paperId}`) ||
+              key.includes(`scratchpad_canvas_${paperId}`) ||
+              key.includes(`scratchpad_agent_chat_${paperId}`))
+          ) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+      } catch (err) {
+        console.warn('Failed to clear scratchpad cache for paper:', err);
+      }
+    }
+
+    // 7. 递增草稿版本以强制彻底卸载并重置草稿画板与组件缓存
+    setScratchpadDraftRevision((rev) => rev + 1);
+
+    // 8. 更新 activePaper 试卷快照与试卷列表
+    if (activePaper?.id) {
+      const freshPaper = {
+        ...activePaper,
+        status: '考试中',
+        secondsLeft: pristineDuration,
+        sealedAt: null
+      };
+      try {
+        localStorage.setItem('examcraft_active_paper', JSON.stringify(freshPaper));
+        const raw = localStorage.getItem('examcraft_papers');
+        if (raw) {
+          const list = JSON.parse(raw);
+          const next = list.map((p) => (p.id === activePaper.id ? freshPaper : p));
+          localStorage.setItem('examcraft_papers', JSON.stringify(next));
+        }
+      } catch {}
+      if (onUpdatePaper) onUpdatePaper(freshPaper);
+    }
+
+    // 9. 关闭确认弹窗并给予成功提示
+    setIsResetExamModalOpen(false);
+    showExamToast('✨ 整场考试已重置！所有答案、草稿纸与倒计时均已恢复至初始状态。', 'success');
   };
 
   useEffect(() => {
@@ -1099,7 +1198,7 @@ export default function ExamRoomView({
 
   const renderScratchpadCanvas = (docked = false) => (
     <ScratchpadCanvas
-      key={`${activePaper?.id || 'paper'}_${currentQKey}`}
+      key={`${activePaper?.id || 'paper'}_${currentQKey}_rev_${scratchpadDraftRevision}`}
       questionNum={currentQ?.num}
       questionData={currentQ}
       questionIndex={currentQIndex}
@@ -1431,6 +1530,17 @@ export default function ExamRoomView({
             <span>全屏专注</span>
           </button>
 
+          {/* Reset Entire Exam Button */}
+          <button
+            type="button"
+            onClick={() => setIsResetExamModalOpen(true)}
+            className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1.5 text-on-surface-variant hover:text-error hover:bg-error/10 border border-outline-variant/40 hover:border-error/30 text-[11px] sm:text-[12px] font-sans font-medium rounded-lg transition-all active:scale-95 cursor-pointer"
+            title="重置整场考试：清空所有题目的答案与草稿纸，恢复初始考试倒计时"
+          >
+            <span className="material-symbols-outlined text-[16px]">restart_alt</span>
+            <span className="hidden sm:inline">重置整卷</span>
+          </button>
+
           {/* Submit Exam Button */}
           <button
             type="button"
@@ -1468,6 +1578,15 @@ export default function ExamRoomView({
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsResetExamModalOpen(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-low hover:bg-error/10 text-on-surface-variant hover:text-error text-[12px] font-sans font-medium border border-outline-variant/30 transition-colors cursor-pointer"
+                title="重置整场考试：清空所有答案、草稿纸与恢复初始考试时间"
+              >
+                <span className="material-symbols-outlined text-[15px]">restart_alt</span>
+                <span className="hidden sm:inline">重置整卷</span>
+              </button>
               <button type="button" onClick={() => setIsAnswerCardCollapsed((collapsed) => !collapsed)} aria-expanded={!isAnswerCardCollapsed} aria-controls="exam-answer-card-questions" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface text-[12px] font-sans font-medium border border-outline-variant/30 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                 <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{isAnswerCardCollapsed ? 'expand_more' : 'expand_less'}</span>
                 <span>{isAnswerCardCollapsed ? '展开答题卡' : '收起答题卡'}</span>
@@ -2013,6 +2132,75 @@ export default function ExamRoomView({
           </div>
         </div>
       )}
+
+      {/* Reset Entire Exam Confirmation Modal */}
+      {isResetExamModalOpen && (
+        <div className="fixed inset-0 z-60 bg-on-background/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" role="presentation">
+          <div
+            className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-6 shadow-2xl border border-outline-variant/40 space-y-4 animate-in zoom-in-95 duration-200"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="reset-exam-title"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-12 h-12 rounded-xl bg-error/10 text-error flex items-center justify-center shrink-0 border border-error/20">
+                <span className="material-symbols-outlined text-[26px]">restart_alt</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 id="reset-exam-title" className="text-title-lg font-bold text-on-surface">
+                  重置整场考试？
+                </h3>
+                <p className="mt-1 text-body-sm text-on-surface-variant">
+                  将试卷《{activePaper?.title || '当前考卷'}》彻底还原至最初开考状态。
+                </p>
+              </div>
+            </div>
+
+            {/* Detailed summary of items being reset */}
+            <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 text-body-sm space-y-2 text-on-surface">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px] text-error">edit_off</span>
+                <span><strong>清空已答内容</strong>：已填涂的 {answeredCount} 题答案与 AI 转写板书将被完全清除。</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px] text-error">draw</span>
+                <span><strong>清空全部草稿纸</strong>：所有题目的手绘笔迹、坐标系图元与推导板书一并清空。</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px] text-primary">timer</span>
+                <span><strong>恢复考试倒计时</strong>：倒计时重新恢复至初始 {Math.floor(totalExamDurationSeconds / 60)} 分钟，解除封卷。</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px] text-secondary">bookmark_remove</span>
+                <span><strong>重置标记与序号</strong>：清空复查标记，题目定位自动回到第 1 题。</span>
+              </div>
+            </div>
+
+            <p className="text-[12px] text-error font-medium">
+              ⚠️ 此操作无法撤销，确定要放弃现有进度并重新开考吗？
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-surface-container">
+              <button
+                type="button"
+                onClick={() => setIsResetExamModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleResetEntireExam}
+                className="px-4 py-2 rounded-xl bg-error hover:bg-error/90 text-white font-label-md font-semibold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 active:scale-98"
+              >
+                <span className="material-symbols-outlined text-[17px]">restart_alt</span>
+                <span>确认重置并重新开考</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isSubmitModalOpen && (
         <div className="fixed inset-0 z-50 bg-on-background/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-surface-container-lowest rounded-2xl max-w-md w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md">
