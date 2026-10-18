@@ -2650,6 +2650,104 @@ function formatSpokenMathToScratchpad(spokenText) {
   return formattedLines.join('\n');
 }
 
+/**
+ * 从当前草稿板文本中智能提取已推导出的数学关系与等式池 (Equivalence Pool)
+ */
+export function extractBoardEquivalencePool(boardText = '') {
+  if (!boardText || typeof boardText !== 'string') return [];
+  const lines = boardText.split('\n').map((l) => l.trim()).filter(Boolean);
+  const equations = [];
+  const seen = new Set();
+
+  for (const rawLine of lines) {
+    const clauses = rawLine
+      .split(/[,，;；]|\b(?:则|即|可得)\b/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+    for (const clause of clauses) {
+      const clean = clause
+        .replace(/\$/g, '')
+        .replace(/\\(?:therefore|because|implies)\s*/g, '')
+        .replace(/^(?:令|则|由|可得|即|又因为|因为|所以)\s*/, '')
+        .trim();
+
+      const match = clean.match(/^([a-zA-Z0-9'\\^_\s()+\-*]+?)\s*=\s*(.+)$/);
+      if (match) {
+        const lhs = match[1].trim();
+        const rhs = match[2].trim();
+        if (lhs && rhs && lhs !== rhs && !seen.has(`${lhs}=${rhs}`)) {
+          seen.add(`${lhs}=${rhs}`);
+          equations.push({
+            raw: `${lhs} = ${rhs}`,
+            lhs,
+            rhs,
+            key: lhs.replace(/[\s\\(){}^_]/g, '').toLowerCase()
+          });
+        }
+      }
+    }
+  }
+  return equations;
+}
+
+/**
+ * 确定性等量代换求解器：当考生明确指示等量代换/回代时，自动在已知等式池中检索并执行代数代换
+ */
+export function resolveEquivalenceSubstitution(spokenText = '', boardText = '') {
+  const isSubstitution = /(?:等量代换|等式替换|代入|替换一下|代换一下|把.{1,10}代入|把.{1,10}替换|计算过|之前求过)/.test(spokenText);
+  if (!isSubstitution) return null;
+
+  const pool = extractBoardEquivalencePool(boardText);
+  if (!pool.length) return null;
+
+  const compactSpoken = spokenText.toLowerCase().replace(/[\s\\(){}^_]/g, '');
+
+  // 1. 按符号长度降序排序（优先匹配 cosy, siny, y'，防止单字母误命中）
+  const sortedPool = [...pool].sort((a, b) => b.key.length - a.key.length);
+  let matchedEquiv = null;
+
+  for (const eq of sortedPool) {
+    if (eq.key.length >= 2 && compactSpoken.includes(eq.key)) {
+      matchedEquiv = eq;
+      break;
+    }
+  }
+
+  // 2. 常见三角函数/变量模糊匹配
+  if (!matchedEquiv) {
+    if (compactSpoken.includes('cos') && pool.some((e) => e.key === 'cosy')) {
+      matchedEquiv = pool.find((e) => e.key === 'cosy');
+    } else if (compactSpoken.includes('sin') && pool.some((e) => e.key === 'siny')) {
+      matchedEquiv = pool.find((e) => e.key === 'siny');
+    }
+  }
+
+  // 3. 匹配母式并执行代换
+  if (matchedEquiv) {
+    const candidateTargets = pool.filter((eq) => eq !== matchedEquiv && (eq.rhs.includes(matchedEquiv.lhs) || eq.rhs.replace(/[\s\\]/g, '').includes(matchedEquiv.key)));
+
+    let targetEq = null;
+    if (compactSpoken.includes('y导') || compactSpoken.includes("y'")) {
+      targetEq = candidateTargets.find((e) => e.lhs.includes("y'"));
+    }
+    if (!targetEq && candidateTargets.length) {
+      // 倒序匹配最近推导出的母式
+      targetEq = candidateTargets[candidateTargets.length - 1];
+    }
+
+    if (targetEq) {
+      const substitutedRhs = targetEq.rhs.split(matchedEquiv.lhs).join(matchedEquiv.rhs);
+      return {
+        formula: `\\therefore ${targetEq.lhs} = ${targetEq.rhs} = ${substitutedRhs}`,
+        matchedEquation: matchedEquiv.raw,
+        targetEquation: targetEq.raw
+      };
+    }
+  }
+  return null;
+}
+
 // POST /api/model/scratchpad-agent-loop
 // 考场草稿纸专属 Agent Loop：辅助考生帮写规范板书草稿与绘图
 // 意图、作弊防范与草稿规范化全部交由 AI Agent 深度理解与直接判断，不依赖脆弱的硬编码规则
@@ -2958,15 +3056,20 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
    - 严禁在聊天区与考生辩论对线，严禁长篇大论！
    - 面对考生的任何意见、疑问、指责或质问：
      ① 第一准则：动手改板！永远通过 canvasActions 在画板上落实修改，行动大于语言！
-     ② 聊天回复（chatResponse）必须极度简短温和，严格控制在 1-2 句话、20字以内（例如：“好的，已为您将 $\\cos y$ 等式代入分母。”、“已修复末尾格式。”、“已去除多余推导。”）。
+     ② 聊天回复（chatResponse）必须极度简短温和，严格控制在 1-2 句话、20字以内（例如：“好的，已为您将 $\\cos y$ 等式代入分母。”、“已修复末尾格式。”、“已去除多余推导。”）。`;
 
-【交流语气要求】：${toneInstructions[selectedTone]}`;
+  const equivalencePool = extractBoardEquivalencePool(currentBoardContent);
+  const substitutionResolution = resolveEquivalenceSubstitution(spokenText, currentBoardContent);
 
   const agentUserPrompt = `【当前试题题干（辅助理解数学符号与上下文，严禁代答本题）】：
 ${contextProblem || '（无特定题干上下文）'}
 
 【考生当前草稿板已有内容】：
 ${currentBoardContent || '（当前草稿板为空）'}
+
+【草稿纸内置工具状态 · 已推导等量代换等式库 (Equivalence Pool)】：
+${equivalencePool.length ? equivalencePool.map((eq, i) => `${i + 1}. $${eq.raw}$`).join('\n') : '（当前板书暂无已提取等式）'}
+${substitutionResolution ? `\n★【等量代换工具匹配提示】：考生口述要求进行等量代换，工具已匹配到代换等式「$${substitutionResolution.matchedEquation}$」与目标母式「$${substitutionResolution.targetEquation}$」，代换后完整式子为：$${substitutionResolution.formula}$。请在板书动作中切实执行此代换步骤，绝不能留悬空等号！\n` : ''}
 
 【草稿板图元与可编辑目标 ID】：
 ${JSON.stringify(safeBoardElements)}
@@ -3074,6 +3177,40 @@ ${spokenText}
           }
           return action;
         });
+      }
+
+      // 确定性等量代换健全性守卫：如果考生要求等量代换，且工具已成功匹配出代换公式
+      if (substitutionResolution) {
+        const writeAct = parsed.canvasActions.find((a) => a.type === 'write' || a.type === 'update_element');
+        if (writeAct && typeof writeAct.content === 'string') {
+          // 如果 writeAct 中等号悬空，或者未出现代换后的目标式，自动补齐
+          if (!writeAct.content.includes(substitutionResolution.formula)) {
+            if (writeAct.operation === 'replace') {
+              const cleanBase = writeAct.content.replace(/=\s*(\$|\n|$)/g, '$1').trim();
+              writeAct.content = `${cleanBase}\n\n$${substitutionResolution.formula}$`;
+            } else {
+              writeAct.content = `$${substitutionResolution.formula}$`;
+            }
+            parsed.scribeResult = parsed.scribeResult || `$${substitutionResolution.formula}$`;
+          }
+        } else if (parsed.canvasActions.length === 0) {
+          const targetId = existingWriteElem?.id || safeBoardElements[0]?.id;
+          if (targetId) {
+            parsed.canvasActions = [{
+              type: 'update_element',
+              targetElementId: targetId,
+              operation: 'append',
+              content: `$${substitutionResolution.formula}$`
+            }];
+          } else {
+            parsed.canvasActions = [{
+              type: 'write',
+              content: `$${substitutionResolution.formula}$`,
+              color: '#0f172a'
+            }];
+          }
+          parsed.scribeResult = `$${substitutionResolution.formula}$`;
+        }
       }
 
       // 清理末尾悬空的未闭合等号（例如出现 \therefore y' = \frac{1}{\cos y} = 时移除多余等号）

@@ -380,6 +380,48 @@ export const extractFormulasFromProblem = (questionData, contextProblem = '') =>
 };
 
 /**
+ * 从当前草稿板图元中实时提取已推导成立的已知等式池 (Equivalence Pool)
+ */
+export const extractBoardEquivalencePool = (boardText = '') => {
+  if (!boardText || typeof boardText !== 'string') return [];
+  const lines = boardText.split('\n').map((l) => l.trim()).filter(Boolean);
+  const equations = [];
+  const seen = new Set();
+
+  for (const rawLine of lines) {
+    const clauses = rawLine
+      .split(/[,，;；]|\b(?:则|即|可得)\b/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+    for (const clause of clauses) {
+      const clean = clause
+        .replace(/\$/g, '')
+        .replace(/\\(?:therefore|because|implies)\s*/g, '')
+        .replace(/^(?:令|则|由|可得|即|又因为|因为|所以)\s*/, '')
+        .trim();
+
+      const match = clean.match(/^([a-zA-Z0-9'\\^_\s()+\-*]+?)\s*=\s*(.+)$/);
+      if (match) {
+        const lhs = match[1].trim();
+        const rhs = match[2].trim();
+        if (lhs && rhs && lhs !== rhs && !seen.has(`${lhs}=${rhs}`)) {
+          seen.add(`${lhs}=${rhs}`);
+          equations.push({
+            id: `board_eq_${equations.length}_${lhs.replace(/[\s\\]/g, '')}`,
+            raw: `${lhs} = ${rhs}`,
+            lhs,
+            rhs,
+            key: lhs.replace(/[\s\\(){}^_]/g, '').toLowerCase()
+          });
+        }
+      }
+    }
+  }
+  return equations;
+};
+
+/**
  * 判定草稿图元类型：属于「1. 画图」还是「2. 写公式」
  */
 export const isElementFormula = (elem) => {
@@ -692,6 +734,15 @@ export default function ScratchpadCanvas({
       return [];
     }
   }, [agentChatStorageKey, agentChatRevision]);
+
+  // 从当前草稿板所有板书图元中动态提取已知等式，作为快捷代换工具胶囊
+  const boardEquivalenceChips = useMemo(() => {
+    const allBoardText = elements
+      .flatMap((el) => (el.actions || []).map((a) => a.content || ''))
+      .filter(Boolean)
+      .join('\n');
+    return extractBoardEquivalencePool(allBoardText);
+  }, [elements]);
   const appendAgentChatMessage = useCallback((message) => {
     try {
       const stored = JSON.parse(localStorage.getItem(agentChatStorageKey) || '[]');
@@ -2728,6 +2779,32 @@ export default function ScratchpadCanvas({
                 ))}
                 {isAgentRunning && <div className="flex justify-start"><div className="rounded-xl rounded-bl-sm bg-surface-container px-2.5 py-1.5 text-[10px] text-primary flex items-center gap-1.5"><span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>{agentLoopStage || '正在处理指令…'}</div></div>}
               </div>
+
+              {/* 已算等式快速代换胶囊 */}
+              {boardEquivalenceChips.length > 0 && (
+                <div className="flex items-center gap-1 flex-wrap px-1.5 py-1 mb-1.5 rounded-md bg-primary/5 border border-primary/15 text-[10px]">
+                  <div className="flex items-center gap-0.5 text-primary font-semibold shrink-0">
+                    <span className="material-symbols-outlined text-[12px]">swap_horiz</span>
+                    <span>已算等式 (点击代换):</span>
+                  </div>
+                  {boardEquivalenceChips.slice(-4).map((eq) => (
+                    <button
+                      key={eq.id}
+                      type="button"
+                      onClick={() => {
+                        setSpokenInput((prev) => {
+                          const prefix = prev ? `${prev.trim()} ` : '';
+                          return `${prefix}等量代换：用 ${eq.lhs} 等式替换一下`;
+                        });
+                      }}
+                      className="px-1.5 py-0.5 rounded bg-surface-container-lowest border border-outline-variant/40 hover:border-primary text-[10px] font-mono text-on-surface hover:text-primary transition cursor-pointer shadow-2xs truncate max-w-[160px]"
+                      title={`点击代换: ${eq.raw}`}
+                    >
+                      {eq.raw}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* 口述/需求输入框 */}
               <div className="relative">
