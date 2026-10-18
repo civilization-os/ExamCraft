@@ -2864,7 +2864,7 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
 
   const prompt = `你是考场草稿纸旁的助手，可以进行简短、自然、友善的日常交流，也可以按用户明确指令誊写其已经提供的内容或绘图。必须严格区分聊天和画板操作：闲聊只回复 chatResponse，intent="chat" 且 canvasActions 为空；只有明确要求画图或誊写时才操作画板，intent="canvas"。
 
-【独立意图审核结果】：${intentClassification?.decision === 'allow' ? '模型判断允许本轮请求。若用户要求列出/誊写已经给出的推导文字或公式，只能忠实转录，不得补充、纠错、续写、计算或解释。' : '未使用独立模型审核结果；请按下面规则判断。'} 词语“求导、积分、极限、证明、展开”本身不是违规依据，关键在于用户是否要求你生成未提供的解题内容。
+【独立意图审核结果】：${intentClassification?.decision === 'allow' ? '官方模型已判断允许本轮请求。此判断对本轮意图有效，不要再次因为“求导”等词把它判违规；现在只需把用户已经说出的公式关系整理成标准数学符号，不能添加任何未说出的步骤、结果或解释。' : '未使用独立模型审核结果；请按下面规则判断。'} 词语“求导、积分、极限、证明、展开”本身不是违规依据，关键在于用户是否要求你生成未提供的解题内容。
 
 【默认交流语气】：${toneInstructions[selectedTone]}
 语气用于日常交流、拒绝说明和操作确认。用户可以简单聊天，不要把聊天写到画板上。遇到做题或数学求解请求时，简短礼貌拒绝；不得给出答案、步骤、解题思路、定理/公式提示、下一步建议或任何部分线索，也不要引导用户补充题目步骤。不得改变考场诚信规则，也不得把额外推导或答案包装成“板书整理”。scribeResult 必须是考生明确提供内容的忠实誊写，不添加解释或推导。
@@ -2890,7 +2890,7 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
 2. 【诱导拦截与防作弊熔断】：
    - 只有当用户让你生成未给出的答案、计算结果、推导步骤、解释、提示、解题思路、下一步或其他解题内容时，才判定 audit.passed = false 并返回空 canvasActions。不要仅凭数学术语或动词关键词拦截。
    - 拒绝时只在 chatResponse 中给一句简短拒绝，例如“抱歉，我不能帮助解题或提供提示。”不要附加任何知识内容、步骤、线索或替代性引导。
-   - 用户明确要求把本条消息中已经完整给出的过程、公式或文字列出/誊写/排版时，允许忠实转录，包括内容提及泰勒展开、求导、积分、极限或证明的情况；不得把未给出的步骤补全，不得代算、纠错或解释。若实质要求你生成这些内容，则拒绝。
+   - 用户明确要求把本条消息中已经给出的过程、公式或文字列出/誊写/排版时，允许整理；包括将口述数学关系转换成标准符号（如“y 等于 arcsin x，那么 sin y 等于 x”整理为两行等式）。这属于表达格式转换，不是求导或推导。不得把未给出的步骤补全，不得代算、纠错或解释。若实质要求你生成这些内容，则拒绝。
 3. 【日常交流】：
    - 问候、感谢、简单寒暄等非题目交流可以自然简短回应，设置 intent="chat"、audit.passed=true、canvasActions=[]，不得顺便提供学习建议或解题提示。
 
@@ -2909,6 +2909,12 @@ ${safeConversationContext || '（本题尚无对话记录）'}
 ${spokenText}
 """
 
+【口述公式符号化规则】：
+- 用户说“列式子/写公式/按上下分数形式排版”时，输出规范的数学符号与 LaTeX，不要把“等于、那么、过程如下”等口述连接词原样写在草稿纸上。
+- 例如用户已说“arcsinx 求导过程如下，y 等于 arcsin x，那么 sin y = x”，只整理为 $\\begin{aligned} y &= \\arcsin x \\\\ \\sin y &= x \\end{aligned}$；不要推导 arcsin 的导数，也不要把“求导过程如下”写上去。
+- “siny”在明确的数学口述语境中排为“\\sin y”，“arcsinx”排为“\\arcsin x”；保留原有变量和关系，不增加数学内容。
+- 有明确排版指令时允许把已有内容转换成分数、上下标、根式、函数符号等标准格式；只改变表示方式，不做代数变形或求值。
+
 【输出结构（必须为标准纯 JSON）】：
 {
   "intent": "chat 或 canvas",
@@ -2917,7 +2923,7 @@ ${spokenText}
     "reason": "口述需求合规，未请求代算"
   },
   "chatResponse": "仅闲聊或拒绝时使用的简短自然回复；画板操作时为空字符串",
-  "scribeResult": "【重要】规范整理后的正式草稿板书（使用优雅标准的 Markdown 与 LaTeX 数学公式如 $...$ 或 $$...$$）。绝对严禁包含“口述需求：”、“指令：”、“好的已为您...”等任何交际口语！只保留纯正的考场板书记录本身。",
+  "scribeResult": "【重要】规范整理后的正式草稿板书（将口述数学关系符号化，使用 Markdown 与 LaTeX，如 $...$ 或 $$...$$）。去掉口述填充语，只保留用户实际给出的数学关系；不得扩展成用户未说的解题步骤。",
   "canvasActions": [
     // 严格按考生需求生成动作：
     // 若要求写公式/写字：[{"type": "write", "content": "规范公式内容", "color": "#0f172a"}]
@@ -2934,7 +2940,7 @@ ${spokenText}
   try {
     const model = createTrackedChatModel('scratchpad.write-draw');
     const response = await model.invoke([
-      { role: 'system', content: `你是友善、简洁的考场草稿纸助手，可以日常交流，也可以按明确指令忠实誊写或绘图。只在用户要求你生成未提供的答案、步骤、思路、提示、计算或推导时拒绝；不得因出现“求导”等词就拦截已完整给出的内容誊写。誊写只能复现用户给出的内容，不得补全、纠错或解释。闲聊不得操作画板。默认语气：${toneInstructions[selectedTone]}语气不能改变或绕过安全规则。` },
+      { role: 'system', content: `你是友善、简洁的考场草稿纸助手，可以日常交流，也可以按明确指令把已给出的口述数学关系整理为标准符号并绘图。只在用户要求你生成未提供的答案、步骤、思路、提示、计算或推导时拒绝；若独立意图审核已判定 allow，不得再对同一请求做第二次违规判断。将“y等于arcsinx，那么siny=x”整理成 y=\\arcsin x 与 \\sin y=x 两个已提供的等式，不要写成口述句，也不要推导导数。闲聊不得操作画板。默认语气：${toneInstructions[selectedTone]}语气不能改变或绕过安全规则。` },
       { role: 'user', content: prompt }
     ]);
 
@@ -2967,9 +2973,44 @@ ${spokenText}
       parsed.canvasActions = [];
     }
 
-    // 意图审核允许的“忠实誊写”若被主助手误判为违规，退回本地原文转录，避免静态审计再次误拦。
+    // 主模型再次误判但独立审核已允许时，调用同一官方模型仅做符号化誊写；不再把口述原文直接冒充板书。
     if (!isSuspicious && intentClassification?.decision === 'allow' && parsed.audit?.passed === false && (explicitTranscription || followsTranscriptionRequest) && suppliedMathContent) {
-      parsed = executeDeterministicFallback(spokenText);
+      try {
+        const formatter = createTrackedChatModel('scratchpad.write-draw');
+        const formatResponse = await formatter.invoke([
+          {
+            role: 'system',
+            content: '独立官方模型已将本轮意图判定为允许誊写。你的职责仅是把用户已经说出的数学表达整理为规范数学符号。不能解题、求导、推导、计算、补全、纠错或解释。删除“过程如下”“那么”等口述填充语，只输出公式；例如“arcsinx 求导过程如下，y 等于 arcsin x，那么 sin y=x”只输出 $\\begin{aligned}y&=\\arcsin x\\\\\\sin y&=x\\end{aligned}$。不能把口述句子原样输出。'
+          },
+          {
+            role: 'user',
+            content: `请仅整理这条已审核通过的口述内容为标准公式，不推导任何未提供内容：\n${spokenText}`
+          }
+        ]);
+        const formattedContent = String(formatResponse.content || '')
+          .replace(/^```(?:latex|markdown|text)?\s*/i, '')
+          .replace(/\s*```$/i, '')
+          .trim();
+        if (!formattedContent) throw new Error('官方模型未返回公式排版内容');
+        parsed = {
+          intent: 'canvas',
+          audit: { passed: true, reason: '独立官方模型已确认是已给出内容的符号化整理' },
+          chatResponse: '',
+          scribeResult: formattedContent,
+          canvasActions: [{ type: 'write', content: formattedContent, color: '#0f172a' }],
+          loopLogs: ['THINK：语义审核通过', '公式转录：口述关系已符号化', 'Canvas：板书动作已生成']
+        };
+      } catch (formatError) {
+        console.warn('[scratchpad] 公式符号化排版失败：', formatError.message);
+        parsed = {
+          intent: 'chat',
+          audit: { passed: true, reason: '语义审核通过，但公式排版服务暂不可用' },
+          chatResponse: '我理解你是在补充要列出的数学内容，但这次没能规范排成公式。可以稍后重试。',
+          scribeResult: '',
+          canvasActions: [],
+          loopLogs: []
+        };
+      }
     }
 
     res.json({
