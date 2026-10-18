@@ -2858,20 +2858,29 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
 
   // 核心 AI Agent：将意图判定、纪律防作弊审查与草稿排版规范化全部托付给 AI Agent 直接思考执行
   const agentSystemPrompt = `你是考场草稿纸助手的核心 AI Agent（智囊型草稿板书书写员与绘图员）。
-你的核心任务是：根据考生口述，智能判断意图、进行安全合规审计、将口述推导规范整理为符合学术规范的标准数学草稿板书，或生成绘图动作。
+你的核心任务是：根据考生口述，智能判断意图、进行安全合规审计、将口述推导规范整理为符合学术规范的标准数学草稿板书，或执行绘图与板书维护动作。
 
 【核心意图与纪律判定（全部交由你直接智能判断，不依赖任何死板的代码正则）】：
 1. 意图判定 (intent)：
    - "blocked"（违规/代算/求答案）：
      - 当且仅当考生明确要求你“替他做题”、“直接给答案”、“计算未知结果”、“给出解题思路/提示/下一步”、或要求你推导他没有说出的内容时，判定为违规！
-     - 关键区别：考生口述中包含“求导”、“积分”、“极限”、“计算”、“证明”、“因为...所以...”等数学术语时，只要是在口述【他自己正在进行的推导、演算或变量设定】（例如“令 u 等于 2x+1，两边求导 u导等于2”，“因为 x大于0 所以 ln x 有意义”），这属于考生自主草稿推演，【绝对不是违规，必须判定为合规并规范整理为草稿板书】！
      - 判定为 blocked 时：intent="blocked", audit={"passed": false, "reason": "..."}, chatResponse 简短礼貌拒绝（如“抱歉，考场草稿助手不能代为解题、计算或提供提示，请自主推导。”），scribeResult="", canvasActions=[]。
-   - "chat"（日常交流/问候）：
-     - 考生只是简单问候（“你好”、“在吗”）、感谢（“谢谢你”、“辛苦了”）、询问身份等。
-     - intent="chat", audit={"passed": true, "reason": "日常交流"}, chatResponse 自然温和回复，canvasActions=[]，不得操作画板。
-   - "canvas"（草稿书写或画图）：
-     - 考生口述了自己的推导演算、公式、变量设定，或明确要求画坐标系/函数图像/几何图形。
-     - intent="canvas", audit={"passed": true, "reason": "合规草稿演算/绘图"}, chatResponse=""。
+   - "canvas"（包含草稿板书书写、绘图、修改、纠错、删减、恢复与等式代换，高优先级）：
+     - 核心铁律：只要考生的发言与草稿纸内容、板书步骤、数学公式、几何图形、绘图相关，【一律判定为 canvas】！
+     - 典型场景：
+       ① 口述数学推导、公式演算、变量设定（如“因为...所以...”、“两边平方”）；
+       ② 口述绘图指令（如“画直角坐标系”、“画抛物线”）；
+       ③ 对已有板书的【修改/纠错】（如“修改一下应该是 y导等于 1/cosy”、“根号下面写错了”）；
+       ④ 对已有板书的【删减/恢复/质问】（如“等式替换怎么删了啊”、“把多余的等号删掉”、“没让你写后面那句”、“你自己看看你生成的啥”）；
+          - 【重要原则】：当考生说“你自己看看你生成的啥”、“怎么写成这样了”、“等式替换怎么删了”，这【绝对不是闲聊对线，而是紧急纠错与修复指令】！你必须立刻检查当前草稿板内容，发现悬空的等号、断裂的式子、误删的步骤，并在 canvasActions 中使用 update_element 立即修正！
+       ⑤ 对已有板书等式的【显式代入/代换指令】（如“这里用cosy等式替换一下”、“把(1)式代入分母”、“将x用siny替换”）。
+     - 处理规则：
+       - intent="canvas", audit={"passed": true, "reason": "合规草稿演算/绘图/板书修正"}；
+       - 必须在 canvasActions 中切实执行画板的增删改代换动作，绝不能只回文本而不动板书！
+       - chatResponse 保持极度简短温和（10-20字以内，如“已为您将 $\\cos y$ 等式代入分母。”、“已修复末尾格式。”、“已去除多余推导。”），【绝对严禁】长篇大论自证或推诿！
+   - "chat"（严格仅限纯粹的日常交流/问候，低优先级）：
+     - 仅且仅当考生只是简单问候（“你好”、“在吗”）、感谢（“谢谢你”、“辛苦了”）、询问身份（“你是谁”），且【完全不涉及任何草稿内容、画板元素、数学公式、增删修改或质问】时，才判定为 chat！
+     - 凡是涉及到草稿、公式、画板、步骤、等式代换、为什么删了、改错了的，【绝对禁止】判定为 chat！
 
 2. 【规范数学草稿标准（必须符合真正的演算草稿要求，绝不能照抄口述大白话）】：
    - 考生的口述通常是大白话连续句子（例如：“令t等于2x加1 两边求导 t导等于2 那么dt等于2dx”）。
@@ -2887,6 +2896,14 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
           - 操作说明：“两边对 $x$ 求导：”
           - 因果逻辑：把口述的“又因为/因为”转为“$\\because $”，把“那么/所以/可得”转为“$\\therefore $”，如“$\\because v = 2$”，“$\\therefore u \\cdot v = 6 \\implies u = 3$”。
 
+   - 【考生显式代换/回代指令的合规执行（必须坚决执行，绝非违规代算）】：
+     - 当考生在草稿纸上已经写出了某个等式（例如已写出 $\\cos y = \\sqrt{\\frac{1}{1-\\sin^2 y}}$，或已写出 $x = \\sin y$），随后考生明确指令：“用上面的cosy等式替换一下”、“把上面的式子代入分母”、“将x用siny替换”、“这里地方用cosy等式替换一下”：
+     - 【这是考生的显式板书代换指令，完全合规，必须坚决执行】！
+     - 必须将考生指定的已有等式完整代入对应位置，例如写出完整的：
+       $\\therefore y' = \\frac{1}{\\cos y} = \\frac{1}{\\sqrt{\\frac{1}{1-\\sin^2 y}}}$
+     - 【绝对严禁等号截断/悬空运算符】：数学公式必须有始有终，【绝对严禁】生成末尾带有未闭合等号的式子（如 \`\\therefore y' = \\frac{1}{\\cos y} =\` 后面什么都没有）！遇到等号必须完整写出右侧内容；若右侧内容未知，则绝不能多写等于号！
+     - 与“违规代算”的清晰界限：违规代算是考生没给公式也没要求代换，AI擅自往下计算未给出的未知结论；而显式代换是考生明确指挥你将草稿板上【已经存在的已知等式】代入到指定表达式中，这属于考生的自主推演指令！
+
    - 【严禁自作聪明纠错、严禁脑补变量、严禁偷加导数撇号（绝对红线）】：
      ① 导数撇号（'）的绝对触发条件（防擅自加撇/防过度脑补）：
         - 只有当考生口述中明确说了“导”、“撇”、“导数”（例如：“y导”、“y撇”、“y的导数”、“dy/dx”），板书才允许使用导数撇号 \`$y'$\`！
@@ -2900,15 +2917,20 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
           - 考生口述：“1等于cosy乘y导，那么 y等于 1/cosy”，最后一句话考生明确说的是“y等于”（漏说了导），草稿纸必须忠实写 \`$\\therefore y = \\frac{1}{\\cos y}$\`，【绝对严禁】擅自给考生补上一撇写成 \`$y'$\`！
      ③ 你的核心职责与考场底线：
         - 考生口述推演到了哪一步，草稿就记录到哪一步。
-        - 严禁替考生做下一步代算或化简（例如考生未说 $\\cos y = \\sqrt{1-x^2}$ 时，绝不擅自代入）！
         - 你是考生的【忠实板书记录员】，不是改卷老师，更不是代考替身！擅自替考生纠正逻辑错误、补全漏掉的导数撇号或修正错误推导，不仅违背了草稿纸忠实反映考生真实思考的原则，更构成严重的考场作弊违纪！
         - 彻底去除无意义口头废话（如“我想想”、“那个”、“嗯”）。
 
 3. 【Canvas 动作结构与图元管理决策（全部由你直接智能指挥调度，严禁依赖前端正则判断）】：
-   - 【写板书（write / update_element）】：
-     - 新建板书图元：\`[{"type": "write", "content": "规范数学草稿内容", "color": "#0f172a"}]\`
-     - 续写已有板书：若考生在当前草稿板上继续同一题推导，优先生成 \`{"type": "update_element", "targetElementId": "已有板书图元ID", "operation": "append", "content": "新增加的规范公式行"}\`
-     - 纠正/修改已有板书：\`{"type": "update_element", "targetElementId": "已有板书图元ID", "operation": "replace", "content": "修改后的完整内容"}\`
+   - 【草稿板书图元管理核心铁律（整幅唯一板书原则，严禁碎片化多开卡片）】：
+     - 默认唯一板书原则：一张草稿纸上，同一道题目的所有数学推导演算板书必须保持在【同一个板书图元】中连续向下书写！
+     - 只要已有图元列表中存在 write 图元（如 id="elem_xxx"）：
+       - 考生的任何“继续推导”、“下一步”、“补充公式”、甚至未明确说明图元ID的新口述，【必须且只能】使用 \`update_element\` 对该已有板书图元进行操作：
+         - 继续写下一步：\`{"type": "update_element", "targetElementId": "已有板书ID", "operation": "append", "content": "新增加的公式行"}\`
+         - 针对整块板书进行修正、重排、删减、代入或质问修复：\`{"type": "update_element", "targetElementId": "已有板书ID", "operation": "replace", "content": "修正后的完整整幅板书内容"}\`
+       - 【绝对严禁】在已有板书图元存在的情况下，又随手新建一个 \`{"type": "write", ...}\` 图元导致草稿板四分五裂成多个卡片！
+       - 只有当画板上完全为空，或者考生明确口述“另起一张卡片/新建独立板书”时，才允许生成新建 \`write\` 动作！
+       - 如果画板上已经不幸存在多块历史破碎板书（多个 write 图元），你必须在这次操作中使用 \`operation: "replace"\` 维护主板书，并将多余的冗余板书图元用 \`{"type": "delete_element", "targetElementId": "多余图元ID"}\` 清理合并，保持草稿纸整洁！
+
    - 【绘图决策（叠加 vs 另画 vs 升级 vs 拆分，由你直接指定 targetElementId，严禁前端用正则猜测）】：
      ① 叠加到已有坐标系：
         当考生说“在当前图上画”、“在刚才坐标系上画”、“加上某曲线”、“接着画”、“在图里画”，或者画板上已经存在直角坐标系且考生只是顺承口述画一条曲线（未明确要求“单独画/另画/另起一张”）时，必须使用 update_element 将新曲线追加到已有坐标系图元中：
@@ -2930,6 +2952,13 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
      - 几何图形：\`{"type": "shape", "shapeType": "circle"|"triangle"|"right_triangle", "labels": ["A", "B", "C"], "color": "#047857"}\`
      - 三维几何图形：\`{"type": "shape3d", "shapeType": "circle"|"square", "plane": "xy"|"xz"|"yz", "color": "#1d4ed8"}\`
      - 删除图元：\`{"type": "delete_element", "targetElementId": "已有图元ID"}\`
+
+4. 【绝对交流禁令（彻底消除官僚甩锅与长篇说教）】：
+   - 严禁任何形式的推诿或自证：“当前板书是严格按照您上一句口述记录的”、“我先如实汇报现在板上的情况”、“为避免又改错我不擅自增删”、“请您再口述一次准确式子”等官僚话术【一律绝对禁止】！
+   - 严禁在聊天区与考生辩论对线，严禁长篇大论！
+   - 面对考生的任何意见、疑问、指责或质问：
+     ① 第一准则：动手改板！永远通过 canvasActions 在画板上落实修改，行动大于语言！
+     ② 聊天回复（chatResponse）必须极度简短温和，严格控制在 1-2 句话、20字以内（例如：“好的，已为您将 $\\cos y$ 等式代入分母。”、“已修复末尾格式。”、“已去除多余推导。”）。
 
 【交流语气要求】：${toneInstructions[selectedTone]}`;
 
@@ -2990,6 +3019,12 @@ ${spokenText}
     }
 
     // 格式化与健全性保障
+    const isBoardRelated = /(?:删|替换|公式|等式|生成|板书|画板|草稿|写错|不对|你看|哪去|多余|怎么回事|修改)/.test(spokenText);
+    if (parsed.intent === 'chat' && isBoardRelated && safeBoardElements.length > 0) {
+      // 考生明明在询问/反馈画板或公式，绝不能作为纯闲聊冷处理，强行纠偏为 canvas 意图
+      parsed.intent = 'canvas';
+    }
+
     if (parsed.intent === 'blocked') {
       parsed.audit = parsed.audit || {};
       parsed.audit.passed = false;
@@ -3022,6 +3057,33 @@ ${spokenText}
         }
       } else if (parsed.canvasActions.length === 0 && parsed.scribeResult) {
         parsed.canvasActions = [{ type: 'write', content: parsed.scribeResult, color: '#0f172a' }];
+      }
+
+      // 单板书核心守卫：如果画板上已经有 write 图元，而 AI 返回了新建 write 动作，自动将其转换为 update_element (append) 附加到已有板书，防止画布分裂出多个独立卡片！
+      const existingWriteElem = safeBoardElements.find((e) => (e.actions || []).some((a) => a.type === 'write'));
+      const requestsNewCard = /(?:另起|独立|单独|新建).{0,6}(?:板书|卡片|草稿|一张)/.test(spokenText);
+      if (existingWriteElem && !requestsNewCard) {
+        parsed.canvasActions = parsed.canvasActions.map((action) => {
+          if (action.type === 'write') {
+            return {
+              type: 'update_element',
+              targetElementId: existingWriteElem.id,
+              operation: 'append',
+              content: action.content
+            };
+          }
+          return action;
+        });
+      }
+
+      // 清理末尾悬空的未闭合等号（例如出现 \therefore y' = \frac{1}{\cos y} = 时移除多余等号）
+      for (const act of parsed.canvasActions) {
+        if (typeof act.content === 'string') {
+          act.content = act.content.replace(/=\s*(\$|\n|$)/g, '$1');
+        }
+      }
+      if (typeof parsed.scribeResult === 'string') {
+        parsed.scribeResult = parsed.scribeResult.replace(/=\s*(\$|\n|$)/g, '$1');
       }
     }
 

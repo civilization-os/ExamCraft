@@ -1938,6 +1938,35 @@ export default function ScratchpadCanvas({
             );
 
             const isDraw = hasPlot || hasAxes || hasShape || isCircleAct;
+
+            // 前端唯一板书守护：若本次仅包含纯数学板书 (hasWrite && !isDraw)，且画布上已有板书图元，自动合并追加，绝不分裂多张独立卡片
+            if (hasWrite && !isDraw) {
+              const existingWrite = elements.find((el) => (el.actions || []).some((a) => a.type === 'write'));
+              if (existingWrite) {
+                const writeAct = elemActs.find((a) => a.type === 'write');
+                if (writeAct?.content) {
+                  setElements((previous) => previous.map((el) => {
+                    if (el.id !== existingWrite.id) return el;
+                    const oldWrite = (el.actions || []).find((a) => a.type === 'write');
+                    const oldContent = String(oldWrite?.content || '');
+                    const newLines = writeAct.content.split('\n').map((l) => l.trim()).filter(Boolean);
+                    const existingLines = new Set(oldContent.split('\n').map((l) => l.trim()).filter(Boolean));
+                    const appendLines = newLines.filter((l) => !existingLines.has(l));
+                    const merged = [oldContent.trim(), ...appendLines].filter(Boolean).join('\n');
+                    const updatedActions = (el.actions || []).map((a) => a.type === 'write' ? { ...a, content: merged } : a);
+                    const lineCount = merged.split('\n').length;
+                    return {
+                      ...el,
+                      actions: updatedActions,
+                      height: Math.max(130, Math.min(720, lineCount * 36 + 60)),
+                      updatedAt: Date.now()
+                    };
+                  }));
+                  return;
+                }
+              }
+            }
+
             const targetZone = isDraw ? 'draw' : 'formula';
 
             const containerW = containerRef.current?.clientWidth || 700;
