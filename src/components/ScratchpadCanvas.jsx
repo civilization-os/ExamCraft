@@ -451,6 +451,43 @@ export const extractBoardEquivalencePool = (boardText = '') => {
 };
 
 /**
+ * 智能估算板书演算所需的自适应高度，避免多层分式或行内换行被 Canvas 边缘裁切
+ */
+export const estimateBoardHeight = (content = '', cardWidth = 520) => {
+  if (!content || typeof content !== 'string') return 240;
+  const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return 200;
+
+  let totalHeight = 48; // padding top and bottom
+  const charCapacityPerLine = Math.max(20, Math.floor((cardWidth - 40) / 11));
+
+  for (const line of lines) {
+    const hasFraction = /\\(?:frac|dfrac|tfrac)\{/.test(line);
+    const fractionCount = (line.match(/\\(?:frac|dfrac|tfrac)\{/g) || []).length;
+    const hasRoot = /\\sqrt/.test(line);
+    const hasMatrix = /\\begin\{/.test(line);
+
+    let baseLineH = 32;
+    if (hasMatrix) {
+      const rows = (line.match(/\\\\/g) || []).length + 1;
+      baseLineH = Math.max(40, rows * 26 + 12);
+    } else if (fractionCount > 1) {
+      baseLineH = 50;
+    } else if (hasFraction) {
+      baseLineH = 44;
+    } else if (hasRoot) {
+      baseLineH = 38;
+    }
+
+    const approxLen = line.replace(/\\[a-zA-Z]+/g, 'X').length;
+    const wrapLines = Math.max(1, Math.ceil(approxLen / charCapacityPerLine));
+    totalHeight += wrapLines * baseLineH + 8;
+  }
+
+  return Math.max(240, Math.min(1800, totalHeight));
+};
+
+/**
  * 判定草稿图元类型：属于「1. 画图」还是「2. 写公式」
  */
 export const isElementFormula = (elem) => {
@@ -482,11 +519,18 @@ function DraggableCanvasElement({
   const isMoveTool = tool === 'select';
   const isEraserTool = tool === 'eraser';
 
+  const dynamicHeight = useMemo(() => {
+    const isWrite = (element.actions || []).some((a) => a.type === 'write');
+    if (!isWrite) return element.height || 260;
+    const writeContent = element.actions.find((a) => a.type === 'write')?.content || '';
+    return Math.max(element.height || 260, estimateBoardHeight(writeContent, element.width || 520));
+  }, [element.actions, element.height, element.width]);
+
   useEffect(() => {
     if (canvasRef.current && element.actions) {
-      drawActions(canvasRef.current, element.actions, element.width, element.height);
+      drawActions(canvasRef.current, element.actions, element.width, dynamicHeight);
     }
-  }, [element.actions, element.width, element.height, drawActions]);
+  }, [element.actions, element.width, dynamicHeight, drawActions]);
 
   const handlePointerDown = (e) => {
     // 橡皮擦模式下完全穿透，不拦截事件
@@ -551,7 +595,7 @@ function DraggableCanvasElement({
         position: 'absolute',
         transform: `translate3d(${element.x}px, ${element.y}px, 0)`,
         width: `${element.width}px`,
-        height: `${element.height}px`,
+        height: `${dynamicHeight}px`,
         touchAction: 'none'
       }}
       className={`group select-none transition-[box-shadow,border-color,background-color] duration-150 ${
@@ -687,7 +731,20 @@ export default function ScratchpadCanvas({
   const [elements, setElements] = useState(() => {
     try {
       const saved = localStorage.getItem(`${storageKey}_elements`);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return (Array.isArray(parsed) ? parsed : []).map((el) => {
+        const isWrite = (el.actions || []).some((a) => a.type === 'write');
+        if (isWrite && (el.width < 460 || !el.width)) {
+          const content = el.actions.find((a) => a.type === 'write')?.content || '';
+          const w = 520;
+          return {
+            ...el,
+            width: w,
+            height: estimateBoardHeight(content, w)
+          };
+        }
+        return el;
+      });
     } catch {
       return [];
     }
@@ -697,7 +754,20 @@ export default function ScratchpadCanvas({
   useEffect(() => {
     try {
       const saved = localStorage.getItem(`${storageKey}_elements`);
-      setElements(saved ? JSON.parse(saved) : []);
+      const parsed = saved ? JSON.parse(saved) : [];
+      setElements((Array.isArray(parsed) ? parsed : []).map((el) => {
+        const isWrite = (el.actions || []).some((a) => a.type === 'write');
+        if (isWrite && (el.width < 460 || !el.width)) {
+          const content = el.actions.find((a) => a.type === 'write')?.content || '';
+          const w = 520;
+          return {
+            ...el,
+            width: w,
+            height: estimateBoardHeight(content, w)
+          };
+        }
+        return el;
+      }));
     } catch {
       setElements([]);
     }
@@ -1209,14 +1279,19 @@ export default function ScratchpadCanvas({
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
 
+    // 针对数学板书推导演算，智能根据板书内容与行数保障充足的高度，杜绝多层分式或长等式链被画布边缘裁切
+    const writeAct = actions.find((a) => a.type === 'write');
+    const dynamicMinHeight = writeAct ? estimateBoardHeight(writeAct.content, width) : height;
+    const effectiveHeight = Math.max(height, dynamicMinHeight);
+
     canvas.width = width * dpr;
-    canvas.height = height * dpr;
+    canvas.height = effectiveHeight * dpr;
     canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
+    canvas.style.height = `${effectiveHeight}px`;
 
     ctx.save();
     ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, width, effectiveHeight);
 
     const cx = width / 2;
     const cy = height / 2 + 8;
@@ -1948,11 +2023,13 @@ export default function ScratchpadCanvas({
                   const updatedActions = target.actions.map((action, index) => index === writeIndex
                     ? { ...action, content }
                     : action);
-                  const lineCount = content.split('\n').length;
+                  const formulaBoardW = Math.max(target.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
+                  const newHeight = estimateBoardHeight(content, formulaBoardW);
                   next[targetIndex] = {
                     ...target,
+                    width: formulaBoardW,
+                    height: newHeight,
                     actions: updatedActions,
-                    height: Math.max(130, Math.min(720, lineCount * 36 + 60)),
                     updatedAt: Date.now()
                   };
                 } else if (Array.isArray(edit.actions) && edit.actions.length) {
@@ -2034,11 +2111,13 @@ export default function ScratchpadCanvas({
                     const appendLines = newLines.filter((l) => !existingLines.has(l));
                     const merged = [oldContent.trim(), ...appendLines].filter(Boolean).join('\n');
                     const updatedActions = (el.actions || []).map((a) => a.type === 'write' ? { ...a, content: merged } : a);
-                    const lineCount = merged.split('\n').length;
+                    const formulaBoardW = Math.max(el.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
+                    const newHeight = estimateBoardHeight(merged, formulaBoardW);
                     return {
                       ...el,
+                      width: formulaBoardW,
+                      height: newHeight,
                       actions: updatedActions,
-                      height: Math.max(130, Math.min(720, lineCount * 36 + 60)),
                       updatedAt: Date.now()
                     };
                   }));
@@ -2086,10 +2165,10 @@ export default function ScratchpadCanvas({
               elemHeight = 240;
             } else if (hasWrite) {
               const writeAct = elemActs.find((a) => a.type === 'write');
-              const lineCount = (writeAct?.content || '').split('\n').length;
+              const formulaBoardW = Math.max(480, Math.min(700, containerW - 40));
               elemTitle = '📝 规范板书演算';
-              elemWidth = Math.min(380, maxZoneW);
-              elemHeight = Math.max(130, Math.min(720, lineCount * 36 + 60));
+              elemWidth = formulaBoardW;
+              elemHeight = estimateBoardHeight(writeAct?.content || '', elemWidth);
             }
 
             const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
