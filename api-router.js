@@ -2835,6 +2835,9 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
     ? currentBoardElements.slice(-30).map((element) => ({
         id: String(element?.id || '').slice(0, 120),
         title: String(element?.title || '').slice(0, 160),
+        titleCustom: Boolean(element?.titleCustom),
+        collapsed: Boolean(element?.collapsed),
+        conclusion: typeof element?.conclusion === 'string' ? element.conclusion.slice(0, 200) : undefined,
         actions: Array.isArray(element?.actions) ? element.actions.slice(0, 8).map((action) => ({
           type: String(action?.type || '').slice(0, 32),
           content: typeof action?.content === 'string' ? action.content.slice(0, 1800) : undefined,
@@ -3088,6 +3091,14 @@ apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
        - 只有当画板上完全为空，或者考生明确口述“另起一张卡片/新建独立板书”时，才允许生成新建 \`write\` 动作！
        - 如果画板上已经不幸存在多块历史破碎板书（多个 write 图元），你必须在这次操作中使用 \`operation: "replace"\` 维护主板书，并将多余的冗余板书图元用 \`{"type": "delete_element", "targetElementId": "多余图元ID"}\` 清理合并，保持草稿纸整洁！
 
+   - 【智能板书标题 (title) 与核心推导结论 (conclusion)（草稿纸折叠机制）】：
+     - 动态智能标题 (title)：
+       - 在生成新建板书或维护更新板书时，必须根据板书演算的具体数学内容生成贴切具体的数学标题（如 "title": "📝 y = \arcsin x 求导推演"、"title": "📝 二次函数极值推导"、"title": "📝 变量代换与微分推导"），【绝对严禁】千篇一律生成“规范板书演算”！
+       - 若考生之前已自定义过标题（可从 safeBoardElements 中看到 titleCustom 为 true），则予以尊重，不随意覆盖考生的自定义标题。
+     - 核心推导结论 (conclusion)：
+       - 草稿纸图元支持一键折叠功能：展开时展示考生完整的每一步真实推演，折叠时仅展示核心结论公式以极大节省草稿纸空间。
+       - 请在 write 或 update_element 动作中附带精炼结论式 conclusion（例如 "conclusion": "(\arcsin x)' = \frac{1}{\sqrt{1-x^2}}"、"conclusion": "dt = 2dx" 或当前推导出的最终式）。
+
    - 【绘图决策（叠加 vs 另画 vs 升级 vs 拆分，由你直接指定 targetElementId，严禁前端用正则猜测）】：
      ① 叠加到已有坐标系：
         当考生说“在当前图上画”、“在刚才坐标系上画”、“加上某曲线”、“接着画”、“在图里画”，或者画板上已经存在直角坐标系且考生只是顺承口述画一条曲线（未明确要求“单独画/另画/另起一张”）时，必须使用 update_element 将新曲线追加到已有坐标系图元中：
@@ -3237,7 +3248,9 @@ ${spokenText}
               type: 'update_element',
               targetElementId: existingWriteElem.id,
               operation: 'append',
-              content: action.content
+              content: action.content,
+              title: action.title,
+              conclusion: action.conclusion
             };
           }
           return action;

@@ -488,6 +488,134 @@ export const estimateBoardHeight = (content = '', cardWidth = 520) => {
 };
 
 /**
+ * 智能提取板书的核心推导结论式（用于卡片折叠时展示核心结论，如 (\arcsin x)' = \frac{1}{\sqrt{1-x^2}} 或最终等式）
+ */
+export const extractBoardConclusion = (content = '', explicitConclusion = '') => {
+  if (explicitConclusion && typeof explicitConclusion === 'string' && explicitConclusion.trim()) {
+    return explicitConclusion.trim();
+  }
+  if (!content || typeof content !== 'string') return '';
+  const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return '';
+
+  // 1. 寻找初始设项，例如 "设 $y = \arcsin x$"、"令 $t = 2x+1$"、"$y = \arcsin x$"
+  let initialSubject = null;
+  for (const line of lines) {
+    const cleanLine = line.replace(/^\s*(?:设|令|已知|记)\s*/, '').replace(/\$/g, '').trim();
+    const initMatch = cleanLine.match(/^([a-zA-Z](?:\([a-zA-Z0-9]+\))?)\s*=\s*(.+)$/);
+    if (initMatch && !initialSubject) {
+      initialSubject = { varName: initMatch[1].trim(), expr: initMatch[2].trim() };
+      break;
+    }
+  }
+
+  // 2. 从后向前寻找包含 \therefore、∴、或等号的最终结论行
+  let finalEq = '';
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let line = lines[i].trim();
+    if (line.includes('\\therefore') || line.includes('∴') || line.includes('=')) {
+      line = line
+        .replace(/^\$+/, '')
+        .trim()
+        .replace(/^(?:\\therefore|\\because|∴|∵|所以|由此可得|由此得|可得|故|即)\s*/g, '')
+        .replace(/^\$+|\$+$/g, '')
+        .trim();
+      finalEq = line;
+      break;
+    }
+  }
+
+  if (!finalEq) {
+    finalEq = lines[lines.length - 1].replace(/^\$+|\$+$/g, '').trim();
+  }
+
+  // 3. 若初始设有 y = \arcsin x，最终式为 y' = \frac{1}{\sqrt{1-x^2}}，可升华组合为 (\arcsin x)' = \frac{1}{\sqrt{1-x^2}}
+  if (initialSubject && finalEq) {
+    const varPrime = initialSubject.varName + "'";
+    if (finalEq.startsWith(varPrime)) {
+      const rest = finalEq.slice(varPrime.length).trim();
+      return `(${initialSubject.expr})' ${rest}`.trim();
+    }
+  }
+
+  return finalEq;
+};
+
+/**
+ * 智能根据板书内容生成贴切的数学标题（若用户未自定义标题，自动根据推演内容命名）
+ */
+export const generateSmartBoardTitle = (content = '', explicitTitle = '', isCustom = false) => {
+  if (isCustom && explicitTitle) return explicitTitle;
+  if (explicitTitle && typeof explicitTitle === 'string' && explicitTitle.trim()) {
+    const t = explicitTitle.trim();
+    return t.startsWith('📝') ? t : `📝 ${t}`;
+  }
+  if (!content || typeof content !== 'string') return '📝 规范板书演算';
+
+  // 1. 反三角函数系列
+  if (/\\(?:arcsin|arccos|arctan)\b/.test(content)) {
+    const funcMatch = content.match(/\\(arcsin|arccos|arctan)(?:\s*([xyt]))?/);
+    const funcName = funcMatch ? funcMatch[1] : 'arcsin';
+    const varName = (funcMatch && funcMatch[2]) ? funcMatch[2] : 'x';
+    if (/'|\\cos\b|求导|导数/.test(content)) {
+      return `📝 ${funcName}(${varName}) 求导推演`;
+    }
+    return `📝 反三角函数 ${funcName}(${varName}) 推演`;
+  }
+
+  // 2. 积分与级数
+  if (/\\int|\\iint/.test(content)) {
+    return '📝 积分演算推导';
+  }
+  if (/\\sum\b/.test(content)) {
+    return '📝 级数求和推演';
+  }
+
+  // 3. 极限
+  if (/\\lim\b/.test(content)) {
+    return '📝 极限运算推导';
+  }
+
+  // 4. 矩阵与行列式
+  if (/\\begin\{(?:pmatrix|bmatrix|vmatrix)\}|\\det\b/.test(content)) {
+    return '📝 矩阵/行列式推演';
+  }
+
+  // 5. 三角函数
+  if (/\\(?:sin|cos|tan)\b/.test(content)) {
+    if (/'|求导|导数/.test(content)) {
+      return '📝 三角函数求导推演';
+    }
+    return '📝 三角函数恒等变形';
+  }
+
+  // 6. 指数与对数
+  if (/\\ln\b|\\exp\b|e\^/.test(content)) {
+    return '📝 指数/对数函数推导';
+  }
+
+  // 7. 特征值与微分方程
+  if (/\\lambda|特征值/.test(content)) {
+    return '📝 特征值与特征向量';
+  }
+  if (/d[ytx]\s*\/\s*d[xyt]/.test(content)) {
+    return '📝 微分方程演算';
+  }
+
+  // 8. 提取首行等式作为主题（例如令 t = 2x + 1）
+  const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length > 0) {
+    const firstLineEq = lines[0].match(/\$?([a-zA-Z](?:\([a-zA-Z0-9]+\))?\s*=\s*[^$,\n]+)\$?$/);
+    if (firstLineEq) {
+      const cleanSubject = firstLineEq[1].replace(/\$/g, '').slice(0, 18);
+      return `📝 ${cleanSubject} 演算`;
+    }
+  }
+
+  return '📝 规范数学演算';
+};
+
+/**
  * 判定草稿图元类型：属于「1. 画图」还是「2. 写公式」
  */
 export const isElementFormula = (elem) => {
@@ -513,6 +641,8 @@ function DraggableCanvasElement({
   onUpdateSize,
   onDelete,
   onOpenEditor,
+  onToggleCollapse,
+  onUpdateTitle,
   drawActions
 }) {
   const canvasRef = useRef(null);
@@ -523,31 +653,53 @@ function DraggableCanvasElement({
   const [isResizing, setIsResizing] = useState(false);
   const [previewSize, setPreviewSize] = useState(null);
 
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(element.title || '');
+
+  useEffect(() => {
+    if (!isEditingTitle) {
+      setTitleDraft(element.title || '');
+    }
+  }, [element.title, isEditingTitle]);
+
   const isMoveTool = tool === 'select';
   const isEraserTool = tool === 'eraser';
   const isWrite = (element.actions || []).some((a) => a.type === 'write');
+  const isCollapsed = Boolean(element.collapsed);
 
   const baseWidth = previewSize?.width || element.width || 520;
   const currentScale = Number(element.scale) > 0 ? Number(element.scale) : 1.0;
 
   const dynamicHeight = useMemo(() => {
+    if (isWrite && isCollapsed) return 64;
     if (!isWrite) return previewSize?.height || element.height || 260;
     const writeContent = element.actions?.find((a) => a.type === 'write')?.content || '';
     const estimatedH = estimateBoardHeight(writeContent, baseWidth);
     return previewSize?.height ? Math.max(previewSize.height, estimatedH) : Math.max(element.height || 260, estimatedH);
-  }, [isWrite, previewSize, element.height, element.actions, baseWidth]);
+  }, [isWrite, isCollapsed, previewSize, element.height, element.actions, baseWidth]);
 
   useEffect(() => {
     if (canvasRef.current && element.actions) {
-      drawActions(canvasRef.current, element.actions, baseWidth, dynamicHeight, currentScale);
+      drawActions(canvasRef.current, element.actions, baseWidth, dynamicHeight, currentScale, element);
     }
-  }, [element.actions, baseWidth, dynamicHeight, currentScale, drawActions]);
+  }, [element.actions, baseWidth, dynamicHeight, currentScale, drawActions, element]);
+
+  const handleCommitTitle = () => {
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== element.title) {
+      onUpdateTitle?.(element.id, trimmed, true);
+    } else if (!trimmed) {
+      // 恢复智能自动命名
+      onUpdateTitle?.(element.id, '', false);
+    }
+    setIsEditingTitle(false);
+  };
 
   const handlePointerDown = (e) => {
     // 橡皮擦模式下完全穿透，不拦截事件
     if (isEraserTool) return;
     // 工具按钮与调整手柄需要保留自己的完整 pointer/click 生命周期，不能被图元拖动层捕获。
-    if (e.target.closest('button, [data-no-drag="true"]')) return;
+    if (e.target.closest('button, input, [data-no-drag="true"]')) return;
 
     const isHandle = e.target.closest('[data-drag-handle="true"]');
     if (!isHandle && !isMoveTool) return;
@@ -679,9 +831,57 @@ function DraggableCanvasElement({
           }`}
           title="按住此处可整体拖动画入图形或板书"
         >
-          <div className="flex items-center gap-1.5 truncate pointer-events-none text-primary min-w-0">
-            <span className="material-symbols-outlined text-[14px] shrink-0">drag_pan</span>
-            <span className="truncate font-semibold text-[11px]">{element.title || (isWrite ? '规范板书' : '草稿图形')}</span>
+          {/* 左侧：智能动态标题与就地编辑重命名 */}
+          <div className="flex items-center gap-1.5 truncate min-w-0 flex-1 mr-1">
+            <span className="material-symbols-outlined text-[14px] shrink-0 pointer-events-none text-primary">
+              {isWrite ? (isCollapsed ? 'unfold_more' : 'assignment') : 'drag_pan'}
+            </span>
+            {isEditingTitle ? (
+              <input
+                data-no-drag="true"
+                type="text"
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCommitTitle();
+                  if (e.key === 'Escape') {
+                    setTitleDraft(element.title || '');
+                    setIsEditingTitle(false);
+                  }
+                }}
+                onBlur={handleCommitTitle}
+                className="px-1.5 py-0.2 rounded text-[11px] font-semibold bg-surface-container border border-primary/50 text-on-surface outline-none w-44"
+                placeholder="输入板书自定义标题..."
+              />
+            ) : (
+              <div
+                className="flex items-center gap-1 min-w-0 group/title cursor-text"
+                data-no-drag="true"
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditingTitle(true);
+                }}
+                title="双击或点击铅笔可修改标题"
+              >
+                <span className="truncate font-semibold text-[11px] text-primary">
+                  {element.title || (isWrite ? '规范板书' : '草稿图形')}
+                </span>
+                <button
+                  type="button"
+                  data-no-drag="true"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditingTitle(true);
+                  }}
+                  className="opacity-0 group-hover/title:opacity-100 hover:text-primary text-stone-400 p-0.5 rounded transition cursor-pointer"
+                  title="重命名标题"
+                >
+                  <span className="material-symbols-outlined text-[11px]">edit</span>
+                </button>
+              </div>
+            )}
             {currentScale !== 1.0 && (
               <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-primary/10 text-primary font-bold shrink-0">
                 {Math.round(currentScale * 100)}%
@@ -690,6 +890,30 @@ function DraggableCanvasElement({
           </div>
 
           <div className="flex items-center gap-1 shrink-0 ml-1">
+            {/* 折叠/展开快捷按钮（仅限 write 演算板书） */}
+            {isWrite && (
+              <button
+                type="button"
+                data-no-drag="true"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleCollapse?.(element.id);
+                }}
+                className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold transition cursor-pointer ${
+                  isCollapsed
+                    ? 'bg-primary text-white shadow-xs hover:bg-primary/90'
+                    : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'
+                }`}
+                title={isCollapsed ? '展开查看完整分步推演过程' : '折叠板书（仅展示核心推演结论）'}
+              >
+                <span className="material-symbols-outlined text-[12px]">
+                  {isCollapsed ? 'expand_more' : 'expand_less'}
+                </span>
+                <span>{isCollapsed ? '展开' : '折叠'}</span>
+              </button>
+            )}
+
             {/* 比例与字号缩放微调 */}
             <div className="flex items-center bg-surface-container rounded-md p-0.5 border border-outline-variant/30" data-no-drag="true">
               <button
@@ -763,8 +987,21 @@ function DraggableCanvasElement({
         <canvas ref={canvasRef} className="block w-full h-full bg-transparent" />
       </div>
 
-      {/* 右下角拖拽拉大手柄（支持鼠标/触摸直接拉大拉宽板书） */}
-      {!isEraserTool && (
+      {/* 折叠模式下：卡片主体支持一键快速展开 */}
+      {isWrite && isCollapsed && (
+        <div
+          data-no-drag="true"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleCollapse?.(element.id);
+          }}
+          className="absolute inset-0 bg-transparent hover:bg-primary/[0.04] transition-colors rounded-xl cursor-pointer z-10"
+          title="点击展开查看完整推演步骤"
+        />
+      )}
+
+      {/* 右下角拖拽拉大手柄（支持鼠标/触摸直接拉大拉宽板书，折叠状态下自动隐藏） */}
+      {!isEraserTool && !(isWrite && isCollapsed) && (
         <div
           data-no-drag="true"
           onPointerDown={handleResizePointerDown}
@@ -1323,10 +1560,11 @@ export default function ScratchpadCanvas({
       const tempCanvas = document.createElement('canvas');
       const s = Number(el.scale) > 0 ? Number(el.scale) : 1.0;
       const isWrite = (el.actions || []).some((a) => a.type === 'write');
+      const isCollapsed = Boolean(el.collapsed);
       const dynamicH = isWrite
-        ? Math.max(el.height || 260, estimateBoardHeight(el.actions.find((a) => a.type === 'write')?.content || '', el.width || 520))
+        ? (isCollapsed ? 64 : Math.max(el.height || 260, estimateBoardHeight(el.actions.find((a) => a.type === 'write')?.content || '', el.width || 520)))
         : (el.height || 260);
-      drawActionsOnCanvas(tempCanvas, el.actions, el.width, dynamicH, s);
+      drawActionsOnCanvas(tempCanvas, el.actions, el.width, dynamicH, s, el);
       expCtx.drawImage(tempCanvas, el.x * dpr, el.y * dpr, Math.ceil(el.width * s) * dpr, Math.ceil(dynamicH * s) * dpr);
     });
 
@@ -1430,15 +1668,17 @@ export default function ScratchpadCanvas({
 
   // ==================== 智能 Canvas 绘图与矢量渲染核心 ====================
   // 在指定尺寸的 canvas 内部精准居中绘制各项动作（支持自适应居中与高保真矢量排版）
-  const drawActionsOnCanvas = useCallback((canvas, actions, width, height, scale = 1.0) => {
+  const drawActionsOnCanvas = useCallback((canvas, actions, width, height, scale = 1.0, element = null) => {
     if (!canvas || !actions || actions.length === 0) return;
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     const s = Math.max(0.6, Math.min(2.0, Number(scale) || 1.0));
 
-    // 针对数学板书推导演算，智能根据板书内容与行数保障充足的高度，杜绝多层分式或长等式链被画布边缘裁切
     const writeAct = actions.find((a) => a.type === 'write');
-    const dynamicMinHeight = writeAct ? estimateBoardHeight(writeAct.content, width) : height;
+    const isCollapsed = Boolean(element?.collapsed);
+
+    // 针对数学板书推导演算，折叠模式下使用紧凑高度（64px），展开模式下智能保障充足高度
+    const dynamicMinHeight = writeAct ? (isCollapsed ? 64 : estimateBoardHeight(writeAct.content, width)) : height;
     const effectiveHeight = Math.max(height, dynamicMinHeight);
 
     const pixelW = Math.ceil(width * s);
@@ -1452,6 +1692,72 @@ export default function ScratchpadCanvas({
     ctx.save();
     ctx.scale(dpr * s, dpr * s);
     ctx.clearRect(0, 0, width, effectiveHeight);
+
+    // 折叠模式下：绘制紧凑精致的高保真结论胶囊卡片
+    if (isCollapsed && writeAct) {
+      const cardX = 4;
+      const cardY = 4;
+      const cardW = width - 8;
+      const cardH = effectiveHeight - 8;
+      const radius = 10;
+
+      // 1. 底框背景
+      ctx.fillStyle = '#f8fafc';
+      ctx.strokeStyle = '#93c5fd';
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(cardX, cardY, cardW, cardH, radius);
+      } else {
+        ctx.rect(cardX, cardY, cardW, cardH);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      // 2. 左侧推演结论微标
+      ctx.font = 'bold 11px "Microsoft YaHei", sans-serif';
+      const badgeText = '✨ 推演结论';
+      const badgeW = ctx.measureText(badgeText).width + 12;
+      const badgeH = 22;
+      const badgeX = cardX + 10;
+      const badgeY = cardY + (cardH - badgeH) / 2;
+
+      ctx.fillStyle = '#dbeafe';
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 5);
+      } else {
+        ctx.rect(badgeX, badgeY, badgeW, badgeH);
+      }
+      ctx.fill();
+
+      ctx.fillStyle = '#1d4ed8';
+      ctx.fillText(badgeText, badgeX + 6, badgeY + 15);
+
+      // 3. 核心数学结论公式渲染
+      const conclusionStr = element?.conclusion || extractBoardConclusion(writeAct.content);
+      const conclusionFormatted = formatMathExpression(conclusionStr || '推导完成');
+
+      ctx.font = 'italic 700 16px "KaTeX_Math", "Cambria Math", "Times New Roman", serif';
+      ctx.fillStyle = '#0f172a';
+      const textX = badgeX + badgeW + 10;
+      const textY = cardY + cardH / 2 + 5;
+      ctx.fillText(conclusionFormatted, textX, textY);
+
+      // 4. 右侧步数与展开提示
+      const stepCount = (writeAct.content || '').split('\n').filter(Boolean).length;
+      const hintText = `共 ${stepCount} 步推导 ▾`;
+      ctx.font = '500 11px "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#64748b';
+      const hintW = ctx.measureText(hintText).width;
+      const availableSpace = cardW - (textX + ctx.measureText(conclusionFormatted).width + 10);
+      if (availableSpace > hintW + 16) {
+        ctx.fillText(hintText, cardX + cardW - hintW - 12, textY);
+      }
+
+      ctx.restore();
+      return;
+    }
 
     const cx = width / 2;
     const cy = height / 2 + 8;
@@ -1997,6 +2303,31 @@ export default function ScratchpadCanvas({
     );
   }, []);
 
+  // 切换图元折叠/展开状态
+  const handleToggleCollapseElement = useCallback((id) => {
+    setElements((prev) =>
+      prev.map((el) => (el.id === id ? { ...el, collapsed: !el.collapsed, updatedAt: Date.now() } : el))
+    );
+  }, []);
+
+  // 更新图元标题（若用户主动输入/编辑，则标记为 titleCustom: true，AI 后续不再自动覆盖）
+  const handleUpdateElementTitle = useCallback((id, newTitle, isCustom = true) => {
+    setElements((prev) =>
+      prev.map((el) => {
+        if (el.id !== id) return el;
+        const writeAct = (el.actions || []).find((a) => a.type === 'write');
+        const fallbackTitle = writeAct ? generateSmartBoardTitle(writeAct.content) : (el.title || '📝 规范板书演算');
+        const finalTitle = newTitle && newTitle.trim() ? (newTitle.trim().startsWith('📝') ? newTitle.trim() : `📝 ${newTitle.trim()}`) : fallbackTitle;
+        return {
+          ...el,
+          title: finalTitle,
+          titleCustom: isCustom && Boolean(newTitle && newTitle.trim()),
+          updatedAt: Date.now()
+        };
+      })
+    );
+  }, []);
+
   // 用户手动直接编辑板书模态框状态与处理器
   const [editingBoardElement, setEditingBoardElement] = useState(null);
   const [editingBoardText, setEditingBoardText] = useState('');
@@ -2019,8 +2350,12 @@ export default function ScratchpadCanvas({
           : [{ type: 'write', content: newContent }, ...(el.actions || [])];
         const effectiveW = el.width || 520;
         const newHeight = estimateBoardHeight(newContent, effectiveW);
+        const smartTitle = el.titleCustom ? el.title : generateSmartBoardTitle(newContent);
+        const smartConclusion = extractBoardConclusion(newContent);
         return {
           ...el,
+          title: smartTitle,
+          conclusion: smartConclusion,
           actions: updatedActions,
           height: newHeight,
           updatedAt: Date.now()
@@ -2247,8 +2582,12 @@ export default function ScratchpadCanvas({
                     ? Number(edit.width)
                     : Math.max(target.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
                   const newHeight = hasHeight ? Number(edit.height) : estimateBoardHeight(content, formulaBoardW);
+                  const smartTitle = target.titleCustom ? target.title : generateSmartBoardTitle(content, edit.title);
+                  const smartConclusion = extractBoardConclusion(content, edit.conclusion);
                   next[targetIndex] = {
                     ...target,
+                    title: smartTitle,
+                    conclusion: smartConclusion,
                     width: formulaBoardW,
                     height: newHeight,
                     scale: targetScale,
@@ -2353,8 +2692,12 @@ export default function ScratchpadCanvas({
                     const updatedActions = (el.actions || []).map((a) => a.type === 'write' ? { ...a, content: merged } : a);
                     const formulaBoardW = Math.max(el.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
                     const newHeight = estimateBoardHeight(merged, formulaBoardW);
+                    const smartTitle = el.titleCustom ? el.title : generateSmartBoardTitle(merged, writeAct.title);
+                    const smartConclusion = extractBoardConclusion(merged, writeAct.conclusion);
                     return {
                       ...el,
+                      title: smartTitle,
+                      conclusion: smartConclusion,
                       width: formulaBoardW,
                       height: newHeight,
                       actions: updatedActions,
@@ -2406,16 +2749,20 @@ export default function ScratchpadCanvas({
             } else if (hasWrite) {
               const writeAct = elemActs.find((a) => a.type === 'write');
               const formulaBoardW = Math.max(480, Math.min(700, containerW - 40));
-              elemTitle = '📝 规范板书演算';
+              elemTitle = generateSmartBoardTitle(writeAct?.content || '', writeAct?.title);
               elemWidth = formulaBoardW;
               elemHeight = estimateBoardHeight(writeAct?.content || '', elemWidth);
             }
 
             const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
+            const initialWriteAct = elemActs.find((a) => a.type === 'write');
 
             const newElem = {
               id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               title: elemTitle,
+              conclusion: initialWriteAct ? extractBoardConclusion(initialWriteAct.content || '', initialWriteAct.conclusion) : '',
+              collapsed: false,
+              titleCustom: false,
               x: pos.x,
               y: pos.y,
               width: elemWidth,
@@ -3026,6 +3373,8 @@ export default function ScratchpadCanvas({
               onUpdateSize={handleUpdateElementSize}
               onDelete={handleDeleteElement}
               onOpenEditor={handleOpenBoardEditor}
+              onToggleCollapse={handleToggleCollapseElement}
+              onUpdateTitle={handleUpdateElementTitle}
               drawActions={drawActionsOnCanvas}
             />
           ))}
