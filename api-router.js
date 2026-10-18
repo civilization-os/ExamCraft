@@ -2972,19 +2972,25 @@ ${spokenText}
       parsed.canvasActions = [];
     }
 
-    // 当前消息含有已给出的数学关系时，由同一官方模型统一符号化，避免主模型将口述原文直接当板书。
-    const needsMathScribing = explicitTranscription || /(?:过程如下|列式子|列出来|整理成公式|整理为公式)/i.test(spokenText);
-    if (!isSuspicious && intentClassification?.decision === 'allow' && needsMathScribing && suppliedMathContent) {
+    // 模型判断本轮可处理后，统一整理数学板书输出，避免把口述原文直接当公式写入画板。
+    const hasMathWriteAction = (parsed.canvasActions || []).some((action) => action.type === 'write');
+    const hasDrawingAction = (parsed.canvasActions || []).some((action) => action.type !== 'write');
+    const needsMathScribing = suppliedMathContent && (
+      explicitTranscription
+      || parsed.audit?.passed === false
+      || (parsed.intent === 'canvas' && hasMathWriteAction && !hasDrawingAction)
+    );
+    if (!isSuspicious && intentClassification?.decision === 'allow' && needsMathScribing) {
       try {
         const formatter = createTrackedChatModel('scratchpad.write-draw');
         const formatResponse = await formatter.invoke([
           {
             role: 'system',
-            content: '独立官方模型已将本轮意图判定为允许。你的职责仅是把当前用户消息中已经提供的数学表达整理为规范符号，不需要也不能依赖历史对话。不能解题、求导、推导、计算、补全、纠错或解释。删除“过程如下”“那么”等口述填充语，只输出公式。每个等式独占一行，使用草稿纸画板可渲染的简单行内数学格式，不要使用 aligned/align 环境、& 对齐符、$$块公式或 Markdown 代码块。例如“arcsinx 求导过程如下，y 等于 arcsin x，那么 sin y=x”只输出两行：$y=\\arcsin x$ 和 $\\sin y=x$。不能把口述句子原样输出。'
+            content: '独立官方模型已将本轮意图判定为允许。你的职责仅是把当前用户这条口述中已经给出的数学内容，整理成草稿纸可渲染的规范板书。不得计算、求导、推导、补全、纠错或解释；不要从上下文推出新步骤。可参考画板和最近对话来理解“继续/上一行/这个式子”等指代，但只输出当前这条口述明确给出的内容，不重复历史内容，除非用户要求重写。删除“那么、然后、又因为”等口述连接词；把“等于、乘以、平方、分之、导数/导”等口述数学词转换成标准符号。每个完整等式单独一行，公式使用 $...$ 行内定界符；分数用 \\frac{...}{...}，乘法用 \\cdot，函数用 \\sin/\\cos/\\arcsin，导数撇号用 y\'。不要输出 aligned/align 环境、& 对齐符号、$$块公式、Markdown 代码块或解释文字。对于多行续写，只整理用户本条明确说出的等式，不补中间推导。'
           },
           {
             role: 'user',
-            content: `请仅整理这条已审核通过的口述内容为标准公式，不推导任何未提供内容：\n${spokenText}`
+            content: `【当前口述，唯一需要整理的内容】\n${spokenText}\n\n【当前画板已有内容，仅作续写指代参考；不要重写历史内容或据此补推导】\n${String(currentBoardContent || '').slice(-1600) || '（空）'}\n\n【最近的草稿纸对话，仅作指代参考；只转换当前口述明确给出的数学内容】\n${safeConversationContext || '（无）'}`
           }
         ]);
         const formattedContent = String(formatResponse.content || '')
