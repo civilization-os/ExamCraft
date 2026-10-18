@@ -608,8 +608,13 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
   const flushPassage = () => {
     if (passageBuffer.length > 0) {
       const candidate = passageBuffer.join('\n').trim();
-      if (isCollectingPassage && candidate && !isPseudoPassage(candidate)) {
-        currentPassage = candidate;
+      const cleaned = candidate
+        .replace(/^\*{0,2}Directions:?\*{0,2}\s*/i, '')
+        .replace(/^(?:Read the following|请阅读|阅读下列)[\s\S]*?(?:\(\d+\s*points?\)|（\d+分）|共\s*\d+\s*分[）\)])\s*/i, '')
+        .trim();
+      const textToUse = cleaned || candidate;
+      if (textToUse && !isPseudoPassage(textToUse)) {
+        currentPassage = textToUse;
       }
       passageBuffer = [];
     }
@@ -634,15 +639,24 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
       currentSection = line.replace(/^##\s+/, '').trim();
       currentPassage = '';
       currentPassageTitle = '';
-      isCollectingPassage = false;
+      const isCloze = /Use of English|完形|Cloze|英语知识运用/i.test(currentSection);
+      if (isCloze) {
+        isCollectingPassage = true;
+        currentPassageTitle = '完形填空短文 (Use of English)';
+      } else {
+        isCollectingPassage = false;
+      }
       continue;
     }
 
-    // Passage header (### Text 1, #### Text 1, etc.)
-    const passageMatch = !inDetails && line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*)/i);
+    // Passage header (### Text 1, #### Text 1, plain Text 1, **Text 1**, 【Text 1】, etc.)
+    const passageMatch = !inDetails && (
+      line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*|阅读材料|材料[一二三四\d]+)/i) ||
+      line.match(/^\*{0,2}(?:【\s*)?(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读材料\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*)(?:\s*】)?\*{0,2}\s*$/i)
+    );
     if (passageMatch) {
       flushPassage();
-      currentPassageTitle = passageMatch[1].trim();
+      currentPassageTitle = (passageMatch[1] || '阅读材料').trim();
       currentPassage = '';
       isCollectingPassage = true;
       passageBuffer.push(rawLine);
@@ -667,13 +681,15 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
         isQHeader = true;
         qNum = parseInt(mHash[1], 10);
         rest = mHash[2];
-      } else if (mNum && !line.includes('%') && !isCollectingPassage && blocks.length > 0) {
+      } else if (mNum && !line.includes('%')) {
         const candidateNum = parseInt(mNum[1], 10);
-        const lastNum = blocks[blocks.length - 1].qNum || 0;
-        if (candidateNum === lastNum + 1) {
-          isQHeader = true;
-          qNum = candidateNum;
-          rest = mNum[2];
+        const lastNum = blocks.length ? (blocks[blocks.length - 1].qNum || 0) : 0;
+        if (candidateNum >= 1 && candidateNum <= 150) {
+          if (blocks.length === 0 || candidateNum > lastNum || candidateNum === 1) {
+            isQHeader = true;
+            qNum = candidateNum;
+            rest = mNum[2];
+          }
         }
       }
     }
@@ -684,7 +700,7 @@ export function sliceMarkdownIntoQuestionBlocks(mdText) {
       blocks.push({
         qNum,
         section: currentSection,
-        passageTitle: currentPassageTitle,
+        passageTitle: currentPassage ? (currentPassageTitle || '阅读材料') : '',
         passage: currentPassage,
         lines: [rawLine]
       });
@@ -731,8 +747,13 @@ export function parseExamMarkdown(mdText) {
   const flushPassage = () => {
     if (passageBuffer.length > 0) {
       const candidate = passageBuffer.join('\n').trim();
-      if (isCollectingPassage && candidate && !isPseudoPassage(candidate)) {
-        currentPassage = candidate;
+      const cleaned = candidate
+        .replace(/^\*{0,2}Directions:?\*{0,2}\s*/i, '')
+        .replace(/^(?:Read the following|请阅读|阅读下列)[\s\S]*?(?:\(\d+\s*points?\)|（\d+分）|共\s*\d+\s*分[）\)])\s*/i, '')
+        .trim();
+      const textToUse = cleaned || candidate;
+      if (textToUse && !isPseudoPassage(textToUse)) {
+        currentPassage = textToUse;
       }
       passageBuffer = [];
     }
@@ -811,17 +832,26 @@ export function parseExamMarkdown(mdText) {
       currentSection = line.replace(/^##\s+/, '').trim();
       currentPassage = '';
       currentPassageTitle = '';
-      isCollectingPassage = false;
+      const isCloze = /Use of English|完形|Cloze|英语知识运用/i.test(currentSection);
+      if (isCloze) {
+        isCollectingPassage = true;
+        currentPassageTitle = '完形填空短文 (Use of English)';
+      } else {
+        isCollectingPassage = false;
+      }
       isHeaderReset = true;
       continue;
     }
 
-    // 4. Passage header (#### Text 1, #### Passage A, etc.)
-    const passageMatch = !inDetails && line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*)/i);
+    // 4. Passage header (#### Text 1, #### Passage A, plain Text 1, **Text 1**, etc.)
+    const passageMatch = !inDetails && (
+      line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*|阅读材料|材料[一二三四\d]+)/i) ||
+      line.match(/^\*{0,2}(?:【\s*)?(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读材料\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*)(?:\s*】)?\*{0,2}\s*$/i)
+    );
     if (passageMatch) {
       finishCurrentQ();
       flushPassage();
-      currentPassageTitle = passageMatch[1].trim();
+      currentPassageTitle = (passageMatch[1] || '阅读材料').trim();
       currentPassage = '';
       isCollectingPassage = true;
       isHeaderReset = true;
@@ -918,8 +948,9 @@ export function parseExamMarkdown(mdText) {
         score: score,
         section: currentSection,
         passage: currentPassage || undefined,
-        passageTitle: currentPassageTitle || undefined,
-        prompt: rest,
+        passageTitle: currentPassage ? (currentPassageTitle || '阅读材料') : undefined,
+        passageGroupId: currentPassage ? getPassageGroupId(currentPassageTitle || '阅读材料', currentPassage) : undefined,
+        prompt: rest || (isEnglishExam && qNum <= 20 ? `根据上下文，选择最佳选项填入第 (${qNum}) 空空白处。` : rest),
         options: isChoice ? [] : undefined,
         userAnswer: '',
         standardAnswer: '',
@@ -931,9 +962,7 @@ export function parseExamMarkdown(mdText) {
     }
 
     if (!currentQ) {
-      if (isCollectingPassage) {
-        passageBuffer.push(rawLine);
-      }
+      passageBuffer.push(rawLine);
       continue;
     }
 

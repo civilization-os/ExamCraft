@@ -254,17 +254,102 @@ export default function ExamRoomView({
 
   // Candidate draft input for current question
   const currentQ = questionList[currentQIndex] || questionList[0] || null;
-  const currentPassageItems = currentQ?.passage
-    ? questionList
+
+  // 1. Intelligent passage resolution (defense in depth for papers with missing passage links)
+  const isClozeQuestion = useMemo(() => {
+    return /完形|cloze|Use of English/i.test(currentQ?.type || currentQ?.section || '');
+  }, [currentQ]);
+
+  const resolvedPassage = useMemo(() => {
+    if (currentQ?.passage && typeof currentQ.passage === 'string' && currentQ.passage.trim()) {
+      return currentQ.passage.trim();
+    }
+    // Sibling cloze question fallback
+    if (isClozeQuestion) {
+      const sibling = questionList.find((q) => q.passage && typeof q.passage === 'string' && q.passage.trim() && /完形|cloze|Use of English/i.test(q.type || q.section || ''));
+      if (sibling?.passage) return sibling.passage.trim();
+    }
+    // Sibling in same section fallback
+    if (currentQ?.section) {
+      const siblingInSec = questionList.find((q) => q.section === currentQ.section && q.passage && typeof q.passage === 'string' && q.passage.trim());
+      if (siblingInSec?.passage) return siblingInSec.passage.trim();
+    }
+    // activePaper level fallback
+    if (activePaper?.passage && typeof activePaper.passage === 'string' && activePaper.passage.trim()) {
+      return activePaper.passage.trim();
+    }
+    return '';
+  }, [currentQ, questionList, isClozeQuestion, activePaper]);
+
+  const resolvedPassageTitle = useMemo(() => {
+    if (currentQ?.passageTitle) return currentQ.passageTitle;
+    if (isClozeQuestion) return '完形填空短文 (Use of English)';
+    return '阅读材料';
+  }, [currentQ, isClozeQuestion]);
+
+  // Passage items that share the resolved passage
+  const currentPassageItems = useMemo(() => {
+    if (!resolvedPassage) return [];
+    return questionList
       .map((question, index) => ({ question, index }))
-      .filter(({ question }) => (
-        question?.options?.length > 0 &&
-        (currentQ.passageGroupId && question.passageGroupId
-          ? question.passageGroupId === currentQ.passageGroupId
-          : question.passage === currentQ.passage && (question.passageTitle || '') === (currentQ.passageTitle || ''))
-      ))
-    : [];
-  const isMultiQuestionPassage = currentPassageItems.length > 1;
+      .filter(({ question }) => {
+        if (!question?.options?.length) return false;
+        if (currentQ?.passageGroupId && question.passageGroupId) {
+          return question.passageGroupId === currentQ.passageGroupId;
+        }
+        const qPassage = (question.passage && question.passage.trim()) || (isClozeQuestion && /完形|cloze|Use of English/i.test(question.type || question.section || '') ? resolvedPassage : null);
+        return qPassage === resolvedPassage;
+      });
+  }, [questionList, resolvedPassage, currentQ, isClozeQuestion]);
+
+  // View mode for multi-question passages: 'focus' (show passage + current question) vs 'all' (show passage + all questions)
+  const [passageViewMode, setPassageViewMode] = useState('focus'); // 'focus' | 'all'
+  const isMultiQuestionPassage = currentPassageItems.length > 1 && passageViewMode === 'all';
+
+  // In-place passage repair modal state
+  const [isPassageModalOpen, setIsPassageModalOpen] = useState(false);
+  const [passageInputText, setPassageInputText] = useState('');
+  const [isMobileAnswerDrawerOpen, setIsMobileAnswerDrawerOpen] = useState(false);
+
+  const handleSavePassageToPaper = () => {
+    if (!passageInputText.trim() || !activePaper) return;
+    const text = passageInputText.trim();
+    const title = resolvedPassageTitle || '完形填空短文 (Use of English)';
+    const groupId = `passage-user-${Date.now()}`;
+
+    const updatedQuestions = questionList.map((q) => {
+      const isTarget = isClozeQuestion
+        ? /完形|cloze|Use of English/i.test(q.type || q.section || '') || (Number(q.num || q.id) >= 1 && Number(q.num || q.id) <= 20)
+        : (q.section === currentQ?.section || q.id === currentQ?.id);
+      if (isTarget) {
+        return {
+          ...q,
+          passage: text,
+          passageTitle: title,
+          passageGroupId: groupId
+        };
+      }
+      return q;
+    });
+
+    const updatedPaper = {
+      ...activePaper,
+      questions: updatedQuestions
+    };
+
+    if (onUpdatePaper) onUpdatePaper(updatedPaper);
+    try {
+      const rawPapers = localStorage.getItem('examcraft_papers');
+      if (rawPapers) {
+        const list = JSON.parse(rawPapers);
+        const next = list.map((p) => (p.id === activePaper.id ? updatedPaper : p));
+        localStorage.setItem('examcraft_papers', JSON.stringify(next));
+      }
+    } catch {}
+
+    setIsPassageModalOpen(false);
+    showExamToast('✨ 篇章短文已成功补全并关联到当前题组！', 'success');
+  };
   const [candidateDraft, setCandidateDraft] = useState(currentQ?.userAnswer || '');
   const fillAnswerInputRef = useRef(null);
   const mathFieldRef = useRef(null);
@@ -1646,19 +1731,72 @@ export default function ExamRoomView({
               <span className="text-on-surface-variant text-[12px]">难度: <span className="text-tertiary tracking-wider font-mono">{getQuestionDifficulty(currentQ).stars}</span></span>
             </div>
           </div>
-          {currentQ.passage && (
+          {/* Resolved Passage Section */}
+          {resolvedPassage ? (
             <div className="p-space-md bg-surface-container-low rounded-xl border border-secondary/30 space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-secondary font-semibold font-label-md">{currentQ.passageTitle || '阅读材料'}</div>
-                {isMultiQuestionPassage && <span className="shrink-0 rounded-full bg-secondary-container/40 px-2 py-0.5 text-[11px] font-medium text-secondary">已答 {currentPassageItems.filter(({ question }) => Boolean(question.userAnswer?.trim())).length} / {currentPassageItems.length} 题</span>}
+                <div className="text-secondary font-semibold font-label-md flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[18px]">menu_book</span>
+                  <span>{resolvedPassageTitle}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {currentPassageItems.length > 1 && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="shrink-0 rounded-full bg-secondary-container/40 px-2 py-0.5 text-[11px] font-medium text-secondary">
+                        已答 {currentPassageItems.filter(({ question }) => Boolean(question.userAnswer?.trim())).length} / {currentPassageItems.length} 题
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPassageViewMode((m) => m === 'focus' ? 'all' : 'focus')}
+                        className="px-2 py-0.5 rounded bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-primary text-[11px] font-sans border border-outline-variant/30 transition-colors cursor-pointer"
+                        title={passageViewMode === 'focus' ? '切换为篇章整组展开' : '切换为单题聚焦模式'}
+                      >
+                        {passageViewMode === 'focus' ? '篇章整组展开' : '聚焦单题模式'}
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPassageInputText(resolvedPassage);
+                      setIsPassageModalOpen(true);
+                    }}
+                    className="text-on-surface-variant hover:text-primary p-1 rounded hover:bg-surface-container transition-colors text-[11px] flex items-center gap-0.5 cursor-pointer"
+                    title="编辑或校对本篇材料"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">edit_note</span>
+                    <span className="hidden sm:inline">编辑材料</span>
+                  </button>
+                </div>
               </div>
-              <div className="exam-english-passage max-h-80 overflow-y-auto p-space-sm sm:px-4 sm:py-3 bg-surface-container-lowest rounded-lg text-on-surface border border-outline-variant/20">
-                <MathMarkdown content={currentQ.passage.replace(/\{\{\s*(\d+)\s*\}\}/g, '**($1) ______**')} />
+              <div className="exam-english-passage max-h-80 overflow-y-auto p-space-sm sm:px-4 sm:py-3 bg-surface-container-lowest rounded-lg text-on-surface border border-outline-variant/20 text-[13.5px] leading-relaxed">
+                <MathMarkdown content={resolvedPassage.replace(/\{\{\s*(\d+)\s*\}\}/g, '**($1) ______**').replace(/\[(\d+)\]/g, '**[$1] ______**')} />
               </div>
             </div>
-          )}
+          ) : isClozeQuestion ? (
+            <div className="p-3 sm:p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <span className="material-symbols-outlined text-amber-600 text-[22px] shrink-0">warning</span>
+                <div className="text-[13px] leading-relaxed">
+                  <div className="font-bold text-amber-900">完形填空需结合上下文篇章短文作答</div>
+                  <div className="text-on-surface-variant text-[12px]">当前题组未绑定短文材料，考生无法对照上下文挖空选词。您可以直接在此一键补录短文。</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPassageInputText('');
+                  setIsPassageModalOpen(true);
+                }}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-[12px] flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 transition-all"
+              >
+                <span className="material-symbols-outlined text-[16px]">edit_note</span>
+                <span>补录/粘贴完形短文</span>
+              </button>
+            </div>
+          ) : null}
           {!isMultiQuestionPassage && <div className="py-space-md min-w-0 overflow-x-auto">
-            <MathMarkdown content={currentQ.prompt} className="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm font-semibold" />
+            <MathMarkdown content={currentQ.prompt || (isClozeQuestion ? `请根据上下文，选择最佳词汇填入第 (${currentQ.num}) 空空白处。` : '')} className="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm font-semibold" />
             {currentQ.mathExpression && (
               <div className="bg-surface-container-low px-space-xl py-space-lg rounded-lg border-l-4 border-primary overflow-x-auto my-2">
                 <MathMarkdown content={currentQ.mathExpression.startsWith('$') ? currentQ.mathExpression : `$$${currentQ.mathExpression}$$`} className="text-headline-md" />
@@ -2375,6 +2513,165 @@ export default function ExamRoomView({
           showExamToast('本场考试已关闭弹窗提醒', 'info');
         }}
       />
+
+      {/* Passage Edit / In-Place Repair Modal */}
+      {isPassageModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="w-full max-w-2xl bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant/30 flex flex-col overflow-hidden max-h-[90vh] animate-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 border-b border-surface-container flex items-center justify-between bg-surface-container-low/50">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[22px]">menu_book</span>
+                <h3 className="text-title-md font-bold text-on-surface">补录 / 编辑篇章短文材料</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPassageModalOpen(false)}
+                className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg hover:bg-surface-container transition cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+            <div className="p-5 flex flex-col space-y-3 overflow-y-auto">
+              <div className="p-3 rounded-lg bg-surface-container-low text-on-surface-variant text-[12px] leading-relaxed flex items-start gap-2">
+                <span className="material-symbols-outlined text-primary text-[18px] shrink-0 mt-0.5">info</span>
+                <span>
+                  在此粘贴完整的英文完形填空或阅读短文（支持带挖空编号如 1、[1] 或 1~20 空）。保存后将自动应用至本卷相关题组，并持久化保存。
+                </span>
+              </div>
+              <textarea
+                rows={12}
+                value={passageInputText}
+                onChange={(e) => setPassageInputText(e.target.value)}
+                placeholder="请在此粘贴或输入英文篇章短文，例如：&#10;&#10;The ancient Greek philosopher Aristotle viewed happiness as... 1 [A] ... 2 [B] ..."
+                className="w-full p-3.5 bg-surface-container-low rounded-xl border border-outline-variant/30 font-sans text-[13px] text-on-surface focus:outline-none focus:ring-2 focus:ring-primary leading-relaxed resize-y"
+              />
+            </div>
+            <div className="px-5 py-3 bg-surface-container-low border-t border-surface-container flex items-center justify-between">
+              <span className="text-[11px] text-outline">
+                {passageInputText.length} 字符 · {passageInputText.split(/\s+/).filter(Boolean).length} 词
+              </span>
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsPassageModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-on-surface-variant hover:bg-surface-container font-label-md font-medium transition cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePassageToPaper}
+                  disabled={!passageInputText.trim()}
+                  className="px-5 py-2 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-label-md font-semibold cursor-pointer shadow-xs disabled:opacity-50 active:scale-95 transition-all"
+                >
+                  保存并应用到题组
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile-Only Bottom Sticky Action Bar (sm:hidden, completely isolated from Web) */}
+      <nav aria-label="移动端快速答题导航" className="sm:hidden fixed bottom-0 left-0 right-0 z-30 bg-surface-container-lowest/95 backdrop-blur-md border-t border-outline-variant/30 px-3 py-2 flex items-center justify-between shadow-lg pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <button
+          type="button"
+          disabled={currentQIndex === 0}
+          onClick={() => setCurrentQIndex((i) => Math.max(0, i - 1))}
+          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-sans font-medium border border-outline-variant/30 disabled:opacity-35 disabled:cursor-not-allowed active:scale-95 transition cursor-pointer"
+        >
+          <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+          <span>上一题</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsMobileAnswerDrawerOpen(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary border border-primary/25 text-[12px] font-sans font-semibold active:scale-95 transition cursor-pointer"
+        >
+          <span className="material-symbols-outlined text-[16px]">grid_view</span>
+          <span>答题卡 ({answeredCount}/{questionList.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowScratchpad(!showScratchpad)}
+          className={`p-1.5 rounded-lg border text-[12px] transition cursor-pointer ${showScratchpad ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-low text-on-surface-variant border-outline-variant/30'}`}
+          title="打开草稿纸"
+        >
+          <span className="material-symbols-outlined text-[18px]">draw</span>
+        </button>
+
+        <button
+          type="button"
+          disabled={currentQIndex === questionList.length - 1}
+          onClick={() => setCurrentQIndex((i) => Math.min(questionList.length - 1, i + 1))}
+          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[12px] font-sans font-semibold shadow-xs disabled:opacity-35 disabled:bg-surface-container-low disabled:text-on-surface-variant disabled:shadow-none disabled:cursor-not-allowed active:scale-95 transition cursor-pointer"
+        >
+          <span>下一题</span>
+          <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+        </button>
+      </nav>
+
+      {/* Mobile Answer Card Bottom Sheet / Drawer */}
+      {isMobileAnswerDrawerOpen && (
+        <div className="sm:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in duration-150">
+          <div className="w-full bg-surface-container-lowest rounded-t-2xl max-h-[75vh] flex flex-col shadow-2xl border-t border-outline-variant/30 animate-in slide-in-from-bottom duration-200">
+            <div className="px-4 py-3 border-b border-surface-container flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[20px]">grid_view</span>
+                <span className="font-bold text-on-surface text-[14px]">答题卡与题目跳转</span>
+                <span className="text-xs font-mono text-outline">({answeredCount}/{questionList.length})</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileAnswerDrawerOpen(false)}
+                className="p-1 rounded-lg text-on-surface-variant hover:text-on-surface"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto space-y-3">
+              {questionGroups.map((group) => (
+                <div key={group.type} className="space-y-1.5">
+                  <div className="text-[11px] font-semibold text-secondary flex items-center gap-1">
+                    <span>{group.type}</span>
+                    <span className="text-outline-variant">({group.items.length})</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.items.map(({ question: q, index: idx }) => {
+                      const isCurrent = idx === currentQIndex;
+                      const isAnswered = Boolean(q.userAnswer && q.userAnswer.trim().length > 0);
+                      const isMarked = markedQuestionKeys.includes(getQuestionMarkKey(q, idx));
+                      return (
+                        <button
+                          key={`mob_q_${q.id ?? 'item'}_${idx}`}
+                          type="button"
+                          onClick={() => {
+                            setCurrentQIndex(idx);
+                            setIsMobileAnswerDrawerOpen(false);
+                          }}
+                          className={`relative flex h-9 w-9 items-center justify-center rounded-lg border font-mono text-[13px] ${getQuestionTypeClass(q.type)} ${
+                            isCurrent
+                              ? 'ring-2 ring-primary ring-offset-2 font-bold shadow-xs'
+                              : isAnswered
+                              ? 'ring-1 ring-emerald-500 font-semibold'
+                              : 'opacity-85'
+                          }`}
+                        >
+                          {q.num}
+                          {isAnswered && <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-1 ring-surface-container-lowest" />}
+                          {isMarked && <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-400 ring-1 ring-surface-container-lowest" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

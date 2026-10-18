@@ -54,8 +54,13 @@ export function sliceMarkdownIntoChunks(mdText) {
   const flushPassage = () => {
     if (passageBuffer.length > 0) {
       const candidate = passageBuffer.join('\n').trim();
-      if (isCollectingPassage && candidate && !isPseudoPassage(candidate)) {
-        currentPassage = candidate;
+      const cleaned = candidate
+        .replace(/^\*{0,2}Directions:?\*{0,2}\s*/i, '')
+        .replace(/^(?:Read the following|请阅读|阅读下列)[\s\S]*?(?:\(\d+\s*points?\)|（\d+分）|共\s*\d+\s*分[）\)])\s*/i, '')
+        .trim();
+      const textToUse = cleaned || candidate;
+      if (textToUse && !isPseudoPassage(textToUse)) {
+        currentPassage = textToUse;
       }
       passageBuffer = [];
     }
@@ -87,16 +92,25 @@ export function sliceMarkdownIntoChunks(mdText) {
       currentSection = line.replace(/^##\s+/, '').trim();
       currentPassage = '';
       currentPassageTitle = '';
-      isCollectingPassage = false;
+      const isCloze = /Use of English|完形|Cloze|英语知识运用/i.test(currentSection);
+      if (isCloze) {
+        isCollectingPassage = true;
+        currentPassageTitle = '完形填空短文 (Use of English)';
+      } else {
+        isCollectingPassage = false;
+      }
       isHeaderReset = true;
       continue;
     }
 
-    // Passage header (### Text 1, #### Text 1, ### Passage A, #### 阅读材料, etc.)
-    const passageMatch = !inDetails && line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*)/i);
+    // Passage header (### Text 1, #### Text 1, plain Text 1, **Text 1**, 【Text 1】, etc.)
+    const passageMatch = !inDetails && (
+      line.match(/^#{2,4}\s*(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读理解\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*|阅读材料|材料[一二三四\d]+)/i) ||
+      line.match(/^\*{0,2}(?:【\s*)?(Text\s*\d+|Passage\s*[A-D0-9]+|篇章\s*[A-D0-9]+|[A-D]篇|阅读材料\s*[A-D0-9]*|完形填空(?:\s*[A-D0-9]*)?|Cloze(?:\s+Test)?\s*[A-D0-9]*)(?:\s*】)?\*{0,2}\s*$/i)
+    );
     if (passageMatch) {
       flushPassage();
-      currentPassageTitle = passageMatch[1].trim();
+      currentPassageTitle = (passageMatch[1] || '阅读材料').trim();
       currentPassage = '';
       isCollectingPassage = true;
       isHeaderReset = true;
@@ -150,7 +164,7 @@ export function sliceMarkdownIntoChunks(mdText) {
       isCollectingPassage = false;
       isHeaderReset = false;
       const validPassage = currentPassage && !isPseudoPassage(currentPassage) ? currentPassage : '';
-      const validPassageTitle = validPassage ? currentPassageTitle : '';
+      const validPassageTitle = validPassage ? (currentPassageTitle || '阅读材料') : '';
       questionBlocks.push({
         qNum,
         section: currentSection,
@@ -163,7 +177,7 @@ export function sliceMarkdownIntoChunks(mdText) {
 
     if (questionBlocks.length > 0 && !isCollectingPassage) {
       questionBlocks[questionBlocks.length - 1].lines.push(rawLine);
-    } else if (isCollectingPassage) {
+    } else {
       passageBuffer.push(rawLine);
     }
 
