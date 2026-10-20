@@ -20,10 +20,12 @@ import {
   apiSaveSubmission,
   apiSaveNotebook,
   apiSaveSubjects,
-  apiMigrateLocalData
+  apiMigrateLocalData,
+  apiSaveExamSession
 } from './utils/auth';
 import { deduplicateQuestions } from './utils/questionTypes';
 import { inferPaperSubject } from './utils/paperSubject';
+import { mergeAnswersSmartly } from './stores/useExamSessionStore';
 
 const APP_PATHS = new Set(['dashboard', 'exam-generator', 'paper-library', 'question-bank', 'settings', 'exam-room', 'exam-result', 'login']);
 
@@ -50,21 +52,51 @@ function syncCloudExamSessions(examSessions) {
   Object.entries(examSessions).forEach(([paperId, session]) => {
     if (!session || !Array.isArray(session.answers)) return;
     try {
+      const localAnswersRaw = localStorage.getItem(`examcraft_answers_${paperId}`);
+      const localAnswers = localAnswersRaw ? JSON.parse(localAnswersRaw) : [];
       const localSessionRaw = localStorage.getItem(`examcraft_session_${paperId}`);
-      const localTime = Number(localSessionRaw ? JSON.parse(localSessionRaw)?.updatedAt : 0) || 0;
+      const localSession = localSessionRaw ? JSON.parse(localSessionRaw) : {};
+      const localTime = Number(localSession?.updatedAt) || 0;
       const cloudTime = Number(session.updatedAt) || 0;
-      if (cloudTime >= localTime || !localStorage.getItem(`examcraft_answers_${paperId}`)) {
-        localStorage.setItem(`examcraft_answers_${paperId}`, JSON.stringify(session.answers));
-        if (Array.isArray(session.markedQuestionKeys)) {
-          localStorage.setItem(`examcraft_question_marks_${paperId}`, JSON.stringify(session.markedQuestionKeys));
-        }
-        localStorage.setItem(`examcraft_session_${paperId}`, JSON.stringify({
-          secondsLeft: session.secondsLeft,
-          currentQIndex: session.currentQIndex,
-          status: session.status,
-          sealedAt: session.sealedAt,
-          updatedAt: session.updatedAt
-        }));
+
+      // 题级智能无损合并：绝不允许服务端空白答案抹杀本地已作答记录！
+      const { merged, shouldPushToCloud } = mergeAnswersSmartly(
+        localAnswers,
+        session.answers,
+        localTime,
+        cloudTime
+      );
+
+      // 合并标记题号
+      const localMarksRaw = localStorage.getItem(`examcraft_question_marks_${paperId}`);
+      const localMarks = localMarksRaw ? JSON.parse(localMarksRaw) : [];
+      const mergedMarks = Array.isArray(session.markedQuestionKeys) && session.markedQuestionKeys.length > 0
+        ? Array.from(new Set([...(Array.isArray(localMarks) ? localMarks : []), ...session.markedQuestionKeys]))
+        : (Array.isArray(localMarks) ? localMarks : []);
+
+      localStorage.setItem(`examcraft_answers_${paperId}`, JSON.stringify(merged));
+      localStorage.setItem(`examcraft_question_marks_${paperId}`, JSON.stringify(mergedMarks));
+      localStorage.setItem(`examcraft_session_${paperId}`, JSON.stringify({
+        secondsLeft: typeof session.secondsLeft === 'number'
+          ? (typeof localSession.secondsLeft === 'number' ? Math.min(localSession.secondsLeft, session.secondsLeft) : session.secondsLeft)
+          : localSession.secondsLeft,
+        currentQIndex: typeof session.currentQIndex === 'number' ? session.currentQIndex : (localSession.currentQIndex || 0),
+        status: session.status || localSession.status || '考试中',
+        sealedAt: session.sealedAt || localSession.sealedAt || '',
+        updatedAt: Math.max(cloudTime, localTime, Date.now())
+      }));
+
+      // 如果本地作答更完整（例如手机端刚做的题目尚未同步至云端），立即异步回推云端补全
+      if (shouldPushToCloud && getToken()) {
+        apiSaveExamSession({
+          paperId,
+          answers: merged,
+          markedQuestionKeys: mergedMarks,
+          secondsLeft: session.secondsLeft ?? localSession.secondsLeft,
+          currentQIndex: session.currentQIndex ?? localSession.currentQIndex,
+          status: session.status || localSession.status,
+          sealedAt: session.sealedAt || localSession.sealedAt
+        }).catch(() => {});
       }
     } catch (e) {
       console.warn('Sync exam session failed for paper:', paperId, e);

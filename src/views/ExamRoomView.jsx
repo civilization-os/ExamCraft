@@ -13,6 +13,7 @@ import {
   REMINDER_PRESET_OPTIONS
 } from '../utils/examTimer';
 import { useExamSessionStore } from '../stores/useExamSessionStore';
+import { getToken } from '../utils/auth';
 
 const prefersSplitExamLayout = () => {
   try { return window.matchMedia('(min-width: 1024px)').matches && localStorage.getItem('examcraft_exam_default_layout') !== 'stacked'; }
@@ -145,8 +146,34 @@ export default function ExamRoomView({
       console.warn('[ExamRoomView] Session init warning:', err);
     });
 
+    // 3. 多端漫游感知：当用户从手机/其他标签切回当前前台时，自动智能合并最新的作答进展
+    let lastFocusSyncTime = Date.now();
+    const handleVisibilitySync = () => {
+      if (document.visibilityState === 'visible' && !cancelled && activePaper?.id && getToken()) {
+        const now = Date.now();
+        // 限制防抖：至少间隔 5 秒
+        if (now - lastFocusSyncTime < 5000) return;
+        lastFocusSyncTime = now;
+
+        initPaperSession(activePaper, questions).then((session) => {
+          if (cancelled || !session) return;
+          if (Array.isArray(session.answers) && session.answers.length > 0) {
+            setQuestionList(normalizeQuestions(session.answers));
+          }
+          if (Array.isArray(session.markedQuestionKeys)) {
+            setMarkedQuestionKeys(session.markedQuestionKeys);
+          }
+        }).catch(() => {});
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilitySync);
+    window.addEventListener('focus', handleVisibilitySync);
+
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilitySync);
+      window.removeEventListener('focus', handleVisibilitySync);
     };
   }, [questions, activePaper?.id]);
 
@@ -770,6 +797,7 @@ export default function ExamRoomView({
 
   const handleUpdateAnswer = (val, targetIndex = currentQIndex) => {
     if (targetIndex === currentQIndex) setCandidateDraft(val);
+    const now = Date.now();
     setQuestionList((prev) => {
       const next = prev.map((q, idx) =>
         idx === targetIndex
@@ -779,6 +807,13 @@ export default function ExamRoomView({
       if (activePaper?.id) {
         try {
           localStorage.setItem(`examcraft_answers_${activePaper.id}`, JSON.stringify(next));
+          const prevMeta = localStorage.getItem(`examcraft_session_${activePaper.id}`);
+          const parsedMeta = prevMeta ? JSON.parse(prevMeta) : {};
+          localStorage.setItem(`examcraft_session_${activePaper.id}`, JSON.stringify({
+            ...parsedMeta,
+            currentQIndex: targetIndex,
+            updatedAt: now
+          }));
         } catch {}
       }
       return next;
@@ -1875,29 +1910,38 @@ export default function ExamRoomView({
                 <span className="font-mono text-on-surface-variant font-medium">{questionList.length}</span>
               </div>
               <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-sans font-medium bg-surface-container-low border border-outline-variant/25 transition-all">
-                {syncStatus === 'saving' && (
-                  <span className="flex items-center gap-1 text-primary animate-pulse">
-                    <span className="material-symbols-outlined text-[13px] animate-spin">sync</span>
-                    <span>云端同步中</span>
+                {!getToken() ? (
+                  <span className="flex items-center gap-1 text-amber-700 dark:text-amber-400" title="未登录状态：答题草稿已在当前浏览器安全留存，登录账号后即可启用双端秒级漫游">
+                    <span className="material-symbols-outlined text-[13px]">lock</span>
+                    <span>未登录 · 本地已保护</span>
                   </span>
-                )}
-                {syncStatus === 'synced' && (
-                  <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400" title="答题进度已自动云端同步，换设备可无缝接续">
-                    <span className="material-symbols-outlined text-[13px]">cloud_done</span>
-                    <span>已云端同步</span>
-                  </span>
-                )}
-                {syncStatus === 'error' && (
-                  <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400" title="离线模式：已在本地安全缓存，网络恢复将自动同步">
-                    <span className="material-symbols-outlined text-[13px]">cloud_off</span>
-                    <span>离线已存</span>
-                  </span>
-                )}
-                {syncStatus === 'idle' && (
-                  <span className="flex items-center gap-1 text-on-surface-variant/70" title="实时跨端答题同步就绪">
-                    <span className="material-symbols-outlined text-[13px]">cloud</span>
-                    <span>实时同步</span>
-                  </span>
+                ) : (
+                  <>
+                    {syncStatus === 'saving' && (
+                      <span className="flex items-center gap-1 text-primary animate-pulse">
+                        <span className="material-symbols-outlined text-[13px] animate-spin">sync</span>
+                        <span>云端同步中</span>
+                      </span>
+                    )}
+                    {syncStatus === 'synced' && (
+                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400" title="答题进度已自动云端同步，换设备可无缝接续">
+                        <span className="material-symbols-outlined text-[13px]">cloud_done</span>
+                        <span>已云端同步</span>
+                      </span>
+                    )}
+                    {syncStatus === 'error' && (
+                      <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400" title="离线模式：已在本地安全缓存，网络恢复将自动同步">
+                        <span className="material-symbols-outlined text-[13px]">cloud_off</span>
+                        <span>离线已存</span>
+                      </span>
+                    )}
+                    {syncStatus === 'idle' && (
+                      <span className="flex items-center gap-1 text-on-surface-variant/70" title="实时跨端答题同步就绪">
+                        <span className="material-symbols-outlined text-[13px]">cloud</span>
+                        <span>实时同步</span>
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
               <span className="hidden 2xl:inline-flex items-center gap-2.5 text-[11px] font-sans text-on-surface-variant/70">
@@ -3037,6 +3081,17 @@ export default function ExamRoomView({
                 <span className="material-symbols-outlined text-primary text-[20px]">grid_view</span>
                 <span className="font-bold text-on-surface text-[14px]">答题卡与题目跳转</span>
                 <span className="text-xs font-mono text-outline">({answeredCount}/{questionList.length})</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-container border border-outline-variant/30 flex items-center gap-1 font-medium">
+                  {!getToken() ? (
+                    <span className="text-amber-600 dark:text-amber-400">本地已存</span>
+                  ) : syncStatus === 'saving' ? (
+                    <span className="text-primary flex items-center gap-0.5"><span className="material-symbols-outlined text-[11px] animate-spin">sync</span>同步中</span>
+                  ) : syncStatus === 'synced' ? (
+                    <span className="text-emerald-600 flex items-center gap-0.5"><span className="material-symbols-outlined text-[11px]">cloud_done</span>已同步</span>
+                  ) : (
+                    <span className="text-on-surface-variant">实时同步</span>
+                  )}
+                </span>
               </div>
               <button
                 type="button"

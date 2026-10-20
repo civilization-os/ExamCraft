@@ -37,6 +37,103 @@ function removeLocalStorage(key) {
   } catch {}
 }
 
+/**
+ * 题级智能无损合并 (Smart Question-Level Merge)
+ * 核心法则：
+ * 1. 绝不允许云端的“空答案”覆盖本地已经填涂的“有效答案”；
+ * 2. 若双方都有答案，比对时间戳并优先最新作答；
+ * 3. 统计两端有效作答数，若本地作答数多于云端，自动将本地合并结果反向推向云端。
+ */
+export function mergeAnswersSmartly(localQuestions = [], cloudQuestions = [], localUpdatedAt = 0, cloudUpdatedAt = 0) {
+  const localList = Array.isArray(localQuestions) ? localQuestions : [];
+  const cloudList = Array.isArray(cloudQuestions) ? cloudQuestions : [];
+
+  // 建立题目索引字典
+  const cloudMap = new Map();
+  cloudList.forEach((q, idx) => {
+    const key = q?.id || `q_${q?.num || idx}`;
+    cloudMap.set(key, q);
+  });
+
+  const localMap = new Map();
+  localList.forEach((q, idx) => {
+    const key = q?.id || `q_${q?.num || idx}`;
+    localMap.set(key, q);
+  });
+
+  // 以本地题库或云端题库的并集为基准
+  const allBaseQuestions = localList.length >= cloudList.length ? localList : cloudList;
+
+  let localFilledCount = 0;
+  let cloudFilledCount = 0;
+
+  const merged = allBaseQuestions.map((baseQ, idx) => {
+    const key = baseQ?.id || `q_${baseQ?.num || idx}`;
+    const localQ = localMap.get(key) || localList[idx];
+    const cloudQ = cloudMap.get(key) || cloudList[idx];
+
+    const localAns = (localQ?.userAnswer || '').trim();
+    const cloudAns = (cloudQ?.userAnswer || '').trim();
+
+    if (localAns) localFilledCount++;
+    if (cloudAns) cloudFilledCount++;
+
+    // 1. 若本地有答案，云端无答案 -> 绝对保留本地答案
+    if (localAns && !cloudAns) {
+      return {
+        ...baseQ,
+        ...(localQ || {}),
+        userAnswer: localAns,
+        status: 'answered'
+      };
+    }
+
+    // 2. 若云端有答案，本地无答案 -> 采纳云端答案
+    if (!localAns && cloudAns) {
+      return {
+        ...baseQ,
+        ...(cloudQ || {}),
+        userAnswer: cloudAns,
+        status: 'answered'
+      };
+    }
+
+    // 3. 若双方都有答案 -> 比较时间戳
+    if (localAns && cloudAns) {
+      if (cloudUpdatedAt > localUpdatedAt) {
+        return {
+          ...baseQ,
+          ...(cloudQ || {}),
+          userAnswer: cloudAns,
+          status: 'answered'
+        };
+      }
+      return {
+        ...baseQ,
+        ...(localQ || {}),
+        userAnswer: localAns,
+        status: 'answered'
+      };
+    }
+
+    // 4. 双方都无答案 -> 继承基础题型信息
+    return {
+      ...baseQ,
+      userAnswer: '',
+      aiTranscription: localQ?.aiTranscription || cloudQ?.aiTranscription || '',
+      stepScores: localQ?.stepScores || cloudQ?.stepScores || [],
+      status: 'unanswered'
+    };
+  });
+
+  return {
+    merged,
+    localFilledCount,
+    cloudFilledCount,
+    shouldPushToCloud: localFilledCount > cloudFilledCount || (localFilledCount > 0 && cloudFilledCount === 0)
+  };
+}
+
 export const useExamSessionStore = create((set, get) => ({
   // Active sessions mapped by paperId
   sessions: {},
@@ -125,67 +222,58 @@ export const useExamSessionStore = create((set, get) => ({
           const cloudTime = Number(cloudSession.updatedAt) || 0;
           const localTime = Number(initialSession.updatedAt) || 0;
 
-          // If cloud has newer or equal progress, adopt cloud session!
-          if (cloudTime >= localTime || !localAnswers.length) {
-            const cloudAnswerMap = new Map();
-            if (Array.isArray(cloudSession.answers)) {
-              cloudSession.answers.forEach((ans, idx) => {
-                const key = ans?.id || `q_${ans?.num || idx}`;
-                cloudAnswerMap.set(key, ans);
-              });
-            }
+          // 题级智能合并：绝不允许云端空答案覆盖本地有效答案
+          const { merged, shouldPushToCloud } = mergeAnswersSmartly(
+            initialSession.answers,
+            cloudSession.answers || [],
+            localTime,
+            cloudTime
+          );
 
-            const updatedAnswers = baseQuestions.map((q, idx) => {
-              const key = q?.id || `q_${q?.num || idx}`;
-              const cloudAns = cloudAnswerMap.get(key) || cloudSession.answers?.[idx];
-              return {
-                ...q,
-                userAnswer: cloudAns?.userAnswer || '',
-                aiTranscription: cloudAns?.aiTranscription || '',
-                stepScores: cloudAns?.stepScores || [],
-                status: (cloudAns?.userAnswer || '').trim() ? 'answered' : 'unanswered'
-              };
-            });
+          const refreshedSession = {
+            ...initialSession,
+            ...cloudSession,
+            answers: merged,
+            markedQuestionKeys: Array.isArray(cloudSession.markedQuestionKeys) && cloudSession.markedQuestionKeys.length > 0
+              ? Array.from(new Set([...initialSession.markedQuestionKeys, ...cloudSession.markedQuestionKeys]))
+              : initialSession.markedQuestionKeys,
+            secondsLeft: typeof cloudSession.secondsLeft === 'number'
+              ? Math.min(initialSession.secondsLeft, cloudSession.secondsLeft)
+              : initialSession.secondsLeft,
+            currentQIndex: typeof cloudSession.currentQIndex === 'number'
+              ? cloudSession.currentQIndex
+              : initialSession.currentQIndex,
+            status: cloudSession.status || initialSession.status,
+            sealedAt: cloudSession.sealedAt || initialSession.sealedAt,
+            updatedAt: Math.max(cloudTime, localTime, Date.now())
+          };
 
-            const refreshedSession = {
-              ...initialSession,
-              ...cloudSession,
-              answers: updatedAnswers,
-              markedQuestionKeys: Array.isArray(cloudSession.markedQuestionKeys)
-                ? cloudSession.markedQuestionKeys
-                : initialSession.markedQuestionKeys,
-              secondsLeft: typeof cloudSession.secondsLeft === 'number'
-                ? cloudSession.secondsLeft
-                : initialSession.secondsLeft,
-              currentQIndex: typeof cloudSession.currentQIndex === 'number'
-                ? cloudSession.currentQIndex
-                : initialSession.currentQIndex,
-              status: cloudSession.status || initialSession.status,
-              sealedAt: cloudSession.sealedAt || initialSession.sealedAt,
-              updatedAt: cloudTime || Date.now()
-            };
+          // 刷新本地持久化
+          writeLocalStorage(`${STORAGE_PREFIX_ANSWERS}${paperId}`, refreshedSession.answers);
+          writeLocalStorage(`${STORAGE_PREFIX_MARKS}${paperId}`, refreshedSession.markedQuestionKeys);
+          writeLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {
+            secondsLeft: refreshedSession.secondsLeft,
+            currentQIndex: refreshedSession.currentQIndex,
+            status: refreshedSession.status,
+            sealedAt: refreshedSession.sealedAt,
+            updatedAt: refreshedSession.updatedAt
+          });
 
-            // Write back to local cache
-            writeLocalStorage(`${STORAGE_PREFIX_ANSWERS}${paperId}`, refreshedSession.answers);
-            writeLocalStorage(`${STORAGE_PREFIX_MARKS}${paperId}`, refreshedSession.markedQuestionKeys);
-            writeLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {
-              secondsLeft: refreshedSession.secondsLeft,
-              currentQIndex: refreshedSession.currentQIndex,
-              status: refreshedSession.status,
-              sealedAt: refreshedSession.sealedAt,
-              updatedAt: refreshedSession.updatedAt
-            });
+          set((state) => ({
+            sessions: {
+              ...state.sessions,
+              [paperId]: refreshedSession
+            },
+            syncStatus: 'synced',
+            lastSyncedAt: Date.now()
+          }));
 
-            set((state) => ({
-              sessions: {
-                ...state.sessions,
-                [paperId]: refreshedSession
-              },
-              syncStatus: 'synced',
-              lastSyncedAt: Date.now()
-            }));
-            return refreshedSession;
+          // 如果本地作答更全（例如在手机新答的题目），立即自动反向同步到云端
+          if (shouldPushToCloud) {
+            get().scheduleCloudSync(paperId, refreshedSession, 200);
           }
+
+          return refreshedSession;
         }
         set({ syncStatus: 'synced', lastSyncedAt: Date.now() });
       } catch (err) {
@@ -199,13 +287,30 @@ export const useExamSessionStore = create((set, get) => ({
 
   /**
    * Update question answer with immediate local persistence & debounced cloud synchronization
+   * 具备自愈能力：若 current 不存在，从本地存储自动水合构建，绝不静默退出！
    */
   updateAnswer: (paperId, value, questionIndex) => {
     if (!paperId) return;
-    const current = get().sessions[paperId];
-    if (!current) return;
+    let current = get().sessions[paperId];
 
-    const nextAnswers = current.answers.map((q, idx) =>
+    // 自愈保护：若当前内存中尚未完成 initPaperSession，从本地缓存立即回构
+    if (!current) {
+      const localAnswers = readLocalStorage(`${STORAGE_PREFIX_ANSWERS}${paperId}`, []);
+      const localMarks = readLocalStorage(`${STORAGE_PREFIX_MARKS}${paperId}`, []);
+      const localMeta = readLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {});
+      current = {
+        paperId,
+        answers: Array.isArray(localAnswers) ? localAnswers : [],
+        markedQuestionKeys: Array.isArray(localMarks) ? localMarks : [],
+        secondsLeft: typeof localMeta.secondsLeft === 'number' ? localMeta.secondsLeft : 5400,
+        currentQIndex: typeof localMeta.currentQIndex === 'number' ? localMeta.currentQIndex : questionIndex,
+        status: localMeta.status || '考试中',
+        sealedAt: localMeta.sealedAt || '',
+        updatedAt: Date.now()
+      };
+    }
+
+    const nextAnswers = (current.answers || []).map((q, idx) =>
       idx === questionIndex
         ? {
             ...q,
@@ -230,7 +335,7 @@ export const useExamSessionStore = create((set, get) => ({
       }
     }));
 
-    // 2. Local storage write
+    // 2. Local storage immediate write
     writeLocalStorage(`${STORAGE_PREFIX_ANSWERS}${paperId}`, nextAnswers);
     writeLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {
       secondsLeft: updatedSession.secondsLeft,
@@ -240,8 +345,8 @@ export const useExamSessionStore = create((set, get) => ({
       updatedAt: now
     });
 
-    // 3. Debounced cloud push (700ms)
-    get().scheduleCloudSync(paperId, updatedSession, 700);
+    // 3. Debounced cloud push (针对选择题更灵敏：300ms)
+    get().scheduleCloudSync(paperId, updatedSession, 300);
   },
 
   /**
@@ -249,13 +354,27 @@ export const useExamSessionStore = create((set, get) => ({
    */
   toggleQuestionMark: (paperId, markKey) => {
     if (!paperId || !markKey) return;
-    const current = get().sessions[paperId];
-    if (!current) return;
+    let current = get().sessions[paperId];
+    if (!current) {
+      const localAnswers = readLocalStorage(`${STORAGE_PREFIX_ANSWERS}${paperId}`, []);
+      const localMarks = readLocalStorage(`${STORAGE_PREFIX_MARKS}${paperId}`, []);
+      const localMeta = readLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {});
+      current = {
+        paperId,
+        answers: Array.isArray(localAnswers) ? localAnswers : [],
+        markedQuestionKeys: Array.isArray(localMarks) ? localMarks : [],
+        secondsLeft: typeof localMeta.secondsLeft === 'number' ? localMeta.secondsLeft : 5400,
+        currentQIndex: typeof localMeta.currentQIndex === 'number' ? localMeta.currentQIndex : 0,
+        status: localMeta.status || '考试中',
+        sealedAt: localMeta.sealedAt || '',
+        updatedAt: Date.now()
+      };
+    }
 
-    const exists = current.markedQuestionKeys.includes(markKey);
+    const exists = (current.markedQuestionKeys || []).includes(markKey);
     const nextMarks = exists
       ? current.markedQuestionKeys.filter((k) => k !== markKey)
-      : [...current.markedQuestionKeys, markKey];
+      : [...(current.markedQuestionKeys || []), markKey];
 
     const now = Date.now();
     const updatedSession = {
@@ -272,7 +391,7 @@ export const useExamSessionStore = create((set, get) => ({
     }));
 
     writeLocalStorage(`${STORAGE_PREFIX_MARKS}${paperId}`, nextMarks);
-    get().scheduleCloudSync(paperId, updatedSession, 500);
+    get().scheduleCloudSync(paperId, updatedSession, 300);
   },
 
   /**
@@ -431,6 +550,7 @@ export const useExamSessionStore = create((set, get) => ({
       currentQIndex: 0,
       status: '考试中',
       sealedAt: '',
+      isReset: true,
       updatedAt: Date.now()
     };
 
@@ -542,3 +662,36 @@ export const useExamSessionStore = create((set, get) => ({
     }
   }
 }));
+
+// 全局移动端/PC端页面关闭、卸载、切后台时的高优先级保活数据推送 (Unload & Pagehide Keepalive)
+if (typeof window !== 'undefined') {
+  const executeEmergencyKeepaliveSync = () => {
+    const token = getToken();
+    if (!token) return;
+
+    // 1. 遍历待发送的防抖队列
+    pendingSyncPayloads.forEach((payload) => {
+      if (payload && payload.paperId) {
+        try {
+          fetch('/api/user/exam-session', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({ session: payload }),
+            keepalive: true
+          }).catch(() => {});
+        } catch {}
+      }
+    });
+
+    // 2. 清空待发队列
+    pendingSyncTimers.forEach((timer) => clearTimeout(timer));
+    pendingSyncTimers.clear();
+    pendingSyncPayloads.clear();
+  };
+
+  window.addEventListener('pagehide', executeEmergencyKeepaliveSync);
+  window.addEventListener('beforeunload', executeEmergencyKeepaliveSync);
+}

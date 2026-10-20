@@ -483,9 +483,37 @@ export function saveUserExamSession(userId, session) {
   if (!session || !session.paperId) throw new Error('无效的考试进度数据');
   const filePath = getUserFilePath(userId, 'exam_sessions.json');
   const sessions = readJsonFile(filePath, {});
+  const existing = sessions[session.paperId];
   const now = Date.now();
+
+  let finalAnswers = session.answers;
+  // 服务端智能防空保护：若云端已有作答且非明确重置考卷操作，绝不允许空白答案抹杀已填涂答案！
+  if (existing && Array.isArray(existing.answers) && Array.isArray(session.answers) && !session.isReset) {
+    finalAnswers = session.answers.map((newQ, idx) => {
+      const key = newQ?.id || `q_${newQ?.num || idx}`;
+      const oldQ = existing.answers.find((oq, oidx) => (oq?.id || `q_${oq?.num || oidx}`) === key) || existing.answers[idx];
+      const newAns = (newQ?.userAnswer || '').trim();
+      const oldAns = (oldQ?.userAnswer || '').trim();
+
+      if (newAns) {
+        return newQ;
+      }
+      if (oldAns) {
+        return {
+          ...newQ,
+          userAnswer: oldAns,
+          aiTranscription: newQ.aiTranscription || oldQ?.aiTranscription || '',
+          stepScores: (Array.isArray(newQ.stepScores) && newQ.stepScores.length > 0) ? newQ.stepScores : (oldQ?.stepScores || []),
+          status: 'answered'
+        };
+      }
+      return newQ;
+    });
+  }
+
   const normalized = {
     ...session,
+    answers: finalAnswers,
     updatedAt: now
   };
   sessions[session.paperId] = normalized;
