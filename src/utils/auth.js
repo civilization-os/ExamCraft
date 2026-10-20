@@ -276,3 +276,47 @@ export async function apiUpdateProfile(profileData) {
   window.dispatchEvent(new CustomEvent('examcraft-profile-updated'));
   return data.user;
 }
+
+export async function apiGetExamSessions() {
+  const res = await authFetch('/api/user/exam-sessions');
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '获取考试会话失败');
+  }
+  return data.sessions || {};
+}
+
+export async function apiGetExamSession(paperId) {
+  if (!paperId) return null;
+  const res = await authFetch(`/api/user/exam-session/${paperId}`);
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '获取考试进度失败');
+  }
+  return data.session || null;
+}
+
+export async function apiSaveExamSession(session) {
+  if (!session || !session.paperId) return null;
+  const res = await authFetch('/api/user/exam-session', {
+    method: 'POST',
+    body: { session }
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '同步考试进度失败');
+  }
+  return data.session;
+}
+
+export async function apiDeleteExamSession(paperId) {
+  if (!paperId) return true;
+  const res = await authFetch(`/api/user/exam-session/${paperId}`, {
+    method: 'DELETE'
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '清除考试进度失败');
+  }
+  return true;
+}

@@ -458,12 +458,50 @@ export function getUserSyncData(userId) {
   const submissions = readJsonFile(getUserFilePath(userId, 'submissions.json'), []);
   const notebook = readJsonFile(getUserFilePath(userId, 'notebook.json'), { items: [] });
   const subjects = readJsonFile(getUserFilePath(userId, 'subjects.json'), []);
+  const examSessions = readJsonFile(getUserFilePath(userId, 'exam_sessions.json'), {});
   return {
     papers,
     submissions,
     notebook,
-    subjects
+    subjects,
+    examSessions
   };
+}
+
+export function getUserExamSessions(userId) {
+  const filePath = getUserFilePath(userId, 'exam_sessions.json');
+  return readJsonFile(filePath, {});
+}
+
+export function getUserExamSession(userId, paperId) {
+  if (!paperId) return null;
+  const sessions = getUserExamSessions(userId);
+  return sessions[paperId] || null;
+}
+
+export function saveUserExamSession(userId, session) {
+  if (!session || !session.paperId) throw new Error('无效的考试进度数据');
+  const filePath = getUserFilePath(userId, 'exam_sessions.json');
+  const sessions = readJsonFile(filePath, {});
+  const now = Date.now();
+  const normalized = {
+    ...session,
+    updatedAt: now
+  };
+  sessions[session.paperId] = normalized;
+  atomicWriteJson(filePath, sessions);
+  return normalized;
+}
+
+export function deleteUserExamSession(userId, paperId) {
+  if (!paperId) return false;
+  const filePath = getUserFilePath(userId, 'exam_sessions.json');
+  const sessions = readJsonFile(filePath, {});
+  if (sessions[paperId]) {
+    delete sessions[paperId];
+    atomicWriteJson(filePath, sessions);
+  }
+  return true;
 }
 
 export function saveUserPaper(userId, paper) {
@@ -491,6 +529,7 @@ export function deleteUserPaper(userId, paperId) {
   const papers = readJsonFile(filePath, []);
   const nextPapers = papers.filter((p) => p.id !== paperId);
   atomicWriteJson(filePath, nextPapers);
+  deleteUserExamSession(userId, paperId);
   return true;
 }
 

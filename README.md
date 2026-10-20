@@ -67,6 +67,11 @@
 - **Global Version Indicators**: Prominently shows release version `v1.0.0` on the top navigation bar, user dropdown menu, and system settings panel.
 
 ### 4. Focus-Mode Proctored Online Exam Room
+- **Cross-Device Real-Time Exam Persistence (Zustand + Cloud Debounced Sync)** 🆕:
+  - **Seamless Mobile ⇄ Desktop Handoff**: Answers entered on a smartphone are debounced (700ms) and saved to cloud exam sessions. Opening the paper on a PC immediately resumes with all answers, review flags (`M` key), timer seconds, and seal states intact.
+  - **Offline Fault Tolerance & Reconnection**: When offline or facing packet loss, the app falls back to local storage and displays a real-time sync pill (`Syncing...` 🔄 / `Cloud Saved` ☁️ / `Offline Cached` ⚠️).
+  - **Timestamp-Based Smart Merge**: Uses conflict-free `updatedAt` timestamps to prevent overwrites when switching devices.
+  - **Layered Zustand Stores Architecture**: Standardizes state into `useExamSessionStore`, `usePaperStore`, `useSubmissionStore`, `useNotebookStore`, and `useUserStore`.
 - **Minimalist Proctored Status Header**:
   - High-precision countdown timer with **Pause / Seal State** support (simulating tournament adjournment).
   - **Dynamic Color Gradient (Green $\to$ Yellow $\to$ Red)**: The countdown pill smoothly transitions from calm green (>50%) to warning yellow (20%~50%), urgent red ($\le$20% or alert threshold), and pulsating alarm red ($\le$5 min), with an embedded live progress track.

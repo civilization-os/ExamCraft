@@ -45,6 +45,33 @@ function readStoredObject(key) {
   }
 }
 
+function syncCloudExamSessions(examSessions) {
+  if (!examSessions || typeof examSessions !== 'object') return;
+  Object.entries(examSessions).forEach(([paperId, session]) => {
+    if (!session || !Array.isArray(session.answers)) return;
+    try {
+      const localSessionRaw = localStorage.getItem(`examcraft_session_${paperId}`);
+      const localTime = Number(localSessionRaw ? JSON.parse(localSessionRaw)?.updatedAt : 0) || 0;
+      const cloudTime = Number(session.updatedAt) || 0;
+      if (cloudTime >= localTime || !localStorage.getItem(`examcraft_answers_${paperId}`)) {
+        localStorage.setItem(`examcraft_answers_${paperId}`, JSON.stringify(session.answers));
+        if (Array.isArray(session.markedQuestionKeys)) {
+          localStorage.setItem(`examcraft_question_marks_${paperId}`, JSON.stringify(session.markedQuestionKeys));
+        }
+        localStorage.setItem(`examcraft_session_${paperId}`, JSON.stringify({
+          secondsLeft: session.secondsLeft,
+          currentQIndex: session.currentQIndex,
+          status: session.status,
+          sealedAt: session.sealedAt,
+          updatedAt: session.updatedAt
+        }));
+      }
+    } catch (e) {
+      console.warn('Sync exam session failed for paper:', paperId, e);
+    }
+  });
+}
+
 // Helper to automatically purge legacy hardcoded mock items from user's localStorage
 function purgeLegacyMockData() {
   const legacyPaperIds = new Set([
@@ -179,6 +206,9 @@ export default function App() {
             if (Array.isArray(cloudData.subjects)) {
               localStorage.setItem('examcraft_custom_subjects', JSON.stringify(cloudData.subjects));
             }
+            if (cloudData.examSessions) {
+              syncCloudExamSessions(cloudData.examSessions);
+            }
 
             // Check if there are local unmigrated papers from guest sessions
             const serverPaperIds = new Set(cleanPapers.map((p) => p.id));
@@ -293,6 +323,9 @@ export default function App() {
       }
       if (Array.isArray(cloudData.subjects)) {
         localStorage.setItem('examcraft_custom_subjects', JSON.stringify(cloudData.subjects));
+      }
+      if (cloudData.examSessions) {
+        syncCloudExamSessions(cloudData.examSessions);
       }
 
       // Check for local backup papers to offer migration

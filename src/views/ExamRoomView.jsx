@@ -12,6 +12,7 @@ import {
   DEFAULT_REMINDER_MINUTES,
   REMINDER_PRESET_OPTIONS
 } from '../utils/examTimer';
+import { useExamSessionStore } from '../stores/useExamSessionStore';
 
 const prefersSplitExamLayout = () => {
   try { return window.matchMedia('(min-width: 1024px)').matches && localStorage.getItem('examcraft_exam_default_layout') !== 'stacked'; }
@@ -29,6 +30,20 @@ export default function ExamRoomView({
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [isAnswerCardCollapsed, setIsAnswerCardCollapsed] = useState(false);
   const [modelUsageStatus, setModelUsageStatus] = useState(null);
+  const {
+    sessions,
+    syncStatus,
+    initPaperSession,
+    updateAnswer: storeUpdateAnswer,
+    toggleQuestionMark: storeToggleQuestionMark,
+    updateExamProgress: storeUpdateExamProgress,
+    sealExam: storeSealExam,
+    unsealExam: storeUnsealExam,
+    clearSingleAnswer: storeClearSingleAnswer,
+    resetEntireExam: storeResetEntireExam,
+    finishAndCleanupSession: storeFinishAndCleanupSession,
+    flushPendingSync
+  } = useExamSessionStore();
   const normalizeQuestions = (list) => deduplicateQuestions(list, activePaper?.title || '').map((rawQuestion) => {
     const question = healQuestionOptions(rawQuestion);
     let userAnswer = question.userAnswer;
@@ -87,22 +102,52 @@ export default function ExamRoomView({
   });
 
   useEffect(() => {
+    let cancelled = false;
     if (!activePaper?.id) {
       setQuestionList(normalizeQuestions(questions));
       setCurrentQIndex(0);
       return;
     }
+
+    // 1. 本地极速秒开渲染
     try {
       const saved = localStorage.getItem(`examcraft_answers_${activePaper.id}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setQuestionList(normalizeQuestions(parsed));
-          return;
         }
       }
     } catch {}
-    setQuestionList(normalizeQuestions(questions));
+
+    // 2. 异步拉取云端实时答题会话并按时间戳智能合并（手机 ⇄ 电脑多端无缝接续）
+    initPaperSession(activePaper, questions).then((session) => {
+      if (cancelled || !session) return;
+      if (Array.isArray(session.answers) && session.answers.length > 0) {
+        setQuestionList(normalizeQuestions(session.answers));
+      }
+      if (Array.isArray(session.markedQuestionKeys)) {
+        setMarkedQuestionKeys(session.markedQuestionKeys);
+      }
+      if (typeof session.secondsLeft === 'number') {
+        setSecondsLeft(session.secondsLeft);
+        secondsLeftRef.current = session.secondsLeft;
+      }
+      if (typeof session.currentQIndex === 'number' && session.currentQIndex >= 0 && session.currentQIndex < (questions?.length || 100)) {
+        setCurrentQIndex(session.currentQIndex);
+      }
+      if (session.status === '已封卷') {
+        setIsSealed(true);
+        setIsTimerRunning(false);
+        setSealedAt(session.sealedAt || '');
+      }
+    }).catch((err) => {
+      console.warn('[ExamRoomView] Session init warning:', err);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [questions, activePaper?.id]);
 
   // Exam Lifecycle Status: 考试中 vs 已封卷 (围棋封盘)
@@ -206,7 +251,10 @@ export default function ExamRoomView({
         }
       }
     } catch {}
-  }, [activePaper?.id, secondsLeft, isSealed, sealedAt]);
+    if (activePaper?.id) {
+      storeUpdateExamProgress(activePaper.id, secondsLeft, currentQIndex);
+    }
+  }, [activePaper?.id, secondsLeft, currentQIndex, isSealed, sealedAt]);
 
   // Closing or reloading the page also seals the exam. pagehide is synchronous, so
   // the snapshot is written before the browser discards the current page.
@@ -454,6 +502,9 @@ export default function ExamRoomView({
     try {
       localStorage.setItem(questionMarksStorageKey, JSON.stringify(next));
     } catch {}
+    if (activePaper?.id) {
+      storeToggleQuestionMark(activePaper.id, currentQuestionMarkKey);
+    }
     showExamToast(isCurrentQuestionMarked ? '已取消本题复查标记' : `已标记第 ${currentQ?.num} 题，交卷前可在答题卡中定位`, 'info');
   };
   const questionScratchpadKeys = useMemo(() => questionList.map((question, index) => {
@@ -732,6 +783,9 @@ export default function ExamRoomView({
       }
       return next;
     });
+    if (activePaper?.id) {
+      storeUpdateAnswer(activePaper.id, val, targetIndex);
+    }
   };
 
   // 全局考场作答键盘快捷键支持 (上一题/下一题/选项填涂/标记复查/草稿纸)
@@ -885,6 +939,7 @@ export default function ExamRoomView({
     setQuestionList(cleared);
     if (activePaper?.id) {
       try { localStorage.setItem(`examcraft_answers_${activePaper.id}`, JSON.stringify(cleared)); } catch {}
+      storeClearSingleAnswer(activePaper.id, currentQIndex);
     }
     setCandidateDraft('');
     setScribedLatex('');
@@ -966,6 +1021,9 @@ export default function ExamRoomView({
     // 7. 递增草稿版本与重置计数器以强制卸载并重置草稿画板与组件缓存
     setScratchpadDraftRevision((rev) => rev + 1);
     setExamResetCounter((cnt) => cnt + 1);
+    if (activePaper?.id) {
+      storeResetEntireExam(activePaper.id, pristineDuration);
+    }
 
     // 8. 更新 activePaper 试卷快照与试卷列表
     if (activePaper?.id) {
@@ -1029,6 +1087,9 @@ export default function ExamRoomView({
       sealedAt: nowStr
     };
     if (onUpdatePaper) onUpdatePaper(updated);
+    if (activePaper?.id) {
+      storeSealExam(activePaper.id, nowStr);
+    }
     try {
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
@@ -1054,6 +1115,9 @@ export default function ExamRoomView({
       sealedAt: null
     };
     if (onUpdatePaper) onUpdatePaper(updated);
+    if (activePaper?.id) {
+      storeUnsealExam(activePaper.id);
+    }
     try {
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
@@ -1068,6 +1132,9 @@ export default function ExamRoomView({
   };
 
   const handleExitExam = () => {
+    if (activePaper?.id) {
+      flushPendingSync(activePaper.id);
+    }
     if (isTimerRunning && !isSealed) handleSealExam();
     onExit();
   };
@@ -1420,6 +1487,10 @@ export default function ExamRoomView({
 
     submitRequestInFlightRef.current = false;
     setIsSubmitting(false);
+
+    if (activePaper?.id) {
+      storeFinishAndCleanupSession(activePaper.id);
+    }
 
     if (onSubmitExam) {
       onSubmitExam(submissionRecord);
@@ -1802,6 +1873,32 @@ export default function ExamRoomView({
                 <span className="font-mono font-bold text-primary">{answeredCount}</span>
                 <span className="text-outline-variant">/</span>
                 <span className="font-mono text-on-surface-variant font-medium">{questionList.length}</span>
+              </div>
+              <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-sans font-medium bg-surface-container-low border border-outline-variant/25 transition-all">
+                {syncStatus === 'saving' && (
+                  <span className="flex items-center gap-1 text-primary animate-pulse">
+                    <span className="material-symbols-outlined text-[13px] animate-spin">sync</span>
+                    <span>云端同步中</span>
+                  </span>
+                )}
+                {syncStatus === 'synced' && (
+                  <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400" title="答题进度已自动云端同步，换设备可无缝接续">
+                    <span className="material-symbols-outlined text-[13px]">cloud_done</span>
+                    <span>已云端同步</span>
+                  </span>
+                )}
+                {syncStatus === 'error' && (
+                  <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400" title="离线模式：已在本地安全缓存，网络恢复将自动同步">
+                    <span className="material-symbols-outlined text-[13px]">cloud_off</span>
+                    <span>离线已存</span>
+                  </span>
+                )}
+                {syncStatus === 'idle' && (
+                  <span className="flex items-center gap-1 text-on-surface-variant/70" title="实时跨端答题同步就绪">
+                    <span className="material-symbols-outlined text-[13px]">cloud</span>
+                    <span>实时同步</span>
+                  </span>
+                )}
               </div>
               <span className="hidden 2xl:inline-flex items-center gap-2.5 text-[11px] font-sans text-on-surface-variant/70">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-primary ring-1 ring-primary/40"></span>当前</span>

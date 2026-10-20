@@ -15,6 +15,10 @@ import {
   verifyPasswordResetToken,
   resetPasswordWithToken,
   getUserSyncData,
+  getUserExamSessions,
+  getUserExamSession,
+  saveUserExamSession,
+  deleteUserExamSession,
   saveUserPaper,
   deleteUserPaper,
   saveUserSubmission,
@@ -1499,6 +1503,73 @@ apiRouter.post('/user/migrate-local', requireAuth, (req, res) => {
     res.status(400).json({
       success: false,
       error: error.message || '数据迁移失败'
+    });
+  }
+});
+
+// GET /api/user/exam-sessions — 获取当前用户所有进行中的考试会话
+apiRouter.get('/user/exam-sessions', requireAuth, (req, res) => {
+  try {
+    const sessions = getUserExamSessions(req.user.id);
+    res.json({
+      success: true,
+      sessions
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取考试会话失败'
+    });
+  }
+});
+
+// GET /api/user/exam-session/:paperId — 获取指定试卷进行中的考试会话（答题进度、倒计时、标记等）
+apiRouter.get('/user/exam-session/:paperId', requireAuth, (req, res) => {
+  try {
+    const { paperId } = req.params;
+    const session = getUserExamSession(req.user.id, paperId);
+    res.json({
+      success: true,
+      session
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取单卷答题进度失败'
+    });
+  }
+});
+
+// POST /api/user/exam-session — 实时保存/增量同步考试会话进度
+apiRouter.post('/user/exam-session', requireAuth, (req, res) => {
+  try {
+    const { session } = req.body || {};
+    const saved = saveUserExamSession(req.user.id, session);
+    res.json({
+      success: true,
+      session: saved
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '保存答题进度失败'
+    });
+  }
+});
+
+// DELETE /api/user/exam-session/:paperId — 交卷完成或重置整卷时移除进行中的会话
+apiRouter.delete('/user/exam-session/:paperId', requireAuth, (req, res) => {
+  try {
+    const { paperId } = req.params;
+    deleteUserExamSession(req.user.id, paperId);
+    res.json({
+      success: true,
+      message: '考试会话已归档清除'
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: error.message || '清除考试会话失败'
     });
   }
 });
