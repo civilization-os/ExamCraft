@@ -487,27 +487,72 @@ export function saveUserExamSession(userId, session) {
   const now = Date.now();
 
   let finalAnswers = session.answers;
-  // 服务端智能防空保护：若云端已有作答且非明确重置考卷操作，绝不允许空白答案抹杀已填涂答案！
+  // 服务端智能防空与题目防丢保护：
+  // 1. 若云端已有且非明确重置考卷操作，绝不允许空白答案抹杀已填涂答案！
+  // 2. 绝不允许由于客户端上报部分切片而截断云端已有的全卷题目骨架！
   if (existing && Array.isArray(existing.answers) && Array.isArray(session.answers) && !session.isReset) {
-    finalAnswers = session.answers.map((newQ, idx) => {
-      const key = newQ?.id || `q_${newQ?.num || idx}`;
-      const oldQ = existing.answers.find((oq, oidx) => (oq?.id || `q_${oq?.num || oidx}`) === key) || existing.answers[idx];
+    const baseList = existing.answers.length >= session.answers.length
+      ? existing.answers
+      : session.answers;
+
+    const sessionMap = new Map();
+    session.answers.forEach((q, idx) => {
+      if (!q) return;
+      if (q.id) sessionMap.set(String(q.id), q);
+      if (q.num !== undefined && q.num !== null && String(q.num).trim() !== '') {
+        const rawNum = String(q.num).trim();
+        const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
+        sessionMap.set(`num_${rawNum}`, q);
+        if (Number.isFinite(numVal) && numVal > 0) {
+          sessionMap.set(`num_${numVal}`, q);
+          sessionMap.set(`num_${String(numVal).padStart(2, '0')}`, q);
+        }
+      }
+      if (session.answers.length === baseList.length) {
+        sessionMap.set(`idx_${idx}`, q);
+      }
+    });
+
+    finalAnswers = baseList.map((baseQ, idx) => {
+      let newQ = null;
+      if (baseQ.id && sessionMap.has(String(baseQ.id))) newQ = sessionMap.get(String(baseQ.id));
+      if (!newQ && baseQ.num !== undefined && baseQ.num !== null && String(baseQ.num).trim() !== '') {
+        const rawNum = String(baseQ.num).trim();
+        const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
+        newQ = sessionMap.get(`num_${rawNum}`)
+          || (Number.isFinite(numVal) ? (sessionMap.get(`num_${numVal}`) || sessionMap.get(`num_${String(numVal).padStart(2, '0')}`)) : null);
+      }
+      if (!newQ && session.answers.length === baseList.length) {
+        newQ = sessionMap.get(`idx_${idx}`);
+      }
+
+      const oldQ = baseQ;
       const newAns = (newQ?.userAnswer || '').trim();
       const oldAns = (oldQ?.userAnswer || '').trim();
 
       if (newAns) {
-        return newQ;
-      }
-      if (oldAns) {
         return {
-          ...newQ,
-          userAnswer: oldAns,
-          aiTranscription: newQ.aiTranscription || oldQ?.aiTranscription || '',
-          stepScores: (Array.isArray(newQ.stepScores) && newQ.stepScores.length > 0) ? newQ.stepScores : (oldQ?.stepScores || []),
+          ...baseQ,
+          userAnswer: newAns,
+          aiTranscription: newQ?.aiTranscription || oldQ?.aiTranscription || '',
+          stepScores: (Array.isArray(newQ?.stepScores) && newQ.stepScores.length > 0) ? newQ.stepScores : (oldQ?.stepScores || []),
           status: 'answered'
         };
       }
-      return newQ;
+      if (oldAns) {
+        return {
+          ...baseQ,
+          userAnswer: oldAns,
+          aiTranscription: newQ?.aiTranscription || oldQ?.aiTranscription || '',
+          stepScores: (Array.isArray(newQ?.stepScores) && newQ.stepScores.length > 0) ? newQ.stepScores : (oldQ?.stepScores || []),
+          status: 'answered'
+        };
+      }
+      return {
+        ...baseQ,
+        userAnswer: '',
+        status: 'unanswered'
+      };
     });
   }
 

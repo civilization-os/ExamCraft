@@ -38,39 +38,149 @@ function removeLocalStorage(key) {
 }
 
 /**
+ * 权威水合函数：以试卷原题（baseQuestions）为绝对骨架，将用户答题记录（savedAnswers）精准注入
+ * 铁律：题干 (prompt)、选项 (options)、分值、公式、题型必须永远来自试卷源题，绝不允许因答案记录而丢失题目！
+ */
+export function hydrateQuestionsWithAnswers(baseQuestions = [], savedAnswers = []) {
+  if (!Array.isArray(baseQuestions) || baseQuestions.length === 0) {
+    return Array.isArray(savedAnswers) ? savedAnswers : [];
+  }
+
+  const answerMap = new Map();
+  const isSameLength = Array.isArray(savedAnswers) && savedAnswers.length === baseQuestions.length;
+
+  if (Array.isArray(savedAnswers)) {
+    savedAnswers.forEach((ans, idx) => {
+      if (!ans) return;
+      if (ans.id) {
+        answerMap.set(String(ans.id), ans);
+      }
+      if (ans.num !== undefined && ans.num !== null && String(ans.num).trim() !== '') {
+        const rawNum = String(ans.num).trim();
+        const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
+        answerMap.set(`num_${rawNum}`, ans);
+        if (Number.isFinite(numVal) && numVal > 0) {
+          answerMap.set(`num_${numVal}`, ans);
+          answerMap.set(`num_${String(numVal).padStart(2, '0')}`, ans);
+        }
+      }
+      if (isSameLength) {
+        answerMap.set(`idx_${idx}`, ans);
+      }
+    });
+  }
+
+  return baseQuestions.map((q, idx) => {
+    let saved = null;
+    if (q.id && answerMap.has(String(q.id))) {
+      saved = answerMap.get(String(q.id));
+    }
+    if (!saved && q.num !== undefined && q.num !== null && String(q.num).trim() !== '') {
+      const rawNum = String(q.num).trim();
+      const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
+      saved = answerMap.get(`num_${rawNum}`)
+        || (Number.isFinite(numVal) ? (answerMap.get(`num_${numVal}`) || answerMap.get(`num_${String(numVal).padStart(2, '0')}`)) : null);
+    }
+    if (!saved && isSameLength) {
+      saved = answerMap.get(`idx_${idx}`);
+    }
+
+    const userAnswer = typeof saved?.userAnswer === 'string'
+      ? saved.userAnswer
+      : (typeof q.userAnswer === 'string' ? q.userAnswer : '');
+
+    return {
+      ...q,
+      userAnswer,
+      aiTranscription: saved?.aiTranscription || q.aiTranscription || '',
+      stepScores: (Array.isArray(saved?.stepScores) && saved.stepScores.length > 0)
+        ? saved.stepScores
+        : (Array.isArray(q.stepScores) ? q.stepScores : []),
+      status: userAnswer.trim().length > 0 ? 'answered' : 'unanswered'
+    };
+  });
+}
+
+/**
  * 题级智能无损合并 (Smart Question-Level Merge)
  * 核心法则：
- * 1. 绝不允许云端的“空答案”覆盖本地已经填涂的“有效答案”；
- * 2. 若双方都有答案，比对时间戳并优先最新作答；
- * 3. 统计两端有效作答数，若本地作答数多于云端，自动将本地合并结果反向推向云端。
+ * 1. 以完整的试卷题目 (baseQuestions) 为权威基准，一道题都不能少；
+ * 2. 绝不允许云端的“空答案”覆盖本地已经填涂的“有效答案”；
+ * 3. 若双方都有答案，比对时间戳并优先最新作答；
+ * 4. 统计两端有效作答数，若本地作答数多于云端，自动将本地合并结果反向推向云端。
  */
-export function mergeAnswersSmartly(localQuestions = [], cloudQuestions = [], localUpdatedAt = 0, cloudUpdatedAt = 0) {
-  const localList = Array.isArray(localQuestions) ? localQuestions : [];
-  const cloudList = Array.isArray(cloudQuestions) ? cloudQuestions : [];
+export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloudAnswers = [], localUpdatedAt = 0, cloudUpdatedAt = 0) {
+  let actualBase = baseQuestions;
+  let actualLocal = localAnswers;
+  let actualCloud = cloudAnswers;
+  let actualLocalTime = localUpdatedAt;
+  let actualCloudTime = cloudUpdatedAt;
 
-  // 建立题目索引字典
-  const cloudMap = new Map();
-  cloudList.forEach((q, idx) => {
-    const key = q?.id || `q_${q?.num || idx}`;
-    cloudMap.set(key, q);
-  });
+  if (arguments.length === 4 && typeof localUpdatedAt === 'number') {
+    // 兼容历史调用: mergeAnswersSmartly(localQuestions, cloudQuestions, localTime, cloudTime)
+    actualLocal = baseQuestions;
+    actualCloud = localAnswers;
+    actualLocalTime = cloudAnswers;
+    actualCloudTime = localUpdatedAt;
+    actualBase = (Array.isArray(actualLocal) && actualLocal.length >= (actualCloud?.length || 0))
+      ? actualLocal
+      : (actualCloud || []);
+  }
 
-  const localMap = new Map();
-  localList.forEach((q, idx) => {
-    const key = q?.id || `q_${q?.num || idx}`;
-    localMap.set(key, q);
-  });
+  const baseList = Array.isArray(actualBase) ? actualBase : [];
+  const localList = Array.isArray(actualLocal) ? actualLocal : [];
+  const cloudList = Array.isArray(actualCloud) ? actualCloud : [];
 
-  // 以本地题库或云端题库的并集为基准
-  const allBaseQuestions = localList.length >= cloudList.length ? localList : cloudList;
+  // 若 baseList 为空，使用较长的一方作为兜底骨架
+  const authoritativeList = baseList.length > 0
+    ? baseList
+    : (localList.length >= cloudList.length ? localList : cloudList);
+
+  const buildLookup = (list) => {
+    const map = new Map();
+    list.forEach((ans, idx) => {
+      if (!ans) return;
+      if (ans.id) map.set(String(ans.id), ans);
+      if (ans.num !== undefined && ans.num !== null && String(ans.num).trim() !== '') {
+        const rawNum = String(ans.num).trim();
+        const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
+        map.set(`num_${rawNum}`, ans);
+        if (Number.isFinite(numVal) && numVal > 0) {
+          map.set(`num_${numVal}`, ans);
+          map.set(`num_${String(numVal).padStart(2, '0')}`, ans);
+        }
+      }
+      if (list.length === authoritativeList.length) {
+        map.set(`idx_${idx}`, ans);
+      }
+    });
+    return map;
+  };
+
+  const localMap = buildLookup(localList);
+  const cloudMap = buildLookup(cloudList);
 
   let localFilledCount = 0;
   let cloudFilledCount = 0;
 
-  const merged = allBaseQuestions.map((baseQ, idx) => {
-    const key = baseQ?.id || `q_${baseQ?.num || idx}`;
-    const localQ = localMap.get(key) || localList[idx];
-    const cloudQ = cloudMap.get(key) || cloudList[idx];
+  const findMatch = (baseQ, idx, map, list) => {
+    if (baseQ.id && map.has(String(baseQ.id))) return map.get(String(baseQ.id));
+    if (baseQ.num !== undefined && baseQ.num !== null && String(baseQ.num).trim() !== '') {
+      const rawNum = String(baseQ.num).trim();
+      const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
+      const match = map.get(`num_${rawNum}`)
+        || (Number.isFinite(numVal) ? (map.get(`num_${numVal}`) || map.get(`num_${String(numVal).padStart(2, '0')}`)) : null);
+      if (match) return match;
+    }
+    if (list.length === authoritativeList.length) {
+      return map.get(`idx_${idx}`) || list[idx] || null;
+    }
+    return null;
+  };
+
+  const merged = authoritativeList.map((baseQ, idx) => {
+    const localQ = findMatch(baseQ, idx, localMap, localList);
+    const cloudQ = findMatch(baseQ, idx, cloudMap, cloudList);
 
     const localAns = (localQ?.userAnswer || '').trim();
     const cloudAns = (cloudQ?.userAnswer || '').trim();
@@ -78,50 +188,53 @@ export function mergeAnswersSmartly(localQuestions = [], cloudQuestions = [], lo
     if (localAns) localFilledCount++;
     if (cloudAns) cloudFilledCount++;
 
-    // 1. 若本地有答案，云端无答案 -> 绝对保留本地答案
+    // 1. 若本地有有效答案，云端无答案 -> 绝对保留本地答案
     if (localAns && !cloudAns) {
       return {
         ...baseQ,
-        ...(localQ || {}),
         userAnswer: localAns,
+        aiTranscription: localQ?.aiTranscription || baseQ.aiTranscription || '',
+        stepScores: (Array.isArray(localQ?.stepScores) && localQ.stepScores.length > 0)
+          ? localQ.stepScores
+          : (baseQ.stepScores || []),
         status: 'answered'
       };
     }
 
-    // 2. 若云端有答案，本地无答案 -> 采纳云端答案
+    // 2. 若云端有有效答案，本地无答案 -> 采纳云端答案
     if (!localAns && cloudAns) {
       return {
         ...baseQ,
-        ...(cloudQ || {}),
         userAnswer: cloudAns,
+        aiTranscription: cloudQ?.aiTranscription || baseQ.aiTranscription || '',
+        stepScores: (Array.isArray(cloudQ?.stepScores) && cloudQ.stepScores.length > 0)
+          ? cloudQ.stepScores
+          : (baseQ.stepScores || []),
         status: 'answered'
       };
     }
 
     // 3. 若双方都有答案 -> 比较时间戳
     if (localAns && cloudAns) {
-      if (cloudUpdatedAt > localUpdatedAt) {
-        return {
-          ...baseQ,
-          ...(cloudQ || {}),
-          userAnswer: cloudAns,
-          status: 'answered'
-        };
-      }
+      const winner = actualCloudTime > actualLocalTime ? cloudQ : localQ;
+      const winnerAns = actualCloudTime > actualLocalTime ? cloudAns : localAns;
       return {
         ...baseQ,
-        ...(localQ || {}),
-        userAnswer: localAns,
+        userAnswer: winnerAns,
+        aiTranscription: winner?.aiTranscription || localQ?.aiTranscription || cloudQ?.aiTranscription || baseQ.aiTranscription || '',
+        stepScores: (Array.isArray(winner?.stepScores) && winner.stepScores.length > 0)
+          ? winner.stepScores
+          : (baseQ.stepScores || []),
         status: 'answered'
       };
     }
 
-    // 4. 双方都无答案 -> 继承基础题型信息
+    // 4. 双方都无答案 -> 完整保留试卷骨架题目
     return {
       ...baseQ,
       userAnswer: '',
-      aiTranscription: localQ?.aiTranscription || cloudQ?.aiTranscription || '',
-      stepScores: localQ?.stepScores || cloudQ?.stepScores || [],
+      aiTranscription: localQ?.aiTranscription || cloudQ?.aiTranscription || baseQ.aiTranscription || '',
+      stepScores: baseQ.stepScores || [],
       status: 'unanswered'
     };
   });
@@ -170,26 +283,8 @@ export const useExamSessionStore = create((set, get) => ({
       ? questions
       : (Array.isArray(paper.questions) ? paper.questions : []);
 
-    // Merge answers into questions
-    const answerMap = new Map();
-    if (Array.isArray(localAnswers)) {
-      localAnswers.forEach((ans, idx) => {
-        const key = ans?.id || `q_${ans?.num || idx}`;
-        answerMap.set(key, ans);
-      });
-    }
-
-    const mergedQuestions = baseQuestions.map((q, idx) => {
-      const key = q?.id || `q_${q?.num || idx}`;
-      const saved = answerMap.get(key) || localAnswers[idx];
-      return {
-        ...q,
-        userAnswer: saved?.userAnswer || q.userAnswer || '',
-        aiTranscription: saved?.aiTranscription || q.aiTranscription || '',
-        stepScores: saved?.stepScores || q.stepScores || [],
-        status: (saved?.userAnswer || q.userAnswer || '').trim() ? 'answered' : 'unanswered'
-      };
-    });
+    // 以试卷题目为绝对骨架，精准水合本地答题卡，绝不丢题
+    const mergedQuestions = hydrateQuestionsWithAnswers(baseQuestions, localAnswers);
 
     const initialSession = {
       paperId,
@@ -222,8 +317,9 @@ export const useExamSessionStore = create((set, get) => ({
           const cloudTime = Number(cloudSession.updatedAt) || 0;
           const localTime = Number(initialSession.updatedAt) || 0;
 
-          // 题级智能合并：绝不允许云端空答案覆盖本地有效答案
+          // 题级智能合并：严格以 baseQuestions 为权威基准进行三方对齐
           const { merged, shouldPushToCloud } = mergeAnswersSmartly(
+            baseQuestions,
             initialSession.answers,
             cloudSession.answers || [],
             localTime,

@@ -12,7 +12,7 @@ import {
   DEFAULT_REMINDER_MINUTES,
   REMINDER_PRESET_OPTIONS
 } from '../utils/examTimer';
-import { useExamSessionStore } from '../stores/useExamSessionStore';
+import { useExamSessionStore, hydrateQuestionsWithAnswers } from '../stores/useExamSessionStore';
 import { getToken } from '../utils/auth';
 
 const prefersSplitExamLayout = () => {
@@ -89,43 +89,52 @@ export default function ExamRoomView({
     };
   }, []);
 
-  // Initialize questionList: try to restore saved answers if user previously sealed or paused
+  const baseExamQuestions = useMemo(() => {
+    const raw = activePaper?.questions?.length ? activePaper.questions : (questions || []);
+    return normalizeQuestions(raw);
+  }, [activePaper?.id, activePaper?.questions, questions]);
+
+  // Initialize questionList: 以权威试卷题目为骨架，无损水合本地答题卡，绝不丢失原卷题目与题干
   const [questionList, setQuestionList] = useState(() => {
-    if (!activePaper?.id) return normalizeQuestions(questions || []);
-    try {
-      const saved = localStorage.getItem(`examcraft_answers_${activePaper.id}`);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return normalizeQuestions(parsed);
-      }
-    } catch {}
-    return normalizeQuestions(questions || []);
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!activePaper?.id) {
-      setQuestionList(normalizeQuestions(questions));
-      setCurrentQIndex(0);
-      return;
-    }
-
-    // 1. 本地极速秒开渲染
+    const base = baseExamQuestions;
+    if (!activePaper?.id || base.length === 0) return base;
     try {
       const saved = localStorage.getItem(`examcraft_answers_${activePaper.id}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setQuestionList(normalizeQuestions(parsed));
+          return hydrateQuestionsWithAnswers(base, parsed);
+        }
+      }
+    } catch {}
+    return base;
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    const base = baseExamQuestions;
+    if (!activePaper?.id || base.length === 0) {
+      setQuestionList(base);
+      setCurrentQIndex(0);
+      return;
+    }
+
+    // 1. 本地极速秒开渲染 (以试卷原题为骨架无损水合本地答案)
+    try {
+      const saved = localStorage.getItem(`examcraft_answers_${activePaper.id}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setQuestionList(hydrateQuestionsWithAnswers(base, parsed));
         }
       }
     } catch {}
 
-    // 2. 异步拉取云端实时答题会话并按时间戳智能合并（手机 ⇄ 电脑多端无缝接续）
-    initPaperSession(activePaper, questions).then((session) => {
+    // 2. 异步拉取云端实时答题会话并智能水合（手机 ⇄ 电脑多端无缝接续，永不丢题）
+    initPaperSession(activePaper, base).then((session) => {
       if (cancelled || !session) return;
       if (Array.isArray(session.answers) && session.answers.length > 0) {
-        setQuestionList(normalizeQuestions(session.answers));
+        setQuestionList(hydrateQuestionsWithAnswers(base, session.answers));
       }
       if (Array.isArray(session.markedQuestionKeys)) {
         setMarkedQuestionKeys(session.markedQuestionKeys);
@@ -134,7 +143,7 @@ export default function ExamRoomView({
         setSecondsLeft(session.secondsLeft);
         secondsLeftRef.current = session.secondsLeft;
       }
-      if (typeof session.currentQIndex === 'number' && session.currentQIndex >= 0 && session.currentQIndex < (questions?.length || 100)) {
+      if (typeof session.currentQIndex === 'number' && session.currentQIndex >= 0 && session.currentQIndex < (base?.length || 100)) {
         setCurrentQIndex(session.currentQIndex);
       }
       if (session.status === '已封卷') {
@@ -155,10 +164,10 @@ export default function ExamRoomView({
         if (now - lastFocusSyncTime < 5000) return;
         lastFocusSyncTime = now;
 
-        initPaperSession(activePaper, questions).then((session) => {
+        initPaperSession(activePaper, base).then((session) => {
           if (cancelled || !session) return;
           if (Array.isArray(session.answers) && session.answers.length > 0) {
-            setQuestionList(normalizeQuestions(session.answers));
+            setQuestionList(hydrateQuestionsWithAnswers(base, session.answers));
           }
           if (Array.isArray(session.markedQuestionKeys)) {
             setMarkedQuestionKeys(session.markedQuestionKeys);
@@ -175,7 +184,7 @@ export default function ExamRoomView({
       document.removeEventListener('visibilitychange', handleVisibilitySync);
       window.removeEventListener('focus', handleVisibilitySync);
     };
-  }, [questions, activePaper?.id]);
+  }, [baseExamQuestions, activePaper?.id]);
 
   // Exam Lifecycle Status: 考试中 vs 已封卷 (围棋封盘)
   const isInitiallySealed = activePaper?.status === '已封卷';

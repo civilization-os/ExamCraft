@@ -47,8 +47,20 @@ function readStoredObject(key) {
   }
 }
 
-function syncCloudExamSessions(examSessions) {
+function syncCloudExamSessions(examSessions, papersList = []) {
   if (!examSessions || typeof examSessions !== 'object') return;
+  let papers = papersList;
+  if (!Array.isArray(papers) || papers.length === 0) {
+    try {
+      const raw = localStorage.getItem('examcraft_papers');
+      if (raw) papers = JSON.parse(raw);
+    } catch {}
+  }
+  const paperMap = new Map();
+  if (Array.isArray(papers)) {
+    papers.forEach((p) => { if (p?.id) paperMap.set(String(p.id), p); });
+  }
+
   Object.entries(examSessions).forEach(([paperId, session]) => {
     if (!session || !Array.isArray(session.answers)) return;
     try {
@@ -59,8 +71,14 @@ function syncCloudExamSessions(examSessions) {
       const localTime = Number(localSession?.updatedAt) || 0;
       const cloudTime = Number(session.updatedAt) || 0;
 
-      // 题级智能无损合并：绝不允许服务端空白答案抹杀本地已作答记录！
+      const matchedPaper = paperMap.get(String(paperId));
+      const baseQuestions = Array.isArray(matchedPaper?.questions) && matchedPaper.questions.length > 0
+        ? matchedPaper.questions
+        : [];
+
+      // 题级智能无损合并：以试卷原题为骨架对齐，绝不允许题干或选项丢失
       const { merged, shouldPushToCloud } = mergeAnswersSmartly(
+        baseQuestions,
         localAnswers,
         session.answers,
         localTime,
@@ -239,7 +257,7 @@ export default function App() {
               localStorage.setItem('examcraft_custom_subjects', JSON.stringify(cloudData.subjects));
             }
             if (cloudData.examSessions) {
-              syncCloudExamSessions(cloudData.examSessions);
+              syncCloudExamSessions(cloudData.examSessions, cleanPapers);
             }
 
             // Check if there are local unmigrated papers from guest sessions
@@ -357,7 +375,7 @@ export default function App() {
         localStorage.setItem('examcraft_custom_subjects', JSON.stringify(cloudData.subjects));
       }
       if (cloudData.examSessions) {
-        syncCloudExamSessions(cloudData.examSessions);
+        syncCloudExamSessions(cloudData.examSessions, cleanPapers);
       }
 
       // Check for local backup papers to offer migration

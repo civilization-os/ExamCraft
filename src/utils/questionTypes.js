@@ -267,8 +267,19 @@ export function deduplicateQuestions(questions = [], examTitle = '') {
   for (const rawQ of questions) {
     if (!rawQ) continue;
     const q = healQuestionOptions(rawQ);
-    const num = Number.parseInt(String(q.num || q.id || '').replace(/\D/g, ''), 10);
-    const key = Number.isFinite(num) && num > 0 ? num : (q.id || `q_${map.size + 1}`);
+    let num = null;
+    if (q.num !== undefined && q.num !== null && String(q.num).trim() !== '') {
+      const parsed = Number.parseInt(String(q.num).replace(/\D/g, ''), 10);
+      if (Number.isFinite(parsed) && parsed > 0) num = parsed;
+    }
+    if (num === null && q.id) {
+      const match = /(?:^|[_\-qQ题])(\d+)(?:$|[_\-])/.exec(String(q.id));
+      if (match) {
+        const parsed = Number.parseInt(match[1], 10);
+        if (Number.isFinite(parsed) && parsed > 0) num = parsed;
+      }
+    }
+    const key = num !== null ? num : (q.id || `q_${map.size + 1}`);
 
     if (!map.has(key)) {
       map.set(key, {
