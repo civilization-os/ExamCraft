@@ -96,7 +96,8 @@ export function hydrateQuestionsWithAnswers(baseQuestions = [], savedAnswers = [
       stepScores: (Array.isArray(saved?.stepScores) && saved.stepScores.length > 0)
         ? saved.stepScores
         : (Array.isArray(q.stepScores) ? q.stepScores : []),
-      status: userAnswer.trim().length > 0 ? 'answered' : 'unanswered'
+      status: userAnswer.trim().length > 0 ? 'answered' : 'unanswered',
+      updatedAt: saved?.updatedAt || q.updatedAt || 0
     };
   });
 }
@@ -105,9 +106,9 @@ export function hydrateQuestionsWithAnswers(baseQuestions = [], savedAnswers = [
  * 题级智能无损合并 (Smart Question-Level Merge)
  * 核心法则：
  * 1. 以完整的试卷题目 (baseQuestions) 为权威基准，一道题都不能少；
- * 2. 绝不允许云端的“空答案”覆盖本地已经填涂的“有效答案”；
- * 3. 若双方都有答案，比对时间戳并优先最新作答；
- * 4. 统计两端有效作答数，若本地作答数多于云端，自动将本地合并结果反向推向云端。
+ * 2. 细粒度题级时间戳对比：无论是作答、改选还是清空作答，以后发生的最新操作为准；
+ * 3. 初始模板空白不会覆盖已有作答，但用户主动删除/清空的作答会完整双端同步；
+ * 4. 统计两端最新修改状态，若本地存在更新的变更（包括删除），自动反向推向云端。
  */
 export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloudAnswers = [], localUpdatedAt = 0, cloudUpdatedAt = 0) {
   let actualBase = baseQuestions;
@@ -162,6 +163,7 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
 
   let localFilledCount = 0;
   let cloudFilledCount = 0;
+  let hasLocalNewerEdits = false;
 
   const findMatch = (baseQ, idx, map, list) => {
     if (baseQ.id && map.has(String(baseQ.id))) return map.get(String(baseQ.id));
@@ -188,8 +190,42 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
     if (localAns) localFilledCount++;
     if (cloudAns) cloudFilledCount++;
 
-    // 1. 若本地有有效答案，云端无答案 -> 绝对保留本地答案
+    // 细粒度题级时间戳：优先题目独立记录的修改时间，其次回退到会话级别时间戳
+    const localQTime = Number(localQ?.updatedAt || (localAns ? actualLocalTime : 0)) || 0;
+    const cloudQTime = Number(cloudQ?.updatedAt || (cloudAns ? actualCloudTime : 0)) || 0;
+
+    // 1. 若云端修改时间明确更晚（手机端填涂了新答案，或手机端清空/删除了答案）-> 云端胜出
+    if (cloudQTime > localQTime) {
+      return {
+        ...baseQ,
+        userAnswer: cloudAns,
+        aiTranscription: cloudAns ? (cloudQ?.aiTranscription || '') : '',
+        stepScores: (Array.isArray(cloudQ?.stepScores) && cloudQ.stepScores.length > 0)
+          ? cloudQ.stepScores
+          : (cloudAns ? (baseQ.stepScores || []) : []),
+        status: cloudAns ? 'answered' : 'unanswered',
+        updatedAt: cloudQTime
+      };
+    }
+
+    // 2. 若本地修改时间明确更晚（电脑端填涂了新答案，或电脑端清空/删除了答案）-> 本地胜出
+    if (localQTime > cloudQTime) {
+      hasLocalNewerEdits = true;
+      return {
+        ...baseQ,
+        userAnswer: localAns,
+        aiTranscription: localAns ? (localQ?.aiTranscription || '') : '',
+        stepScores: (Array.isArray(localQ?.stepScores) && localQ.stepScores.length > 0)
+          ? localQ.stepScores
+          : (localAns ? (baseQ.stepScores || []) : []),
+        status: localAns ? 'answered' : 'unanswered',
+        updatedAt: localQTime
+      };
+    }
+
+    // 3. 时间戳并列/初始加载场景（例如刚从模板打开考卷，或者两端初始状态）
     if (localAns && !cloudAns) {
+      hasLocalNewerEdits = true;
       return {
         ...baseQ,
         userAnswer: localAns,
@@ -197,11 +233,11 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
         stepScores: (Array.isArray(localQ?.stepScores) && localQ.stepScores.length > 0)
           ? localQ.stepScores
           : (baseQ.stepScores || []),
-        status: 'answered'
+        status: 'answered',
+        updatedAt: localQTime || actualLocalTime || Date.now()
       };
     }
 
-    // 2. 若云端有有效答案，本地无答案 -> 采纳云端答案
     if (!localAns && cloudAns) {
       return {
         ...baseQ,
@@ -210,14 +246,15 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
         stepScores: (Array.isArray(cloudQ?.stepScores) && cloudQ.stepScores.length > 0)
           ? cloudQ.stepScores
           : (baseQ.stepScores || []),
-        status: 'answered'
+        status: 'answered',
+        updatedAt: cloudQTime || actualCloudTime || Date.now()
       };
     }
 
-    // 3. 若双方都有答案 -> 比较时间戳
     if (localAns && cloudAns) {
-      const winner = actualCloudTime > actualLocalTime ? cloudQ : localQ;
-      const winnerAns = actualCloudTime > actualLocalTime ? cloudAns : localAns;
+      const winner = actualCloudTime >= actualLocalTime ? cloudQ : localQ;
+      const winnerAns = actualCloudTime >= actualLocalTime ? cloudAns : localAns;
+      const winnerTime = actualCloudTime >= actualLocalTime ? actualCloudTime : actualLocalTime;
       return {
         ...baseQ,
         userAnswer: winnerAns,
@@ -225,7 +262,8 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
         stepScores: (Array.isArray(winner?.stepScores) && winner.stepScores.length > 0)
           ? winner.stepScores
           : (baseQ.stepScores || []),
-        status: 'answered'
+        status: 'answered',
+        updatedAt: winnerTime
       };
     }
 
@@ -233,9 +271,10 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
     return {
       ...baseQ,
       userAnswer: '',
-      aiTranscription: localQ?.aiTranscription || cloudQ?.aiTranscription || baseQ.aiTranscription || '',
-      stepScores: baseQ.stepScores || [],
-      status: 'unanswered'
+      aiTranscription: '',
+      stepScores: [],
+      status: 'unanswered',
+      updatedAt: 0
     };
   });
 
@@ -243,7 +282,7 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
     merged,
     localFilledCount,
     cloudFilledCount,
-    shouldPushToCloud: localFilledCount > cloudFilledCount || (localFilledCount > 0 && cloudFilledCount === 0)
+    shouldPushToCloud: hasLocalNewerEdits || (actualLocalTime > actualCloudTime && localFilledCount > 0)
   };
 }
 
@@ -406,17 +445,18 @@ export const useExamSessionStore = create((set, get) => ({
       };
     }
 
+    const now = Date.now();
     const nextAnswers = (current.answers || []).map((q, idx) =>
       idx === questionIndex
         ? {
             ...q,
             userAnswer: value,
-            status: value && value.trim().length > 0 ? 'answered' : 'unanswered'
+            status: value && value.trim().length > 0 ? 'answered' : 'unanswered',
+            updatedAt: now
           }
         : q
     );
 
-    const now = Date.now();
     const updatedSession = {
       ...current,
       answers: nextAnswers,
@@ -596,19 +636,34 @@ export const useExamSessionStore = create((set, get) => ({
    */
   clearSingleAnswer: (paperId, questionIndex) => {
     if (!paperId) return;
-    const current = get().sessions[paperId];
-    if (!current) return;
+    let current = get().sessions[paperId];
+    if (!current) {
+      const localAnswers = readLocalStorage(`${STORAGE_PREFIX_ANSWERS}${paperId}`, []);
+      const localMarks = readLocalStorage(`${STORAGE_PREFIX_MARKS}${paperId}`, []);
+      const localMeta = readLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {});
+      current = {
+        paperId,
+        answers: Array.isArray(localAnswers) ? localAnswers : [],
+        markedQuestionKeys: Array.isArray(localMarks) ? localMarks : [],
+        secondsLeft: typeof localMeta.secondsLeft === 'number' ? localMeta.secondsLeft : 5400,
+        currentQIndex: typeof localMeta.currentQIndex === 'number' ? localMeta.currentQIndex : questionIndex,
+        status: localMeta.status || '考试中',
+        sealedAt: localMeta.sealedAt || '',
+        updatedAt: Date.now()
+      };
+    }
 
+    const now = Date.now();
     const nextAnswers = current.answers.map((q, idx) =>
       idx === questionIndex
-        ? { ...q, userAnswer: '', aiTranscription: '', stepScores: [], status: 'unanswered' }
+        ? { ...q, userAnswer: '', aiTranscription: '', stepScores: [], status: 'unanswered', updatedAt: now }
         : q
     );
 
     const nextSession = {
       ...current,
       answers: nextAnswers,
-      updatedAt: Date.now()
+      updatedAt: now
     };
 
     set((state) => ({
@@ -619,7 +674,14 @@ export const useExamSessionStore = create((set, get) => ({
     }));
 
     writeLocalStorage(`${STORAGE_PREFIX_ANSWERS}${paperId}`, nextAnswers);
-    get().scheduleCloudSync(paperId, nextSession, 500);
+    writeLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {
+      secondsLeft: nextSession.secondsLeft,
+      currentQIndex: nextSession.currentQIndex,
+      status: nextSession.status,
+      sealedAt: nextSession.sealedAt,
+      updatedAt: now
+    });
+    get().scheduleCloudSync(paperId, nextSession, 300);
   },
 
   /**

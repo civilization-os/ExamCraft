@@ -810,7 +810,7 @@ export default function ExamRoomView({
     setQuestionList((prev) => {
       const next = prev.map((q, idx) =>
         idx === targetIndex
-          ? { ...q, userAnswer: val, status: val.trim() ? 'answered' : 'unanswered' }
+          ? { ...q, userAnswer: val, status: val.trim() ? 'answered' : 'unanswered', updatedAt: now }
           : q
       );
       if (activePaper?.id) {
@@ -953,7 +953,7 @@ export default function ExamRoomView({
               : [...currentSelected, keyUpper].sort();
             handleUpdateAnswer(nextSelected.join(''));
           } else {
-            handleUpdateAnswer(keyUpper);
+            handleUpdateAnswer(currentQ.userAnswer === keyUpper ? '' : keyUpper);
           }
         }
       }
@@ -977,12 +977,21 @@ export default function ExamRoomView({
   ]);
 
   const handleClearCurrentAnswer = () => {
+    const now = Date.now();
     const cleared = questionList.map((question, index) => index === currentQIndex
-      ? { ...question, userAnswer: '', aiTranscription: '', stepScores: [], status: 'unanswered' }
+      ? { ...question, userAnswer: '', aiTranscription: '', stepScores: [], status: 'unanswered', updatedAt: now }
       : question);
     setQuestionList(cleared);
     if (activePaper?.id) {
-      try { localStorage.setItem(`examcraft_answers_${activePaper.id}`, JSON.stringify(cleared)); } catch {}
+      try {
+        localStorage.setItem(`examcraft_answers_${activePaper.id}`, JSON.stringify(cleared));
+        const prevMeta = localStorage.getItem(`examcraft_session_${activePaper.id}`);
+        const parsedMeta = prevMeta ? JSON.parse(prevMeta) : {};
+        localStorage.setItem(`examcraft_session_${activePaper.id}`, JSON.stringify({
+          ...parsedMeta,
+          updatedAt: now
+        }));
+      } catch {}
       storeClearSingleAnswer(activePaper.id, currentQIndex);
     }
     setCandidateDraft('');
@@ -2141,7 +2150,7 @@ export default function ExamRoomView({
                         <button
                           key={`${question.id || index}-${option.key || optionIndex}`}
                           type="button"
-                          onClick={() => handleUpdateAnswer(option.key, index)}
+                          onClick={() => handleUpdateAnswer(selected ? '' : option.key, index)}
                           aria-pressed={selected}
                           className={`flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${selected ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary/30' : 'border-outline-variant/30 bg-surface-container-low text-on-surface hover:border-primary/40 hover:bg-primary/[0.03]'}`}
                         >
@@ -2162,7 +2171,7 @@ export default function ExamRoomView({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
               {currentQ.options.map((opt, optIdx) => {
                 const isSelected = currentQ.userAnswer === opt.key;
-                return <button key={`opt_${opt.key || 'k'}_${optIdx}`} type="button" onClick={() => handleUpdateAnswer(opt.key)} aria-pressed={isSelected} className={`flex items-center gap-space-md p-space-md rounded-xl border text-left transition-all cursor-pointer min-w-0 ${isSelected ? 'bg-primary/5 border-primary ring-2 ring-primary text-primary font-semibold' : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'}`}>
+                return <button key={`opt_${opt.key || 'k'}_${optIdx}`} type="button" onClick={() => handleUpdateAnswer(isSelected ? '' : opt.key)} aria-pressed={isSelected} className={`flex items-center gap-space-md p-space-md rounded-xl border text-left transition-all cursor-pointer min-w-0 ${isSelected ? 'bg-primary/5 border-primary ring-2 ring-primary text-primary font-semibold' : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'}`}>
                   <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-label-md shrink-0 ${isSelected ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}>{opt.key}</span>
                   <MathMarkdown content={opt.text} className="font-body-md text-body-md min-w-0" />
                 </button>;

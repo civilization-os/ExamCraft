@@ -530,28 +530,36 @@ export function saveUserExamSession(userId, session) {
       const newAns = (newQ?.userAnswer || '').trim();
       const oldAns = (oldQ?.userAnswer || '').trim();
 
-      if (newAns) {
+      // 若客户端由于切片未上报该题，完整保留云端已有的原题与作答
+      if (!newQ) {
+        return oldQ;
+      }
+
+      const newQTime = Number(newQ?.updatedAt || session.updatedAt || now) || 0;
+      const oldQTime = Number(oldQ?.updatedAt || existing.updatedAt || 0) || 0;
+
+      // 若客户端修改时间更新或相等（客户端提交的显式作答、修改或清空删除），采纳客户端最新状态
+      if (newQTime >= oldQTime) {
         return {
           ...baseQ,
           userAnswer: newAns,
-          aiTranscription: newQ?.aiTranscription || oldQ?.aiTranscription || '',
-          stepScores: (Array.isArray(newQ?.stepScores) && newQ.stepScores.length > 0) ? newQ.stepScores : (oldQ?.stepScores || []),
-          status: 'answered'
+          aiTranscription: newAns ? (newQ?.aiTranscription || '') : '',
+          stepScores: (Array.isArray(newQ?.stepScores) && newQ.stepScores.length > 0)
+            ? newQ.stepScores
+            : (newAns ? (oldQ?.stepScores || []) : []),
+          status: newAns ? 'answered' : 'unanswered',
+          updatedAt: newQTime
         };
       }
-      if (oldAns) {
-        return {
-          ...baseQ,
-          userAnswer: oldAns,
-          aiTranscription: newQ?.aiTranscription || oldQ?.aiTranscription || '',
-          stepScores: (Array.isArray(newQ?.stepScores) && newQ.stepScores.length > 0) ? newQ.stepScores : (oldQ?.stepScores || []),
-          status: 'answered'
-        };
-      }
+
+      // 若云端已有记录的时间戳更新（来自另一台设备最新的并发提交），保留云端较新的记录
       return {
         ...baseQ,
-        userAnswer: '',
-        status: 'unanswered'
+        userAnswer: oldAns,
+        aiTranscription: oldQ?.aiTranscription || '',
+        stepScores: oldQ?.stepScores || [],
+        status: oldAns ? 'answered' : 'unanswered',
+        updatedAt: oldQTime
       };
     });
   }
