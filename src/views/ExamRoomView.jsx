@@ -292,51 +292,10 @@ export default function ExamRoomView({
     }
   }, [activePaper?.id, secondsLeft, currentQIndex, isSealed, sealedAt]);
 
-  // Closing or reloading the page also seals the exam. pagehide is synchronous, so
-  // the snapshot is written before the browser discards the current page.
-  useEffect(() => {
-    if (!activePaper?.id) return undefined;
-    const sealOnPageExit = () => {
-      if (!timerRunningRef.current || sealedRef.current || submittingRef.current) return;
-      const nowStr = new Date().toLocaleString('zh-CN', { hour12: false });
-      const remaining = secondsLeftRef.current;
-      const paperId = String(activePaper.id);
-      const sealedAtTimestamp = Date.now();
-      const snapshot = { ...activePaper, status: '已封卷', secondsLeft: remaining, sealedAt: nowStr };
-      sealedRef.current = true;
-      timerRunningRef.current = false;
-      try {
-        localStorage.setItem('examcraft_active_paper', JSON.stringify(snapshot));
-        const raw = localStorage.getItem('examcraft_papers');
-        if (raw) {
-          const papers = JSON.parse(raw);
-          if (Array.isArray(papers)) {
-            localStorage.setItem('examcraft_papers', JSON.stringify(papers.map((paper) => (
-              paper.id === activePaper.id ? snapshot : paper
-            ))));
-          }
-        }
-      } catch {}
-
-      // React state updates and ordinary fetch calls are not reliable during
-      // pagehide. Send the same final state through the store's keepalive path
-      // so another device observes the seal instead of an active session.
-      const latestSession = useExamSessionStore.getState().getSession(paperId);
-      if (latestSession) {
-        useExamSessionStore.getState().emergencyKeepaliveSync({
-          ...latestSession,
-          paperId,
-          secondsLeft: remaining,
-          status: '已封卷',
-          sealedAt: nowStr,
-          statusOperation: 'seal',
-          updatedAt: sealedAtTimestamp
-        });
-      }
-    };
-    window.addEventListener('pagehide', sealOnPageExit);
-    return () => window.removeEventListener('pagehide', sealOnPageExit);
-  }, [activePaper?.id]);
+  // pagehide is also fired by F5, so it must never be treated as a submission
+  // or seal action. The session store's global keepalive handler flushes the
+  // latest pending answer snapshot; an explicit "封卷" remains the only way to
+  // lock an attempt.
   const [submitAiUsage, setSubmitAiUsage] = useState({ checked: 0, total: 0, calls: 0, totalTokens: 0, estimatedCostCny: 0, costKnown: true });
 
   useEffect(() => {
