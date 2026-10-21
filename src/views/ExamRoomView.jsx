@@ -300,6 +300,8 @@ export default function ExamRoomView({
       if (!timerRunningRef.current || sealedRef.current || submittingRef.current) return;
       const nowStr = new Date().toLocaleString('zh-CN', { hour12: false });
       const remaining = secondsLeftRef.current;
+      const paperId = String(activePaper.id);
+      const sealedAtTimestamp = Date.now();
       const snapshot = { ...activePaper, status: '已封卷', secondsLeft: remaining, sealedAt: nowStr };
       sealedRef.current = true;
       timerRunningRef.current = false;
@@ -315,6 +317,22 @@ export default function ExamRoomView({
           }
         }
       } catch {}
+
+      // React state updates and ordinary fetch calls are not reliable during
+      // pagehide. Send the same final state through the store's keepalive path
+      // so another device observes the seal instead of an active session.
+      const latestSession = useExamSessionStore.getState().getSession(paperId);
+      if (latestSession) {
+        useExamSessionStore.getState().emergencyKeepaliveSync({
+          ...latestSession,
+          paperId,
+          secondsLeft: remaining,
+          status: '已封卷',
+          sealedAt: nowStr,
+          statusOperation: 'seal',
+          updatedAt: sealedAtTimestamp
+        });
+      }
     };
     window.addEventListener('pagehide', sealOnPageExit);
     return () => window.removeEventListener('pagehide', sealOnPageExit);

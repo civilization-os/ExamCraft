@@ -1,6 +1,6 @@
 {
   "name": "examcraft-ai-workbench",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "private": true,
   "description": "ExamCraft AI Workbench - 双入口智能组卷与在线考练工作台",
   "type": "module",

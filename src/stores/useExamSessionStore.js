@@ -13,6 +13,26 @@ const STORAGE_PREFIX_SESSION = 'examcraft_session_';
 // Debounce timer registry for cloud sync per paperId
 const pendingSyncTimers = new Map();
 const pendingSyncPayloads = new Map();
+// Timer ticks must never keep resetting the answer-edit debounce. This records
+// the last timer checkpoint sent for each paper instead.
+const lastProgressSyncAt = new Map();
+
+function sendKeepaliveSession(session) {
+  const token = getToken();
+  if (!token || !session?.paperId) return;
+
+  try {
+    fetch('/api/user/exam-session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ session }),
+      keepalive: true
+    }).catch(() => {});
+  } catch {}
+}
 
 function readLocalStorage(key, defaultValue = null) {
   try {
@@ -560,8 +580,13 @@ export const useExamSessionStore = create((set, get) => ({
       updatedAt: nextSession.updatedAt
     });
 
-    // Low-frequency cloud sync for timer (every 15 seconds)
-    get().scheduleCloudSync(paperId, nextSession, 15000);
+    // Checkpoint the timer at most once per 15 seconds. Scheduling a 15-second
+    // debounce on every tick would continuously cancel pending answer edits.
+    const lastCheckpoint = lastProgressSyncAt.get(paperId) || 0;
+    if (nextSession.updatedAt - lastCheckpoint >= 15000) {
+      lastProgressSyncAt.set(paperId, nextSession.updatedAt);
+      get().scheduleCloudSync(paperId, nextSession, 0);
+    }
   },
 
   /**
@@ -576,6 +601,7 @@ export const useExamSessionStore = create((set, get) => ({
       ...current,
       status: '已封卷',
       sealedAt: sealedAtStr || new Date().toISOString(),
+      statusOperation: 'seal',
       updatedAt: Date.now()
     };
 
@@ -610,6 +636,7 @@ export const useExamSessionStore = create((set, get) => ({
       ...current,
       status: '考试中',
       sealedAt: '',
+      statusOperation: 'unseal',
       updatedAt: Date.now()
     };
 
@@ -692,13 +719,18 @@ export const useExamSessionStore = create((set, get) => ({
     const current = get().sessions[paperId];
     if (!current) return;
 
+    const resetVersion = Date.now();
     const resetAnswers = current.answers.map((q) => ({
       ...q,
       userAnswer: '',
       aiTranscription: '',
       stepScores: [],
-      status: 'unanswered'
+      status: 'unanswered',
+      // Tombstones need a timestamp too; otherwise a stale device can restore
+      // the answer after this reset.
+      updatedAt: resetVersion
     }));
+
 
     const resetSession = {
       ...current,
@@ -708,8 +740,10 @@ export const useExamSessionStore = create((set, get) => ({
       currentQIndex: 0,
       status: '考试中',
       sealedAt: '',
-      isReset: true,
-      updatedAt: Date.now()
+      // resetVersion is consumed server-side exactly once. Unlike a sticky
+      // boolean it cannot disable merge behavior for all later edits.
+      resetVersion,
+      updatedAt: resetVersion
     };
 
     set((state) => ({
@@ -744,6 +778,7 @@ export const useExamSessionStore = create((set, get) => ({
       pendingSyncTimers.delete(paperId);
       pendingSyncPayloads.delete(paperId);
     }
+    lastProgressSyncAt.delete(paperId);
 
     // Clean up local storage
     removeLocalStorage(`${STORAGE_PREFIX_ANSWERS}${paperId}`);
@@ -818,6 +853,12 @@ export const useExamSessionStore = create((set, get) => ({
         set({ syncStatus: 'error', syncError: err.message });
       }
     }
+  },
+
+  // pagehide cannot await normal requests. This intentionally sends the final
+  // snapshot with keepalive so a sealed exam is visible on another device.
+  emergencyKeepaliveSync: (session) => {
+    sendKeepaliveSession(session);
   }
 }));
 
@@ -830,17 +871,7 @@ if (typeof window !== 'undefined') {
     // 1. 遍历待发送的防抖队列
     pendingSyncPayloads.forEach((payload) => {
       if (payload && payload.paperId) {
-        try {
-          fetch('/api/user/exam-session', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({ session: payload }),
-            keepalive: true
-          }).catch(() => {});
-        } catch {}
+        sendKeepaliveSession(payload);
       }
     });
 

@@ -486,11 +486,20 @@ export function saveUserExamSession(userId, session) {
   const existing = sessions[session.paperId];
   const now = Date.now();
 
+  // A reset is an operation, not a permanent session mode. The client sends a
+  // monotonically newer resetVersion; after accepting it we keep the version
+  // but never persist the legacy isReset flag.
+  const requestedResetVersion = Number(
+    session.resetVersion || (session.isReset ? session.updatedAt : 0)
+  ) || 0;
+  const existingResetVersion = Number(existing?.resetVersion) || 0;
+  const appliesReset = requestedResetVersion > existingResetVersion;
+
   let finalAnswers = session.answers;
   // 服务端智能防空与题目防丢保护：
   // 1. 若云端已有且非明确重置考卷操作，绝不允许空白答案抹杀已填涂答案！
   // 2. 绝不允许由于客户端上报部分切片而截断云端已有的全卷题目骨架！
-  if (existing && Array.isArray(existing.answers) && Array.isArray(session.answers) && !session.isReset) {
+  if (existing && Array.isArray(existing.answers) && Array.isArray(session.answers) && !appliesReset) {
     const baseList = existing.answers.length >= session.answers.length
       ? existing.answers
       : session.answers;
@@ -564,11 +573,33 @@ export function saveUserExamSession(userId, session) {
     });
   }
 
+  const {
+    isReset: _legacyIsReset,
+    statusOperation,
+    ...sessionWithoutLegacyReset
+  } = session;
   const normalized = {
-    ...session,
+    ...sessionWithoutLegacyReset,
     answers: finalAnswers,
+    resetVersion: Math.max(existingResetVersion, requestedResetVersion),
     updatedAt: now
   };
+
+  // A late request from another device must not reopen or mutate a sealed
+  // attempt. Reopening is only permitted through the explicit action.
+  const keepExistingSeal = Boolean(
+    existing?.status === '已封卷'
+    && !appliesReset
+    && statusOperation !== 'unseal'
+  );
+  if (keepExistingSeal) {
+    normalized.answers = existing.answers;
+    normalized.markedQuestionKeys = existing.markedQuestionKeys;
+    normalized.secondsLeft = existing.secondsLeft;
+    normalized.currentQIndex = existing.currentQIndex;
+    normalized.status = existing.status;
+    normalized.sealedAt = existing.sealedAt;
+  }
   sessions[session.paperId] = normalized;
   atomicWriteJson(filePath, sessions);
   return normalized;
