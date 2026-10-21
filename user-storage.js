@@ -500,14 +500,23 @@ export function saveUserExamSession(userId, session) {
   // 1. 若云端已有且非明确重置考卷操作，绝不允许空白答案抹杀已填涂答案！
   // 2. 绝不允许由于客户端上报部分切片而截断云端已有的全卷题目骨架！
   if (existing && Array.isArray(existing.answers) && Array.isArray(session.answers) && !appliesReset) {
-    const baseList = existing.answers.length >= session.answers.length
-      ? existing.answers
-      : session.answers;
+    // 优先从 papers.json 读取该试卷权威完整的题目骨架 (01~22 真实题库序列)
+    let authoritativePaperQuestions = null;
+    try {
+      const papersFilePath = getUserFilePath(userId, 'papers.json');
+      const userPapers = readJsonFile(papersFilePath, []);
+      const matched = Array.isArray(userPapers) ? userPapers.find((p) => p.id === session.paperId) : null;
+      if (Array.isArray(matched?.questions) && matched.questions.length > 0) {
+        authoritativePaperQuestions = matched.questions;
+      }
+    } catch {}
+
+    const baseList = authoritativePaperQuestions
+      || (existing.answers.length >= session.answers.length ? existing.answers : session.answers);
 
     const sessionMap = new Map();
     session.answers.forEach((q, idx) => {
       if (!q) return;
-      if (q.id) sessionMap.set(String(q.id), q);
       if (q.num !== undefined && q.num !== null && String(q.num).trim() !== '') {
         const rawNum = String(q.num).trim();
         const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
@@ -520,19 +529,35 @@ export function saveUserExamSession(userId, session) {
       if (session.answers.length === baseList.length) {
         sessionMap.set(`idx_${idx}`, q);
       }
+      if (q.id) sessionMap.set(String(q.id), q);
     });
 
     finalAnswers = baseList.map((baseQ, idx) => {
       let newQ = null;
-      if (baseQ.id && sessionMap.has(String(baseQ.id))) newQ = sessionMap.get(String(baseQ.id));
-      if (!newQ && baseQ.num !== undefined && baseQ.num !== null && String(baseQ.num).trim() !== '') {
+      // 1. 第一优先级：精确题号匹配 (num 绝无二义性)
+      if (baseQ.num !== undefined && baseQ.num !== null && String(baseQ.num).trim() !== '') {
         const rawNum = String(baseQ.num).trim();
         const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
         newQ = sessionMap.get(`num_${rawNum}`)
           || (Number.isFinite(numVal) ? (sessionMap.get(`num_${numVal}`) || sessionMap.get(`num_${String(numVal).padStart(2, '0')}`)) : null);
       }
-      if (!newQ && session.answers.length === baseList.length) {
-        newQ = sessionMap.get(`idx_${idx}`);
+      // 2. 第二优先级：等长全卷位置索引对齐 (idx)
+      if (!newQ && session.answers.length === baseList.length && sessionMap.has(`idx_${idx}`)) {
+        const candidate = sessionMap.get(`idx_${idx}`);
+        const baseNumVal = Number.parseInt(String(baseQ.num || '').replace(/\D/g, ''), 10);
+        const candNumVal = Number.parseInt(String(candidate?.num || '').replace(/\D/g, ''), 10);
+        if (!Number.isFinite(baseNumVal) || !Number.isFinite(candNumVal) || baseNumVal === candNumVal) {
+          newQ = candidate;
+        }
+      }
+      // 3. 第三优先级：ID 匹配 (附带题号防碰撞校验)
+      if (!newQ && baseQ.id && sessionMap.has(String(baseQ.id))) {
+        const candidate = sessionMap.get(String(baseQ.id));
+        const baseNumVal = Number.parseInt(String(baseQ.num || '').replace(/\D/g, ''), 10);
+        const candNumVal = Number.parseInt(String(candidate?.num || '').replace(/\D/g, ''), 10);
+        if (!Number.isFinite(baseNumVal) || !Number.isFinite(candNumVal) || baseNumVal === candNumVal) {
+          newQ = candidate;
+        }
       }
 
       const oldQ = baseQ;

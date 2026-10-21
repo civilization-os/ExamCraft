@@ -92,17 +92,30 @@ export function hydrateQuestionsWithAnswers(baseQuestions = [], savedAnswers = [
 
   return baseQuestions.map((q, idx) => {
     let saved = null;
-    if (q.id && answerMap.has(String(q.id))) {
-      saved = answerMap.get(String(q.id));
-    }
-    if (!saved && q.num !== undefined && q.num !== null && String(q.num).trim() !== '') {
+    // 1. 第一优先级：精确题号匹配 (num 绝无二义性)
+    if (q.num !== undefined && q.num !== null && String(q.num).trim() !== '') {
       const rawNum = String(q.num).trim();
       const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
       saved = answerMap.get(`num_${rawNum}`)
         || (Number.isFinite(numVal) ? (answerMap.get(`num_${numVal}`) || answerMap.get(`num_${String(numVal).padStart(2, '0')}`)) : null);
     }
-    if (!saved && isSameLength) {
-      saved = answerMap.get(`idx_${idx}`);
+    // 2. 第二优先级：全卷等长位置索引对齐 (idx)
+    if (!saved && isSameLength && answerMap.has(`idx_${idx}`)) {
+      const candidate = answerMap.get(`idx_${idx}`);
+      const baseNumVal = Number.parseInt(String(q.num || '').replace(/\D/g, ''), 10);
+      const candNumVal = Number.parseInt(String(candidate?.num || '').replace(/\D/g, ''), 10);
+      if (!Number.isFinite(baseNumVal) || !Number.isFinite(candNumVal) || baseNumVal === candNumVal) {
+        saved = candidate;
+      }
+    }
+    // 3. 第三优先级：ID 匹配 (附带题号防碰撞校验)
+    if (!saved && q.id && answerMap.has(String(q.id))) {
+      const candidate = answerMap.get(String(q.id));
+      const baseNumVal = Number.parseInt(String(q.num || '').replace(/\D/g, ''), 10);
+      const candNumVal = Number.parseInt(String(candidate?.num || '').replace(/\D/g, ''), 10);
+      if (!Number.isFinite(baseNumVal) || !Number.isFinite(candNumVal) || baseNumVal === candNumVal) {
+        saved = candidate;
+      }
     }
 
     const userAnswer = typeof saved?.userAnswer === 'string'
@@ -191,7 +204,7 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
   let hasLocalNewerEdits = false;
 
   const findMatch = (baseQ, idx, map, list) => {
-    if (baseQ.id && map.has(String(baseQ.id))) return map.get(String(baseQ.id));
+    // 1. 第一优先级：精确题号匹配 (num 绝无二义性)
     if (baseQ.num !== undefined && baseQ.num !== null && String(baseQ.num).trim() !== '') {
       const rawNum = String(baseQ.num).trim();
       const numVal = Number.parseInt(rawNum.replace(/\D/g, ''), 10);
@@ -199,9 +212,31 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
         || (Number.isFinite(numVal) ? (map.get(`num_${numVal}`) || map.get(`num_${String(numVal).padStart(2, '0')}`)) : null);
       if (match) return match;
     }
-    if (list.length === authoritativeList.length) {
-      return map.get(`idx_${idx}`) || list[idx] || null;
+
+    // 2. 第二优先级：等长全卷位置索引对齐 (idx)
+    if (list.length === authoritativeList.length && map.has(`idx_${idx}`)) {
+      const candidate = map.get(`idx_${idx}`) || list[idx];
+      if (candidate) {
+        const baseNumVal = Number.parseInt(String(baseQ.num || '').replace(/\D/g, ''), 10);
+        const candNumVal = Number.parseInt(String(candidate.num || '').replace(/\D/g, ''), 10);
+        if (!Number.isFinite(baseNumVal) || !Number.isFinite(candNumVal) || baseNumVal === candNumVal) {
+          return candidate;
+        }
+      }
     }
+
+    // 3. 第三优先级：ID 匹配 (附带题号防碰撞校验)
+    if (baseQ.id && map.has(String(baseQ.id))) {
+      const candidate = map.get(String(baseQ.id));
+      if (candidate) {
+        const baseNumVal = Number.parseInt(String(baseQ.num || '').replace(/\D/g, ''), 10);
+        const candNumVal = Number.parseInt(String(candidate.num || '').replace(/\D/g, ''), 10);
+        if (!Number.isFinite(baseNumVal) || !Number.isFinite(candNumVal) || baseNumVal === candNumVal) {
+          return candidate;
+        }
+      }
+    }
+
     return null;
   };
 

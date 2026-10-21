@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.6"><img src="https://img.shields.io/badge/Release-v1.1.6-blue.svg?logo=github" alt="Release v1.1.6"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.7"><img src="https://img.shields.io/badge/Release-v1.1.7-blue.svg?logo=github" alt="Release v1.1.7"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -103,6 +103,9 @@
 - 完美渲染高等数学极限、微积分、定积分、矩阵变换（`pmatrix`, `bmatrix`, `vmatrix`）与多行推导。
 
 ### 7. 双端与多端实时作答同步与单向封卷闭环 (Multi-Device Sync & Irreversible Sealing) 🆕
+- **防碰撞无损题号权威匹配 (Collision-Proof Question Matching)**：
+  - 彻底攻克因试卷分篇章/题型解析产生的题号与局部自增 ID 冲突（如选择题 01 与填空题 13 存在相同 `id=1` 导致的答题互相覆盖踩踏）；
+  - 严格实行题号（`num`）第一权威准则、全卷等长位置索引（`idx`）协同校验与全局防撞派生 ID，彻底根除“选了答案过几秒被自动刷掉”的缺陷。
 - **题级细粒度时间戳仲裁 (Smart Question-Level Merge)**：
   - 彻底规避会话级倒计时心跳时间戳污染，未答空白题绝对不冲毁已有作答；
   - 准确识别“主动清空作答”与“初始未答空白”，多端交叉填涂、改选或清空均能毫秒级权威对齐；

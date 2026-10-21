@@ -263,6 +263,7 @@ export const healQuestion = healQuestionOptions;
 export function deduplicateQuestions(questions = [], examTitle = '') {
   if (!Array.isArray(questions) || questions.length === 0) return [];
   const map = new Map();
+  const usedIds = new Set();
 
   for (const rawQ of questions) {
     if (!rawQ) continue;
@@ -280,11 +281,13 @@ export function deduplicateQuestions(questions = [], examTitle = '') {
       }
     }
     const key = num !== null ? num : (q.id || `q_${map.size + 1}`);
+    const assignedId = (q.id && !usedIds.has(String(q.id))) ? q.id : `q_${key}`;
+    usedIds.add(String(assignedId));
 
     if (!map.has(key)) {
       map.set(key, {
         ...q,
-        id: q.id || `q_${key}`,
+        id: assignedId,
         num: String(key).padStart(2, '0'),
         type: normalizeQuestionType(q, examTitle)
       });
