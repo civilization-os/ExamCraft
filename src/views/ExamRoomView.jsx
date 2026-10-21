@@ -28,7 +28,21 @@ export default function ExamRoomView({
   onSubmitExam,
   onUpdatePaper
 }) {
-  const [currentQIndex, setCurrentQIndex] = useState(0);
+  const hasRestoredQIndexRef = useRef(false);
+  const [currentQIndex, setCurrentQIndex] = useState(() => {
+    if (!activePaper?.id) return 0;
+    try {
+      const raw = localStorage.getItem(`examcraft_session_${activePaper.id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.currentQIndex === 'number' && parsed.currentQIndex >= 0) {
+          hasRestoredQIndexRef.current = true;
+          return parsed.currentQIndex;
+        }
+      }
+    } catch {}
+    return 0;
+  });
   const [isAnswerCardCollapsed, setIsAnswerCardCollapsed] = useState(false);
   const [modelUsageStatus, setModelUsageStatus] = useState(null);
   const {
@@ -142,7 +156,10 @@ export default function ExamRoomView({
         setSecondsLeft(session.secondsLeft);
         secondsLeftRef.current = session.secondsLeft;
       }
-      if (typeof session.currentQIndex === 'number' && session.currentQIndex >= 0 && session.currentQIndex < (base?.length || 100)) {
+      // 题目索引 (currentQIndex) 属于当前考生的本地阅读视口，仅在考场首次挂载水合时恢复一次断点，
+      // 后续前台 3 秒轮询绝对不可强制篡改考生的视口，防止将考生正在查看的题目强行弹回旧题目！
+      if (!hasRestoredQIndexRef.current && typeof session.currentQIndex === 'number' && session.currentQIndex >= 0 && session.currentQIndex < (base?.length || 100)) {
+        hasRestoredQIndexRef.current = true;
         setCurrentQIndex(session.currentQIndex);
       }
       const isRemoteSealed = session.status === '已封卷';
@@ -334,6 +351,16 @@ export default function ExamRoomView({
           ))));
         }
       }
+      const prevMeta = localStorage.getItem(`examcraft_session_${activePaper.id}`);
+      const parsedMeta = prevMeta ? JSON.parse(prevMeta) : {};
+      localStorage.setItem(`examcraft_session_${activePaper.id}`, JSON.stringify({
+        ...parsedMeta,
+        secondsLeft,
+        currentQIndex,
+        status,
+        sealedAt: snapshot.sealedAt,
+        updatedAt: Date.now()
+      }));
     } catch {}
     if (activePaper?.id) {
       storeUpdateExamProgress(activePaper.id, secondsLeft, currentQIndex);
