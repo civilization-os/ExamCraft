@@ -92,6 +92,11 @@ function syncCloudExamSessions(examSessions, papersList = []) {
         ? Array.from(new Set([...(Array.isArray(localMarks) ? localMarks : []), ...session.markedQuestionKeys]))
         : (Array.isArray(localMarks) ? localMarks : []);
 
+      // 单向封卷权威法则（Irreversible Seal Priority）：
+      const isSealed = session.status === '已封卷' || localSession.status === '已封卷';
+      const finalStatus = isSealed ? '已封卷' : (session.status || localSession.status || '考试中');
+      const finalSealedAt = isSealed ? (session.sealedAt || localSession.sealedAt || new Date().toISOString()) : '';
+
       localStorage.setItem(`examcraft_answers_${paperId}`, JSON.stringify(merged));
       localStorage.setItem(`examcraft_question_marks_${paperId}`, JSON.stringify(mergedMarks));
       localStorage.setItem(`examcraft_session_${paperId}`, JSON.stringify({
@@ -99,12 +104,31 @@ function syncCloudExamSessions(examSessions, papersList = []) {
           ? (typeof localSession.secondsLeft === 'number' ? Math.min(localSession.secondsLeft, session.secondsLeft) : session.secondsLeft)
           : localSession.secondsLeft,
         currentQIndex: typeof session.currentQIndex === 'number' ? session.currentQIndex : (localSession.currentQIndex || 0),
-        status: session.status || localSession.status || '考试中',
-        sealedAt: session.sealedAt || localSession.sealedAt || '',
+        status: finalStatus,
+        sealedAt: finalSealedAt,
         updatedAt: Math.max(cloudTime, localTime, Date.now())
       }));
 
-      // 如果本地作答更完整（例如手机端刚做的题目尚未同步至云端），立即异步回推云端补全
+      // 若处于封卷状态，联动更新本地 examcraft_papers 列表，确保大厅卡片与考场即时闭环
+      if (isSealed) {
+        try {
+          const rawPapers = localStorage.getItem('examcraft_papers');
+          if (rawPapers) {
+            const list = JSON.parse(rawPapers);
+            let changed = false;
+            const updatedList = list.map((p) => {
+              if (p.id === paperId && p.status !== '已封卷') {
+                changed = true;
+                return { ...p, status: '已封卷', sealedAt: finalSealedAt, secondsLeft: session.secondsLeft ?? p.secondsLeft };
+              }
+              return p;
+            });
+            if (changed) localStorage.setItem('examcraft_papers', JSON.stringify(updatedList));
+          }
+        } catch {}
+      }
+
+      // 如果本地作答更完整（例如电脑端刷新时拉取，发现本地答题卡更全），立即异步回推云端补全
       if (shouldPushToCloud && getToken()) {
         apiSaveExamSession({
           paperId,
@@ -112,8 +136,8 @@ function syncCloudExamSessions(examSessions, papersList = []) {
           markedQuestionKeys: mergedMarks,
           secondsLeft: session.secondsLeft ?? localSession.secondsLeft,
           currentQIndex: session.currentQIndex ?? localSession.currentQIndex,
-          status: session.status || localSession.status,
-          sealedAt: session.sealedAt || localSession.sealedAt
+          status: finalStatus,
+          sealedAt: finalSealedAt
         }).catch(() => {});
       }
     } catch (e) {
@@ -258,6 +282,12 @@ export default function App() {
             }
             if (cloudData.examSessions) {
               syncCloudExamSessions(cloudData.examSessions, cleanPapers);
+              if (activePaper?.id && cloudData.examSessions[activePaper.id]) {
+                const activeSession = cloudData.examSessions[activePaper.id];
+                if (activeSession.status === '已封卷') {
+                  setActivePaper((prev) => (prev ? { ...prev, status: '已封卷', sealedAt: activeSession.sealedAt || prev.sealedAt } : null));
+                }
+              }
             }
 
             // Check if there are local unmigrated papers from guest sessions

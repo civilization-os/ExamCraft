@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/Release-v1.1.0-blue.svg?logo=github" alt="Release v1.1.0"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.6"><img src="https://img.shields.io/badge/Release-v1.1.6-blue.svg?logo=github" alt="Release v1.1.6"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -101,6 +101,15 @@
 ### 6. 全场景 KaTeX 数学矢量公式排版
 - 全站无死角集成 KaTeX 数学渲染引擎；
 - 完美渲染高等数学极限、微积分、定积分、矩阵变换（`pmatrix`, `bmatrix`, `vmatrix`）与多行推导。
+
+### 7. 双端与多端实时作答同步与单向封卷闭环 (Multi-Device Sync & Irreversible Sealing) 🆕
+- **题级细粒度时间戳仲裁 (Smart Question-Level Merge)**：
+  - 彻底规避会话级倒计时心跳时间戳污染，未答空白题绝对不冲毁已有作答；
+  - 准确识别“主动清空作答”与“初始未答空白”，多端交叉填涂、改选或清空均能毫秒级权威对齐；
+  - 电脑端作答后无论何时刷新页面（F5），答题卡内容百分之百稳固保全，绝不丢题。
+- **单向封卷权威仲裁（Irreversible Seal Priority）**：
+  - 只要任意一端（PC 或手机端）执行“封卷”，所有在线设备秒级联动冻结倒计时并锁定试卷，同步弹出封盘保护提示；
+  - 云端试卷元数据与考试会话双向锁定，彻底杜绝多端状态割裂。
 
 ---
 

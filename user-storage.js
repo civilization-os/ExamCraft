@@ -544,31 +544,84 @@ export function saveUserExamSession(userId, session) {
         return oldQ;
       }
 
-      const newQTime = Number(newQ?.updatedAt || session.updatedAt || now) || 0;
-      const oldQTime = Number(oldQ?.updatedAt || existing.updatedAt || 0) || 0;
+      const newQExplicitTime = Number(newQ?.updatedAt) || 0;
+      const newQTime = newQExplicitTime > 0
+        ? newQExplicitTime
+        : (newAns ? (Number(session.updatedAt) || now) : 0);
 
-      // 若客户端修改时间更新或相等（客户端提交的显式作答、修改或清空删除），采纳客户端最新状态
-      if (newQTime >= oldQTime) {
+      const oldQExplicitTime = Number(oldQ?.updatedAt) || 0;
+      const oldQTime = oldQExplicitTime > 0
+        ? oldQExplicitTime
+        : (oldAns ? (Number(existing.updatedAt) || 0) : 0);
+
+      // 1. 客户端有作答，云端为空白 -> 采纳客户端
+      if (newAns && !oldAns) {
         return {
           ...baseQ,
           userAnswer: newAns,
-          aiTranscription: newAns ? (newQ?.aiTranscription || '') : '',
-          stepScores: (Array.isArray(newQ?.stepScores) && newQ.stepScores.length > 0)
-            ? newQ.stepScores
-            : (newAns ? (oldQ?.stepScores || []) : []),
-          status: newAns ? 'answered' : 'unanswered',
-          updatedAt: newQTime
+          aiTranscription: newQ?.aiTranscription || '',
+          stepScores: Array.isArray(newQ?.stepScores) ? newQ.stepScores : [],
+          status: 'answered',
+          updatedAt: newQTime || now
         };
       }
 
-      // 若云端已有记录的时间戳更新（来自另一台设备最新的并发提交），保留云端较新的记录
+      // 2. 客户端为空白，云端已有作答：
+      if (!newAns && oldAns) {
+        // 核心铁律：只有客户端明确带有更新的显式题级修改时间戳（用户在此题上主动点击清空/删除），才采纳清空
+        if (newQExplicitTime > 0 && newQExplicitTime > oldQTime) {
+          return {
+            ...baseQ,
+            userAnswer: '',
+            aiTranscription: '',
+            stepScores: [],
+            status: 'unanswered',
+            updatedAt: newQExplicitTime
+          };
+        }
+        // 否则（例如另一端初次进考场、心跳未填涂、初始模板空白），绝不允许冲毁云端已有答卷！
+        return {
+          ...baseQ,
+          userAnswer: oldAns,
+          aiTranscription: oldQ?.aiTranscription || '',
+          stepScores: oldQ?.stepScores || [],
+          status: 'answered',
+          updatedAt: oldQTime
+        };
+      }
+
+      // 3. 双方皆有作答：时间戳较新者胜出
+      if (newAns && oldAns) {
+        if (newQTime >= oldQTime) {
+          return {
+            ...baseQ,
+            userAnswer: newAns,
+            aiTranscription: newQ?.aiTranscription || '',
+            stepScores: (Array.isArray(newQ?.stepScores) && newQ.stepScores.length > 0)
+              ? newQ.stepScores
+              : (oldQ?.stepScores || []),
+            status: 'answered',
+            updatedAt: newQTime
+          };
+        }
+        return {
+          ...baseQ,
+          userAnswer: oldAns,
+          aiTranscription: oldQ?.aiTranscription || '',
+          stepScores: oldQ?.stepScores || [],
+          status: 'answered',
+          updatedAt: oldQTime
+        };
+      }
+
+      // 4. 双方皆为空白
       return {
         ...baseQ,
-        userAnswer: oldAns,
-        aiTranscription: oldQ?.aiTranscription || '',
-        stepScores: oldQ?.stepScores || [],
-        status: oldAns ? 'answered' : 'unanswered',
-        updatedAt: oldQTime
+        userAnswer: '',
+        aiTranscription: '',
+        stepScores: [],
+        status: 'unanswered',
+        updatedAt: Math.max(newQExplicitTime, oldQExplicitTime)
       };
     });
   }
@@ -584,6 +637,17 @@ export function saveUserExamSession(userId, session) {
     resetVersion: Math.max(existingResetVersion, requestedResetVersion),
     updatedAt: now
   };
+
+  // 封卷状态权威单向不可逆（Irreversible Seal Priority）：
+  // 只要云端已有状态为已封卷，或者本次客户端提交为已封卷，只要没有显式 unseal 或重置，状态锁定为 '已封卷'
+  const isTargetSealed = (session.status === '已封卷' || existing?.status === '已封卷')
+    && !appliesReset
+    && statusOperation !== 'unseal';
+
+  if (isTargetSealed) {
+    normalized.status = '已封卷';
+    normalized.sealedAt = session.sealedAt || existing?.sealedAt || new Date().toISOString();
+  }
 
   // A late request from another device must not reopen or mutate a sealed
   // attempt. Reopening is only permitted through the explicit action.
@@ -602,6 +666,35 @@ export function saveUserExamSession(userId, session) {
   }
   sessions[session.paperId] = normalized;
   atomicWriteJson(filePath, sessions);
+
+  // 联动更新 papers.json 中该试卷的封卷状态与倒计时快照，确保跨端列表大厅即时感知
+  if (isTargetSealed) {
+    try {
+      const papersFilePath = getUserFilePath(userId, 'papers.json');
+      const userPapers = readJsonFile(papersFilePath, []);
+      if (Array.isArray(userPapers)) {
+        let paperChanged = false;
+        const nextPapers = userPapers.map((p) => {
+          if (p.id === session.paperId && p.status !== '已封卷') {
+            paperChanged = true;
+            return {
+              ...p,
+              status: '已封卷',
+              sealedAt: normalized.sealedAt,
+              secondsLeft: normalized.secondsLeft,
+              updatedAt: now
+            };
+          }
+          return p;
+        });
+        if (paperChanged) {
+          atomicWriteJson(papersFilePath, nextPapers);
+        }
+      }
+    } catch (e) {
+      console.warn('[user-storage] Sync papers.json seal state warning:', e);
+    }
+  }
   return normalized;
 }
 

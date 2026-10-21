@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/Release-v1.1.0-blue.svg?logo=github" alt="Release v1.1.0"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.6"><img src="https://img.shields.io/badge/Release-v1.1.6-blue.svg?logo=github" alt="Release v1.1.6"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Publish CI"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub Container Registry"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>

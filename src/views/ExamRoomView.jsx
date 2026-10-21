@@ -130,8 +130,7 @@ export default function ExamRoomView({
       }
     } catch {}
 
-    // 2. 异步拉取云端实时答题会话并智能水合（手机 ⇄ 电脑多端无缝接续，永不丢题）
-    initPaperSession(activePaper, base).then((session) => {
+    const applyRemoteSession = (session) => {
       if (cancelled || !session) return;
       if (Array.isArray(session.answers) && session.answers.length > 0) {
         setQuestionList(hydrateQuestionsWithAnswers(base, session.answers));
@@ -146,43 +145,92 @@ export default function ExamRoomView({
       if (typeof session.currentQIndex === 'number' && session.currentQIndex >= 0 && session.currentQIndex < (base?.length || 100)) {
         setCurrentQIndex(session.currentQIndex);
       }
-      if (session.status === '已封卷') {
+      const isRemoteSealed = session.status === '已封卷';
+      if (isRemoteSealed) {
+        if (!sealedRef.current) {
+          showExamToast('🔏 检测到其他设备已执行封卷，当前考卷已同步进入封盘保护状态', 'warn');
+        }
         setIsSealed(true);
         setIsTimerRunning(false);
-        setSealedAt(session.sealedAt || '');
+        const sealedTime = session.sealedAt || new Date().toLocaleString('zh-CN', { hour12: false });
+        setSealedAt(sealedTime);
+        if (onUpdatePaper) {
+          onUpdatePaper({
+            ...activePaper,
+            status: '已封卷',
+            secondsLeft: typeof session.secondsLeft === 'number' ? session.secondsLeft : secondsLeftRef.current,
+            sealedAt: sealedTime
+          });
+        }
+        try {
+          const raw = localStorage.getItem('examcraft_papers');
+          if (raw) {
+            const list = JSON.parse(raw);
+            const next = list.map((p) =>
+              p.id === activePaper?.id ? { ...p, status: '已封卷', secondsLeft: session.secondsLeft, sealedAt: sealedTime } : p
+            );
+            localStorage.setItem('examcraft_papers', JSON.stringify(next));
+          }
+        } catch {}
+      } else if (session.status === '考试中' && sealedRef.current) {
+        setIsSealed(false);
+        setIsTimerRunning(true);
+        setSealedAt('');
       }
+    };
+
+    // 2. 异步拉取云端实时答题会话并智能水合（手机 ⇄ 电脑多端无缝接续，永不丢题）
+    initPaperSession(activePaper, base).then((session) => {
+      applyRemoteSession(session);
     }).catch((err) => {
       console.warn('[ExamRoomView] Session init warning:', err);
     });
 
-    // 3. 多端漫游感知：当用户从手机/其他标签切回当前前台时，自动智能合并最新的作答进展
-    let lastFocusSyncTime = Date.now();
-    const handleVisibilitySync = () => {
+    // 3. 前台每 3 秒拉取一次远端会话。封卷、解封、倒计时和答案均在
+    // 同一轮询中合并；只依赖 focus 会让另一端在持续前台时永远感知不到封卷。
+    let lastFocusSyncTime = 0;
+    const syncRemoteSession = (force = false) => {
       if (document.visibilityState === 'visible' && !cancelled && activePaper?.id && getToken()) {
         const now = Date.now();
-        // 限制防抖：至少间隔 5 秒
-        if (now - lastFocusSyncTime < 5000) return;
+        if (!force && now - lastFocusSyncTime < 1000) return;
         lastFocusSyncTime = now;
 
-        initPaperSession(activePaper, base).then((session) => {
-          if (cancelled || !session) return;
-          if (Array.isArray(session.answers) && session.answers.length > 0) {
-            setQuestionList(hydrateQuestionsWithAnswers(base, session.answers));
-          }
-          if (Array.isArray(session.markedQuestionKeys)) {
-            setMarkedQuestionKeys(session.markedQuestionKeys);
-          }
-        }).catch(() => {});
+        initPaperSession(activePaper, base, { silent: true })
+          .then(applyRemoteSession)
+          .catch(() => {});
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilitySync);
-    window.addEventListener('focus', handleVisibilitySync);
+    const pollId = window.setInterval(() => syncRemoteSession(true), 3000);
+    document.addEventListener('visibilitychange', syncRemoteSession);
+    window.addEventListener('focus', syncRemoteSession);
+
+    // 监听同机跨标签页与全局封卷事件
+    const handleStorageChange = (e) => {
+      if (e.key === `examcraft_session_${activePaper?.id}` && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed?.status === '已封卷' && !sealedRef.current) {
+            applyRemoteSession(parsed);
+          }
+        } catch {}
+      }
+    };
+    const handleSealedEvent = (e) => {
+      if (e.detail?.paperId === activePaper?.id && e.detail?.session) {
+        applyRemoteSession(e.detail.session);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('examcraft-session-sealed', handleSealedEvent);
 
     return () => {
       cancelled = true;
-      document.removeEventListener('visibilitychange', handleVisibilitySync);
-      window.removeEventListener('focus', handleVisibilitySync);
+      window.clearInterval(pollId);
+      document.removeEventListener('visibilitychange', syncRemoteSession);
+      window.removeEventListener('focus', syncRemoteSession);
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('examcraft-session-sealed', handleSealedEvent);
     };
   }, [baseExamQuestions, activePaper?.id]);
 
@@ -193,7 +241,7 @@ export default function ExamRoomView({
 
   // Auto-mark paper as '考试中' if not already sealed or completed
   useEffect(() => {
-    if (activePaper?.id && activePaper.status !== '已封卷' && !String(activePaper.status).startsWith('已完成')) {
+    if (activePaper?.id && !isSealed && activePaper.status !== '已封卷' && !String(activePaper.status).startsWith('已完成')) {
       const updated = { ...activePaper, status: '考试中' };
       if (onUpdatePaper) onUpdatePaper(updated);
       try {
@@ -205,7 +253,7 @@ export default function ExamRoomView({
         }
       } catch {}
     }
-  }, [activePaper?.id]);
+  }, [activePaper?.id, isSealed]);
   
   // Timer state based on activePaper.secondsLeft or duration
   const initialDurationSeconds = activePaper?.secondsLeft !== undefined
@@ -782,6 +830,7 @@ export default function ExamRoomView({
     || modelUsageStatus?.balance?.balances?.[0];
 
   const handleUpdateAnswer = (val, targetIndex = currentQIndex) => {
+    if (isSealed || sealedRef.current) return;
     if (targetIndex === currentQIndex) setCandidateDraft(val);
     const now = Date.now();
     setQuestionList((prev) => {

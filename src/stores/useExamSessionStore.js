@@ -109,6 +109,11 @@ export function hydrateQuestionsWithAnswers(baseQuestions = [], savedAnswers = [
       ? saved.userAnswer
       : (typeof q.userAnswer === 'string' ? q.userAnswer : '');
 
+    // 只有非空答案，或者显式记录过修改时间戳（如主动清空）的，才保留题级 updatedAt；
+    // 未作答的题目其 updatedAt 必须严格为 0，绝不能继承会话级倒计时心跳！
+    const rawUpdatedAt = Number(saved?.updatedAt ?? q.updatedAt) || 0;
+    const updatedAt = (userAnswer.trim().length > 0 || rawUpdatedAt > 0) ? rawUpdatedAt : 0;
+
     return {
       ...q,
       userAnswer,
@@ -117,7 +122,7 @@ export function hydrateQuestionsWithAnswers(baseQuestions = [], savedAnswers = [
         ? saved.stepScores
         : (Array.isArray(q.stepScores) ? q.stepScores : []),
       status: userAnswer.trim().length > 0 ? 'answered' : 'unanswered',
-      updatedAt: saved?.updatedAt || q.updatedAt || 0
+      updatedAt
     };
   });
 }
@@ -210,46 +215,35 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
     if (localAns) localFilledCount++;
     if (cloudAns) cloudFilledCount++;
 
-    // 细粒度题级时间戳：优先题目独立记录的修改时间，其次回退到会话级别时间戳
-    const localQTime = Number(localQ?.updatedAt || (localAns ? actualLocalTime : 0)) || 0;
-    const cloudQTime = Number(cloudQ?.updatedAt || (cloudAns ? actualCloudTime : 0)) || 0;
+    const localExplicitTime = Number(localQ?.updatedAt) || 0;
+    const cloudExplicitTime = Number(cloudQ?.updatedAt) || 0;
 
-    // 1. 若云端修改时间明确更晚（手机端填涂了新答案，或手机端清空/删除了答案）-> 云端胜出
-    if (cloudQTime > localQTime) {
-      return {
-        ...baseQ,
-        userAnswer: cloudAns,
-        aiTranscription: cloudAns ? (cloudQ?.aiTranscription || '') : '',
-        stepScores: (Array.isArray(cloudQ?.stepScores) && cloudQ.stepScores.length > 0)
-          ? cloudQ.stepScores
-          : (cloudAns ? (baseQ.stepScores || []) : []),
-        status: cloudAns ? 'answered' : 'unanswered',
-        updatedAt: cloudQTime
-      };
-    }
+    const localQTime = localExplicitTime > 0
+      ? localExplicitTime
+      : (localAns ? actualLocalTime : 0);
+    const cloudQTime = cloudExplicitTime > 0
+      ? cloudExplicitTime
+      : (cloudAns ? actualCloudTime : 0);
 
-    // 2. 若本地修改时间明确更晚（电脑端填涂了新答案，或电脑端清空/删除了答案）-> 本地胜出
-    if (localQTime > cloudQTime) {
+    // 1. 本地有作答，云端为空白
+    if (localAns && !cloudAns) {
+      // 核心铁律：只有云端明确记录了显式题级修改时间，且该时间戳明确晚于本地作答时间（用户在另一端主动清空），才采纳清空
+      if (cloudExplicitTime > 0 && cloudExplicitTime > localQTime) {
+        return {
+          ...baseQ,
+          userAnswer: '',
+          aiTranscription: '',
+          stepScores: [],
+          status: 'unanswered',
+          updatedAt: cloudExplicitTime
+        };
+      }
+      // 否则本地作答胜出（无论云端会话倒计时心跳有多新，初始空白绝不冲毁真实作答），并标记自动补全推向云端
       hasLocalNewerEdits = true;
       return {
         ...baseQ,
         userAnswer: localAns,
         aiTranscription: localAns ? (localQ?.aiTranscription || '') : '',
-        stepScores: (Array.isArray(localQ?.stepScores) && localQ.stepScores.length > 0)
-          ? localQ.stepScores
-          : (localAns ? (baseQ.stepScores || []) : []),
-        status: localAns ? 'answered' : 'unanswered',
-        updatedAt: localQTime
-      };
-    }
-
-    // 3. 时间戳并列/初始加载场景（例如刚从模板打开考卷，或者两端初始状态）
-    if (localAns && !cloudAns) {
-      hasLocalNewerEdits = true;
-      return {
-        ...baseQ,
-        userAnswer: localAns,
-        aiTranscription: localQ?.aiTranscription || baseQ.aiTranscription || '',
         stepScores: (Array.isArray(localQ?.stepScores) && localQ.stepScores.length > 0)
           ? localQ.stepScores
           : (baseQ.stepScores || []),
@@ -258,11 +252,25 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
       };
     }
 
+    // 2. 本地为空白，云端有作答
     if (!localAns && cloudAns) {
+      // 核心铁律：只有本地明确记录了显式题级修改时间，且该时间戳明确晚于云端作答时间（用户在当前端主动清空），才采纳清空
+      if (localExplicitTime > 0 && localExplicitTime > cloudQTime) {
+        hasLocalNewerEdits = true;
+        return {
+          ...baseQ,
+          userAnswer: '',
+          aiTranscription: '',
+          stepScores: [],
+          status: 'unanswered',
+          updatedAt: localExplicitTime
+        };
+      }
+      // 否则云端作答胜出（初始未填涂绝不抹杀云端作答）
       return {
         ...baseQ,
         userAnswer: cloudAns,
-        aiTranscription: cloudQ?.aiTranscription || baseQ.aiTranscription || '',
+        aiTranscription: cloudAns ? (cloudQ?.aiTranscription || '') : '',
         stepScores: (Array.isArray(cloudQ?.stepScores) && cloudQ.stepScores.length > 0)
           ? cloudQ.stepScores
           : (baseQ.stepScores || []),
@@ -271,19 +279,30 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
       };
     }
 
+    // 3. 双方均有作答：时间戳晚者胜出
     if (localAns && cloudAns) {
-      const winner = actualCloudTime >= actualLocalTime ? cloudQ : localQ;
-      const winnerAns = actualCloudTime >= actualLocalTime ? cloudAns : localAns;
-      const winnerTime = actualCloudTime >= actualLocalTime ? actualCloudTime : actualLocalTime;
+      if (localQTime > cloudQTime) {
+        hasLocalNewerEdits = true;
+        return {
+          ...baseQ,
+          userAnswer: localAns,
+          aiTranscription: localAns ? (localQ?.aiTranscription || '') : '',
+          stepScores: (Array.isArray(localQ?.stepScores) && localQ.stepScores.length > 0)
+            ? localQ.stepScores
+            : (baseQ.stepScores || []),
+          status: 'answered',
+          updatedAt: localQTime
+        };
+      }
       return {
         ...baseQ,
-        userAnswer: winnerAns,
-        aiTranscription: winner?.aiTranscription || localQ?.aiTranscription || cloudQ?.aiTranscription || baseQ.aiTranscription || '',
-        stepScores: (Array.isArray(winner?.stepScores) && winner.stepScores.length > 0)
-          ? winner.stepScores
+        userAnswer: cloudAns,
+        aiTranscription: cloudAns ? (cloudQ?.aiTranscription || '') : '',
+        stepScores: (Array.isArray(cloudQ?.stepScores) && cloudQ.stepScores.length > 0)
+          ? cloudQ.stepScores
           : (baseQ.stepScores || []),
         status: 'answered',
-        updatedAt: winnerTime
+        updatedAt: cloudQTime
       };
     }
 
@@ -294,7 +313,7 @@ export function mergeAnswersSmartly(baseQuestions = [], localAnswers = [], cloud
       aiTranscription: '',
       stepScores: [],
       status: 'unanswered',
-      updatedAt: 0
+      updatedAt: Math.max(localExplicitTime, cloudExplicitTime)
     };
   });
 
@@ -329,7 +348,7 @@ export const useExamSessionStore = create((set, get) => ({
    * 2. If user is logged in, asynchronously fetch latest cloud session.
    * 3. Merge: if cloud session has newer `updatedAt`, seamlessly update state & local storage!
    */
-  initPaperSession: async (paper, questions = [], currentUser = null) => {
+  initPaperSession: async (paper, questions = [], { silent = false } = {}) => {
     if (!paper?.id) return null;
     const paperId = String(paper.id);
 
@@ -370,7 +389,7 @@ export const useExamSessionStore = create((set, get) => ({
     const token = getToken();
     if (token) {
       try {
-        set({ syncStatus: 'saving' });
+        if (!silent) set({ syncStatus: 'saving' });
         const cloudSession = await apiGetExamSession(paperId);
         if (cloudSession && cloudSession.paperId === paperId) {
           const cloudTime = Number(cloudSession.updatedAt) || 0;
@@ -385,6 +404,14 @@ export const useExamSessionStore = create((set, get) => ({
             cloudTime
           );
 
+          // 单向封卷权威法则（Irreversible Seal Priority）：
+          // 只要云端或本地任一侧已处于“已封卷”状态，合并结果锁死为“已封卷”
+          const isSealed = cloudSession.status === '已封卷' || initialSession.status === '已封卷';
+          const finalStatus = isSealed ? '已封卷' : (cloudSession.status || initialSession.status);
+          const finalSealedAt = isSealed
+            ? (cloudSession.sealedAt || initialSession.sealedAt || new Date().toISOString())
+            : '';
+
           const refreshedSession = {
             ...initialSession,
             ...cloudSession,
@@ -393,13 +420,13 @@ export const useExamSessionStore = create((set, get) => ({
               ? Array.from(new Set([...initialSession.markedQuestionKeys, ...cloudSession.markedQuestionKeys]))
               : initialSession.markedQuestionKeys,
             secondsLeft: typeof cloudSession.secondsLeft === 'number'
-              ? Math.min(initialSession.secondsLeft, cloudSession.secondsLeft)
+              ? (isSealed ? (cloudSession.secondsLeft ?? initialSession.secondsLeft) : Math.min(initialSession.secondsLeft, cloudSession.secondsLeft))
               : initialSession.secondsLeft,
             currentQIndex: typeof cloudSession.currentQIndex === 'number'
               ? cloudSession.currentQIndex
               : initialSession.currentQIndex,
-            status: cloudSession.status || initialSession.status,
-            sealedAt: cloudSession.sealedAt || initialSession.sealedAt,
+            status: finalStatus,
+            sealedAt: finalSealedAt,
             updatedAt: Math.max(cloudTime, localTime, Date.now())
           };
 
@@ -419,8 +446,7 @@ export const useExamSessionStore = create((set, get) => ({
               ...state.sessions,
               [paperId]: refreshedSession
             },
-            syncStatus: 'synced',
-            lastSyncedAt: Date.now()
+            ...(silent ? {} : { syncStatus: 'synced', lastSyncedAt: Date.now() })
           }));
 
           // 如果本地作答更全（例如在手机新答的题目），立即自动反向同步到云端
@@ -430,10 +456,10 @@ export const useExamSessionStore = create((set, get) => ({
 
           return refreshedSession;
         }
-        set({ syncStatus: 'synced', lastSyncedAt: Date.now() });
+        if (!silent) set({ syncStatus: 'synced', lastSyncedAt: Date.now() });
       } catch (err) {
         console.warn('[useExamSessionStore] Cloud session fetch error (falling back to local):', err);
-        set({ syncStatus: 'idle' });
+        if (!silent) set({ syncStatus: 'idle' });
       }
     }
 
@@ -819,8 +845,34 @@ export const useExamSessionStore = create((set, get) => ({
       pendingSyncPayloads.delete(paperId);
       if (payload) {
         try {
-          await apiSaveExamSession(payload);
+          const saved = await apiSaveExamSession(payload);
           set({ syncStatus: 'synced', lastSyncedAt: Date.now(), syncError: null });
+          if (saved && saved.status === '已封卷') {
+            const current = get().sessions[paperId];
+            if (current && current.status !== '已封卷') {
+              const sealedSession = {
+                ...current,
+                status: '已封卷',
+                sealedAt: saved.sealedAt || current.sealedAt || new Date().toISOString()
+              };
+              set((state) => ({
+                sessions: {
+                  ...state.sessions,
+                  [paperId]: sealedSession
+                }
+              }));
+              writeLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {
+                secondsLeft: sealedSession.secondsLeft,
+                currentQIndex: sealedSession.currentQIndex,
+                status: sealedSession.status,
+                sealedAt: sealedSession.sealedAt,
+                updatedAt: sealedSession.updatedAt
+              });
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('examcraft-session-sealed', { detail: { paperId, session: sealedSession } }));
+              }
+            }
+          }
         } catch (err) {
           console.warn('[useExamSessionStore] Cloud auto-save failed:', err.message);
           set({ syncStatus: 'error', syncError: err.message });
@@ -846,8 +898,34 @@ export const useExamSessionStore = create((set, get) => ({
     if (payload) {
       try {
         set({ syncStatus: 'saving' });
-        await apiSaveExamSession(payload);
+        const saved = await apiSaveExamSession(payload);
         set({ syncStatus: 'synced', lastSyncedAt: Date.now(), syncError: null });
+        if (saved && saved.status === '已封卷') {
+          const current = get().sessions[paperId];
+          if (current && current.status !== '已封卷') {
+            const sealedSession = {
+              ...current,
+              status: '已封卷',
+              sealedAt: saved.sealedAt || current.sealedAt || new Date().toISOString()
+            };
+            set((state) => ({
+              sessions: {
+                ...state.sessions,
+                [paperId]: sealedSession
+              }
+            }));
+            writeLocalStorage(`${STORAGE_PREFIX_SESSION}${paperId}`, {
+              secondsLeft: sealedSession.secondsLeft,
+              currentQIndex: sealedSession.currentQIndex,
+              status: sealedSession.status,
+              sealedAt: sealedSession.sealedAt,
+              updatedAt: sealedSession.updatedAt
+            });
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('examcraft-session-sealed', { detail: { paperId, session: sealedSession } }));
+            }
+          }
+        }
       } catch (err) {
         console.warn('[useExamSessionStore] Flush cloud save failed:', err.message);
         set({ syncStatus: 'error', syncError: err.message });
