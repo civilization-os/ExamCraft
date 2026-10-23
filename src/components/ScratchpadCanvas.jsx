@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import katex from 'katex';
 import SelectMenu from './SelectMenu';
 import MathMarkdown from './MathMarkdown';
+import MathDerivationDock from './MathDerivationDock';
 
 /**
  * 高性能 KaTeX 内联数学表达式渲染组件
@@ -2439,14 +2440,15 @@ export default function ScratchpadCanvas({
 
   // 点击胶囊快速追加到口述指令框
   const handleAppendSpokenPrompt = (chip) => {
+    const textToAdd = chip.insertText || chip.latex || chip.label;
     setSpokenInput((prev) => {
       const trimmed = prev.trim();
       if (!trimmed) {
-        return `帮我写下公式：${chip.latex}`;
+        return `请写推导：${textToAdd}`;
       }
-      return `${trimmed} ${chip.latex}`;
+      return `${trimmed} ${textToAdd}`;
     });
-    showToast(`已填入指令：「${chip.label}」`, 'info');
+    showToast(`已填入推导语言：「${chip.label || textToAdd}」`, 'info');
   };
 
   // ==================== 核心 Agent Loop 执行逻辑 ====================
@@ -3434,6 +3436,15 @@ export default function ScratchpadCanvas({
                     <span className="material-symbols-outlined text-[14px]">delete_sweep</span><span>清空</span>
                   </button>
                 </div>
+              </div>
+
+              {/* 数学推导语言智能工具坞 (涵盖因为所以、全称存在量词、设令假设、递进论证与QED) */}
+              <div className="px-1 py-1 border-b border-outline-variant/20">
+                <MathDerivationDock
+                  onInsertPrompt={handleAppendSpokenPrompt}
+                  onWriteToBoard={(latex, label) => handleQuickWriteToBoard(latex, label)}
+                  onCopyLatex={(latex, label) => showToast(`已复制「${label}」LaTeX 符号`, 'info')}
+                />
               </div>
 
               <button

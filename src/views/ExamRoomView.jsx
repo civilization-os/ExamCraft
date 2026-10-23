@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import ScratchpadCanvas from '../components/ScratchpadCanvas';
+import MathDerivationDock from '../components/MathDerivationDock';
 import ExamTimerReminderModal from '../components/ExamTimerReminderModal';
 import { getQuestionDifficulty } from '../utils/paperMetrics';
 import { getQuestionTypeClass, normalizeQuestionType, stripAnswerMaterial, healQuestionOptions, deduplicateQuestions } from '../utils/questionTypes';
@@ -2365,6 +2366,21 @@ export default function ExamRoomView({
                         {candidateDraft.length} 字符
                       </span>
                     </div>
+
+                    {/* 数学推导语言工具坞 (因为、所以、推出、设、令、又因为、由①②可得、证毕) */}
+                    <MathDerivationDock
+                      onInsertPrompt={(item) => {
+                        const text = item.insertText || item.latex || item.label;
+                        const cur = candidateDraft || '';
+                        const updated = cur ? `${cur}\n${text}` : text;
+                        handleUpdateAnswer(updated);
+                        showExamToast(`已填入推导语：${item.label}`, 'info');
+                      }}
+                      onCopyLatex={(latex, label) => {
+                        showExamToast(`已复制「${label}」LaTeX: ${latex}`, 'info');
+                      }}
+                      className="mb-1"
+                    />
 
                     <textarea
                       value={candidateDraft}

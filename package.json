@@ -1,6 +1,6 @@
 {
   "name": "examcraft-ai-workbench",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "private": true,
   "description": "ExamCraft AI Workbench - 双入口智能组卷与在线考练工作台",
   "type": "module",
@@ -16,6 +16,7 @@
     "katex": "^0.19.0",
     "marked": "^18.1.1",
     "mathlive": "0.111.1",
+    "motion": "^14.6.0",
     "nodemailer": "^10.1.2",
     "pdfjs-dist": "4.10.38",
     "react": "^18.3.1",

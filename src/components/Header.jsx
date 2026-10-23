@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { APP_VERSION } from '../config/version';
 import { UserAvatar } from './UserProfileModal';
 import { getGuestProfile } from '../utils/auth';
@@ -92,22 +93,31 @@ export default function Header({
           </button>
 
           {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-space-xs">
+          <nav className="hidden md:flex items-center gap-space-xs relative">
             {navItems.map((item) => {
               const isActive = currentPath === item.path;
               return (
-                <button
+                <motion.button
                   key={item.path}
                   onClick={() => setCurrentPath(item.path)}
-                  className={`px-space-md py-space-xs rounded-lg font-label-md text-label-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.96 }}
+                  className={`relative px-space-md py-space-xs rounded-lg font-label-md text-label-md transition-colors cursor-pointer flex items-center gap-1.5 ${
                     isActive
-                      ? 'bg-surface-container text-primary font-semibold shadow-xs'
-                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low'
+                      ? 'text-primary font-semibold'
+                      : 'text-on-surface-variant hover:text-on-surface'
                   } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
                 >
-                  <span className="material-symbols-outlined text-[17px] opacity-75">{item.icon}</span>
-                  <span>{item.label}</span>
-                </button>
+                  {isActive && (
+                    <motion.div
+                      layoutId="activeNavIndicator"
+                      className="absolute inset-0 bg-surface-container rounded-lg shadow-2xs border border-primary/15"
+                      transition={{ type: 'spring', bounce: 0.16, duration: 0.38 }}
+                    />
+                  )}
+                  <span className="relative z-10 material-symbols-outlined text-[17px] opacity-75">{item.icon}</span>
+                  <span className="relative z-10">{item.label}</span>
+                </motion.button>
               );
             })}
           </nav>
@@ -207,70 +217,78 @@ export default function Header({
                 </button>
 
                 {/* Dropdown Menu */}
-                {isUserMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-60 rounded-xl bg-surface-container-lowest border border-surface-container shadow-xl py-2 z-50 animate-fade-in">
-                    <div className="px-4 py-2 border-b border-surface-container/60">
-                      <div className="flex items-center gap-2.5 mb-1.5">
-                        <UserAvatar avatarId={currentUser.avatar || 'scholar'} className="w-8 h-8" iconSize="text-[18px]" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-on-surface truncate leading-tight">{currentUser.nickname || currentUser.username}</p>
-                          <p className="text-[10px] text-on-surface-variant truncate">@{currentUser.username}</p>
+                <AnimatePresence>
+                  {isUserMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                      transition={{ type: 'spring', bounce: 0.1, duration: 0.22 }}
+                      className="absolute right-0 mt-2 w-60 rounded-xl bg-surface-container-lowest border border-surface-container shadow-xl py-2 z-50 origin-top-right"
+                    >
+                      <div className="px-4 py-2 border-b border-surface-container/60">
+                        <div className="flex items-center gap-2.5 mb-1.5">
+                          <UserAvatar avatarId={currentUser.avatar || 'scholar'} className="w-8 h-8" iconSize="text-[18px]" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-on-surface truncate leading-tight">{currentUser.nickname || currentUser.username}</p>
+                            <p className="text-[10px] text-on-surface-variant truncate">@{currentUser.username}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="px-1.5 py-0.5 rounded font-medium bg-surface-container text-on-surface-variant">
+                            权限: {currentUser.role === 'admin' ? '平台管理员' : '普通用户'}
+                          </span>
+                          <span className="text-outline font-mono">{APP_VERSION}</span>
                         </div>
                       </div>
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="px-1.5 py-0.5 rounded font-medium bg-surface-container text-on-surface-variant">
-                          权限: {currentUser.role === 'admin' ? '平台管理员' : '普通用户'}
-                        </span>
-                        <span className="text-outline font-mono">{APP_VERSION}</span>
-                      </div>
-                    </div>
 
-                    <div className="py-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsUserMenuOpen(false);
-                          if (onOpenProfile) onOpenProfile();
-                        }}
-                        className="w-full text-left px-4 py-2 text-xs text-on-surface hover:bg-surface-container flex items-center gap-2 cursor-pointer transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[16px] text-primary">account_circle</span>
-                        <span>个人中心 / 头像档案</span>
-                      </button>
-
-                      {onTriggerMigrate && (
+                      <div className="py-1">
                         <button
                           type="button"
                           onClick={() => {
                             setIsUserMenuOpen(false);
-                            onTriggerMigrate();
+                            if (onOpenProfile) onOpenProfile();
                           }}
                           className="w-full text-left px-4 py-2 text-xs text-on-surface hover:bg-surface-container flex items-center gap-2 cursor-pointer transition-colors"
                         >
-                          <span className="material-symbols-outlined text-[16px] text-primary">cloud_upload</span>
-                          <span>同步本地离线数据到云端</span>
+                          <span className="material-symbols-outlined text-[16px] text-primary">account_circle</span>
+                          <span>个人中心 / 头像档案</span>
                         </button>
-                      )}
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsUserMenuOpen(false);
-                          if (onLogout) onLogout();
-                        }}
-                        className="w-full text-left px-4 py-2 text-xs text-error hover:bg-error/10 flex items-center gap-2 cursor-pointer transition-colors border-t border-surface-container/40 mt-1 pt-1.5"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">logout</span>
-                        <span>退出当前账号</span>
-                      </button>
-                    </div>
+                        {onTriggerMigrate && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsUserMenuOpen(false);
+                              onTriggerMigrate();
+                            }}
+                            className="w-full text-left px-4 py-2 text-xs text-on-surface hover:bg-surface-container flex items-center gap-2 cursor-pointer transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-[16px] text-primary">cloud_upload</span>
+                            <span>同步本地离线数据到云端</span>
+                          </button>
+                        )}
 
-                    <div className="px-4 py-1.5 border-t border-surface-container/60 text-[10px] font-mono text-outline flex items-center justify-between select-none">
-                      <span>ExamCraft AI</span>
-                      <span>{APP_VERSION}</span>
-                    </div>
-                  </div>
-                )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            if (onLogout) onLogout();
+                          }}
+                          className="w-full text-left px-4 py-2 text-xs text-error hover:bg-error/10 flex items-center gap-2 cursor-pointer transition-colors border-t border-surface-container/40 mt-1 pt-1.5"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">logout</span>
+                          <span>退出当前账号</span>
+                        </button>
+                      </div>
+
+                      <div className="px-4 py-1.5 border-t border-surface-container/60 text-[10px] font-mono text-outline flex items-center justify-between select-none">
+                        <span>ExamCraft AI</span>
+                        <span>{APP_VERSION}</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             ) : (
               <div className="flex items-center gap-1.5">
@@ -296,27 +314,37 @@ export default function Header({
           </div>
         </div>
       </div>
-      {isMobileNavOpen && (
-        <nav id="mobile-primary-navigation" className="md:hidden border-t border-surface-container/70 bg-surface-container-lowest px-4 py-2 shadow-lg" aria-label="主导航">
-          <div className="mx-auto flex max-w-lg flex-col gap-1">
-            {navItems.map((item) => (
-              <button
-                key={item.path}
-                type="button"
-                onClick={() => {
-                  setCurrentPath(item.path);
-                  setIsMobileNavOpen(false);
-                }}
-                aria-current={currentPath === item.path ? 'page' : undefined}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${currentPath === item.path ? 'bg-surface-container text-primary font-semibold' : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'}`}
-              >
-                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{item.icon}</span>
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </div>
-        </nav>
-      )}
+      <AnimatePresence>
+        {isMobileNavOpen && (
+          <motion.nav
+            id="mobile-primary-navigation"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: 'spring', bounce: 0, duration: 0.28 }}
+            className="md:hidden border-t border-surface-container/70 bg-surface-container-lowest px-4 py-2 shadow-lg overflow-hidden"
+            aria-label="主导航"
+          >
+            <div className="mx-auto flex max-w-lg flex-col gap-1">
+              {navItems.map((item) => (
+                <button
+                  key={item.path}
+                  type="button"
+                  onClick={() => {
+                    setCurrentPath(item.path);
+                    setIsMobileNavOpen(false);
+                  }}
+                  aria-current={currentPath === item.path ? 'page' : undefined}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${currentPath === item.path ? 'bg-surface-container text-primary font-semibold' : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'}`}
+                >
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </motion.nav>
+        )}
+      </AnimatePresence>
     </header>
   );
 }

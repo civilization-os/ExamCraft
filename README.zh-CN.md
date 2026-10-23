@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.8"><img src="https://img.shields.io/badge/Release-v1.1.8-blue.svg?logo=github" alt="Release v1.1.8"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.9"><img src="https://img.shields.io/badge/Release-v1.1.9-blue.svg?logo=github" alt="Release v1.1.9"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -108,6 +108,25 @@
   - 题目断点位置仅在考场首次挂载时恢复一次，前台 3 秒数据同步绝不强行篡改考生当前正在浏览的题目，根除“点到第三题过一会儿自动跳回第二题”的视口弹跳 Bug。
 - **防碰撞无损题号权威匹配 (Collision-Proof Question Matching)**：
   - 彻底攻克因试卷分篇章/题型解析产生的题号与局部自增 ID 冲突（如选择题 01 与填空题 13 存在相同 `id=1` 导致的答题互相覆盖踩踏）；
+
+### 8. 数学推导语言交互坞与 Motion 空间动效体系 (Math Derivation Dock & UI Motion Atlas) 🆕
+- **基于 UI Motion Atlas 与 Motion for React 规范深度重构**：
+  - **核心设计理念**：采用 `Operational Command Surface`（操作指挥台）与 `Tactile Craft Journey`（严谨学术手作质感）场景法则，恪守语义颜色锁定与触觉物理回馈，绝不添加刺眼晃动的赛博朋克光效，守护高专注度的学术研磨体验。
+  - **全局无障碍减弱动效注入 (`MotionConfig`)**：根节点注入 `reducedMotion="user"`，严格遵循用户系统的减弱动态偏好，在提供丝滑体验的同时兼顾无障碍可用性。
+- **全新数学推导语言智能工具坞 (`MathDerivationDock`)**：
+  - **四大推演语言维度全覆盖**：
+    1. **逻辑与量词**：$\because$（因为）、$\therefore$（所以）、$\implies$（推出/蕴含）、$\iff$（当且仅当/充要）、$\forall$（任意/所有）、$\exists$（存在）、$\exists!$（存在且唯一）、$\land$（且）、$\lor$（或）、$\neg$（非）；
+    2. **设定与假设**：设未知数与定义域（`设 $x \in \mathbb{R}$`）、换元赋值（`令 $t = $`）、反证法起手（`假设原命题不成立` / `反设结论为假`）、记号化简（`记 $S = $`）、对称化简（`不失一般性地设 $a \le b$`）；
+    3. **递进与引用**：并列前提（`又因为`）、定理与前式回引（`由式①可得` / `结合①②可知`）、对称类比（`同理可得`）、两端变形（`两边同时取极限`）、代换回代（`代入原式化简`）；
+    4. **论证与收尾**：跳过平凡步骤（`易知` / `显然`）、反证收网（`导出矛盾，故假设不成立`）、分支汇总（`综上所述`）、标准证明闭环（$\blacksquare$ `得证` / `Q.E.D.`）。
+  - **全双向联动与触觉物理微反馈**：
+    - **草稿纸工作台 (Scratchpad)**：一键点击直接填入口述助手指令框，或「一键抄入」自动在演算板书生成对应标准 LaTeX 步骤行；
+    - **全真考场作答区 (Exam Room)**：在综合推导与解答题中随时召唤推导坞，点击一键按光标段落插入草稿并支持快速复制；
+    - **流体水滴选项卡 (`layoutId="derivationDockTab"`)**：分类切换采用高阻尼 Spring 物理过渡，胶囊悬浮微弹（`y: -1`、`scale: 1.02`），触感轻柔灵动。
+- **全站结构性与状态流动性动效升级**：
+  - **顶栏桌面导航 Indicator**：采用 Motion `layoutId="activeNavIndicator"` 弹性药丸滑移；
+  - **下拉菜单与移动抽屉**：全面采用 `AnimatePresence` 接管挂载/卸载生命周期，支持自然弹性淡入滑出；
+  - **仪表盘卡片微压感反馈**：卡片与主操作按钮均搭载 `whileHover` 与 `whileTap` 触感回弹。
   - 严格实行题号（`num`）第一权威准则、全卷等长位置索引（`idx`）协同校验与全局防撞派生 ID，彻底根除“选了答案过几秒被自动刷掉”的缺陷。
 - **题级细粒度时间戳仲裁 (Smart Question-Level Merge)**：
   - 彻底规避会话级倒计时心跳时间戳污染，未答空白题绝对不冲毁已有作答；

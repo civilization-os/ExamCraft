@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'motion/react';
 
 const TOKEN_DAY_FORMATTER = new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', month: 'long', day: 'numeric' });
 
@@ -121,31 +122,39 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
           </div>
 
           <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:flex gap-2 sm:gap-space-sm z-10 shrink-0">
-            <button
+            <motion.button
               type="button"
               onClick={() => onNavigate('exam-generator')}
-              className="px-space-xl py-3 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-2 justify-center"
+              whileHover={{ y: -1, scale: 1.015 }}
+              whileTap={{ scale: 0.96 }}
+              transition={{ type: 'spring', bounce: 0.2 }}
+              className="px-space-xl py-3 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm shadow-md transition-colors cursor-pointer flex items-center gap-2 justify-center"
             >
               <span className="material-symbols-outlined text-[20px]">add_circle</span>
               <span>进入智能组卷</span>
-            </button>
-            <button
+            </motion.button>
+            <motion.button
               type="button"
               onClick={() => onNavigate('question-bank')}
-              className="px-space-lg py-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-headline-sm text-headline-sm transition-all cursor-pointer flex items-center gap-2 justify-center border border-outline-variant/30"
+              whileHover={{ y: -1, scale: 1.015 }}
+              whileTap={{ scale: 0.96 }}
+              transition={{ type: 'spring', bounce: 0.2 }}
+              className="px-space-lg py-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-headline-sm text-headline-sm transition-colors cursor-pointer flex items-center gap-2 justify-center border border-outline-variant/30"
             >
               <span className="material-symbols-outlined text-[20px]">warning</span>
               <span>复盘错题本</span>
-            </button>
+            </motion.button>
           </div>
         </section>
 
         {/* Stats 4 Cards */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-space-md">
           {stats.map((s) => (
-            <div
+            <motion.div
               key={s.label}
-              className="min-w-0 bg-surface-container-lowest p-3 sm:p-space-lg rounded-xl shadow-sm border border-outline-variant/30 flex flex-col justify-between"
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', bounce: 0.15 }}
+              className="min-w-0 bg-surface-container-lowest p-3 sm:p-space-lg rounded-xl shadow-sm hover:shadow-md border border-outline-variant/30 flex flex-col justify-between transition-shadow"
             >
               <div className="flex items-center justify-between">
                 <span className="min-w-0 font-label-md text-[11px] leading-tight sm:text-label-md text-on-surface-variant">{s.label}</span>
@@ -158,7 +167,7 @@ export default function DashboardView({ onNavigate, papers, onStartExam }) {
                   {s.change}
                 </p>
               </div>
-            </div>
+            </motion.div>
           ))}
         </section>
 

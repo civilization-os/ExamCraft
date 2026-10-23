@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { MotionConfig } from 'motion/react';
 import Header from './components/Header';
 import DashboardView from './views/DashboardView';
 import ExamGeneratorView from './views/ExamGeneratorView';
@@ -638,7 +639,8 @@ export default function App() {
   const isFullScreenMode = currentPath === 'exam-room' || currentPath === 'exam-result' || currentPath === 'login';
 
   return (
-    <div className="min-h-screen bg-background text-on-surface flex flex-col font-sans selection:bg-primary-fixed selection:text-primary">
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-screen bg-background text-on-surface flex flex-col font-sans selection:bg-primary-fixed selection:text-primary">
       {/* Top Header - hidden during full focus exam room, result review, or login page */}
       {!isFullScreenMode && (
         <Header
@@ -788,6 +790,7 @@ export default function App() {
         </nav>
       )}
     </div>
+    </MotionConfig>
   );
 }
 
