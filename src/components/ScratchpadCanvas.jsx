@@ -1181,7 +1181,8 @@ export default function ScratchpadCanvas({
   onOpacityChange = null,
   onWindowDragStart = null,
   isMoved = false,
-  onResetPosition = null
+  onResetPosition = null,
+  onFillAnswer = null
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -2671,6 +2672,15 @@ export default function ScratchpadCanvas({
     });
     if (!unappliedActions.length) return;
 
+    // 0.5 自动回填试卷答题区动作
+    const fillActions = unappliedActions.filter((a) => a.type === 'fill_answer');
+    for (const fill of fillActions) {
+      if (fill.answer && typeof onFillAnswer === 'function') {
+        onFillAnswer(fill.answer);
+        showToast(`✅ 已自动为您在试卷答题区填入：【${fill.answer}】`, 'success');
+      }
+    }
+
     // 1. 处理 update_element、delete_element 与 clear_board
     const editActions = unappliedActions.filter((a) => a.type === 'update_element' || a.type === 'delete_element' || a.type === 'clear_board');
     if (editActions.length) {
@@ -2771,7 +2781,7 @@ export default function ScratchpadCanvas({
     }
 
     // 2. 处理新建图元
-    const actionsToCreate = unappliedActions.filter((a) => a.type !== 'update_element' && a.type !== 'delete_element' && a.type !== 'clear_board');
+    const actionsToCreate = unappliedActions.filter((a) => a.type !== 'update_element' && a.type !== 'delete_element' && a.type !== 'clear_board' && a.type !== 'fill_answer');
     if (!actionsToCreate.length) return;
 
     let elemActs = actionsToCreate;
@@ -4216,6 +4226,31 @@ export default function ScratchpadCanvas({
                                   <span>已由用户中断回答</span>
                                 </div>
                               )}
+
+                              {/* AI 推导选项快捷一键回填试卷 */}
+                              {message.role !== 'user' && typeof onFillAnswer === 'function' && message.content && (() => {
+                                const match = message.content.match(/(?:你选|建议选|选项|答案(?:是|为)?)\s*([A-D])\b/) ||
+                                              message.content.match(/[与等同于]\s*选项\s*([A-D])\b/) ||
+                                              message.content.match(/\b([A-D])\s*项\b/);
+                                const optionChar = match ? match[1] : null;
+                                if (!optionChar) return null;
+                                return (
+                                  <div className="pt-1.5 flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        onFillAnswer(optionChar);
+                                        showToast(`✅ 已填入试卷答题区：选项 ${optionChar}`, 'success');
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-semibold border border-primary/25 cursor-pointer transition-all shadow-2xs hover:scale-[1.02] active:scale-[0.98]"
+                                      title="一键将该选项填入试卷答题卡"
+                                    >
+                                      <span className="material-symbols-outlined text-[14px]">edit_square</span>
+                                      <span>✍️ 一键填入试卷答题区 (选项 {optionChar})</span>
+                                    </button>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           )}
                         </div>
@@ -4333,7 +4368,7 @@ export default function ScratchpadCanvas({
 
                 {/* 底层：辅助提示与操作主按钮 */}
                 <div className="flex items-center justify-between pt-0.5">
-                  <span className="text-[10px] text-outline truncate max-w-[200px]" title={isAgentRunning ? agentLoopStage : '只操作草稿纸，不填写答题区'}>
+                  <span className="text-[10px] text-outline truncate max-w-[200px]" title={isAgentRunning ? agentLoopStage : '支持协助推导、几何画图与一键回填答题区'}>
                     {isAgentRunning ? (agentLoopStage || 'Agent Loop 思考并操作中…') : '🛡️ 考场草稿助手：协助代换、画图与演算整理，严禁索取外部公式与解法'}
                   </span>
 

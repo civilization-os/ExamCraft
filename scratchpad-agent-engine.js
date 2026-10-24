@@ -531,7 +531,31 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
     }
   });
 
-  return [readScratchpad, writeMath, drawPlot, updateSubstitute, deleteOrClear];
+  // 6. fill_exam_answer: 自动回填试卷答题区
+  const fillExamAnswer = defineLoopTool({
+    name: 'fill_exam_answer',
+    description: '将推导结论或考生指定的选项/答案直接填入当前题目的试卷答题区。当考生说“选A”、“选B”、“帮我选A”、“填入答案”或者明确要求把答案选到答题卡时调用。',
+    schema: z.object({
+      answer: z.string().describe('填入的答案内容。单选题或多选题传入选项字母如 "A"、"B"、"CD"；填空题传入具体结论数值或表达式如 "1/6"、"e^x"'),
+      reason: z.string().optional().describe('回填依据或简要结论说明，如 "经麦克劳林展开求导得 a=1/3, b=-1，对应选项 A"')
+    }),
+    execute: ({ answer, reason }) => {
+      const cleanAns = String(answer || '').trim();
+      canvasActions.push({
+        type: 'fill_answer',
+        answer: cleanAns,
+        reason
+      });
+      return {
+        status: 'success',
+        action: 'filled_exam_answer',
+        answer: cleanAns,
+        instruction: `✅ 答案【${cleanAns}】已成功自动填入试卷答题区！前端已实时同步勾选答题卡并高亮显示。请立即向考生输出简明答复告知已帮其填入。`
+      };
+    }
+  });
+
+  return [readScratchpad, writeMath, drawPlot, updateSubstitute, deleteOrClear, fillExamAnswer];
 }
 
 /**
@@ -578,13 +602,17 @@ export async function runScratchpadAgentLoopStream({
 2. 积极协助代换、化简与排版演算（完全合规且必须积极执行）：
    - 只要草稿纸上已经存在考生写下的公式（或题干中已有已知式），当考生要求“把题干公式用我们已知公式替换”、“把第一行代入分子/分母”、“化简式子”、“合并同类项”等，你必须积极、聪明地协助考生完成代换，调用 write_math_derivation 或 update_or_substitute 将代换整理后的推导步骤清晰呈现在草稿板上！
    - 绝不要死板教条地要求考生把代换后的每个字符都一字不漏地念出来。草稿助手就是要替考生完成代换排版、式子整理与几何画图！
-3. 常用工具调用指南：
+3. 协助考生自动填充试卷答案（极速答题赋能）：
+   - 当考生说“选A”、“选B”、“填A”、“帮我选A”、“选第一个选项”，或者指令“把答案选上/填入答题卡/填入试卷”时，必须调用 fill_exam_answer 工具将对应选项或填空内容直接回填到试卷答题区！
+   - 并在文本答复中告知考生：“✅ 已为您将答案【A】填入试卷答题区！”
+4. 常用工具调用指南：
+   - fill_exam_answer: 自动回填试卷答案（如选项 "A"、"B" 或填空答案）；
    - write_math_derivation: 在草稿纸上呈现规范的 LaTeX 演算或代换步骤（1~4 行），如题干公式代入、展开式代换；
    - draw_geometry_or_plot: 绘制几何图形或函数曲线；
    - update_or_substitute: 进行就地等量代换或板书局部调整；
    - read_scratchpad: 查阅草稿板当前内容。
-4. 回复简短利落：
-   - 执行操作后，直接以 1~2 句简明的中文 Markdown 告知考生已完成的代换或演算，结束本轮对话。
+5. 回复简短利落：
+   - 执行操作后，直接以 1~2 句简明的中文 Markdown 告知考生已完成的代换、板书或答案回填，结束本轮对话。
 `
     : `你是一名博学、亲切且深入浅出的全能数学名师助教（Post-Exam Notebook Tutor）。
 当前处于【考试结束后的错题本复盘与深度研学阶段】！

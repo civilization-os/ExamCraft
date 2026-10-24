@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.8"><img src="https://img.shields.io/badge/Release-v1.2.8-blue.svg?logo=github" alt="Release v1.2.8"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.9"><img src="https://img.shields.io/badge/Release-v1.2.9-blue.svg?logo=github" alt="Release v1.2.9"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Publish CI"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub Container Registry"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -64,7 +64,13 @@
 - **12 Curated Gradient Theme Avatars**: High-fidelity artistic avatars (Scholar, Geek, Geometry, Rocket, Owl, Koi, etc.) with real-time selection.
 - **Profile Customization**: Personalize nicknames, target examinations (Postgraduate Math, CET-4/6, College Transfer, Custom), and motivational mottoes.
 - **Full Guest & Auth Cloud Sync**: Seamlessly works for both anonymous guests (local storage) and authenticated cloud accounts, displaying real-time metrics for created exams, test submissions, and mistake logs.
-- **Global Version Indicators**: Prominently shows release version `v1.2.8` on the top navigation bar, user dropdown menu, and system settings panel.
+- **Global Version Indicators**: Prominently shows release version `v1.2.9` on the top navigation bar, user dropdown menu, and system settings panel.
+- **AI Answer Autofill & In-Chat Shortcuts (v1.2.9)**:
+  - **Dictate to Fill (`fill_exam_answer`)**: After board derivations, students can dictate "select A" or "fill 1/6" to directly backfill answers into the exam paper and answer sheet without leaving the scratchpad.
+  - **In-Chat Quick Actions**: A responsive chip button appears beneath assistant derivation bubbles allowing 1-click answer backfilling.
+- **Non-Blocking Timer Reminder MessageBox HUD (v1.2.9)**:
+  - **Zero-Backdrop Non-Blocking**: Discards full-screen modal overlays, placing an ethereal floating HUD in the top-right corner with 100% background click-through.
+  - **Motion & UI Motion Atlas Spring Physics**: Powered by `motion/react`, featuring entrance springs, breathing alert glow, and a 12-second auto-minimize timer to a compact dynamic island pill.
 - **Dual-Mode Agent Architecture & Smart Substitution (v1.2.8)**: 
   - **In-Exam Scratchpad Assistant (`exam_scratchpad`)**: Strictly focused on a single guardrail: *never proactively reveal unstated formulas or final answers*. Eliminates over-defensive refusals and warmly assists in algebraic substitution, step grouping, and simplification from scratchpad knowns.
   - **Post-Exam Notebook Tutor (`notebook_tutor`)**: Dedicated tutor agent for exam review and mistake notebook analysis, unlocking full multi-step derivations, proof explanations, and isomorphic variant drills.

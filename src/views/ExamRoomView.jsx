@@ -1636,6 +1636,10 @@ export default function ExamRoomView({
       onWindowDragStart={docked ? null : handleScratchpadDragStart}
       isMoved={docked ? false : scratchpadPos !== null}
       onResetPosition={docked ? undefined : () => setScratchpadPos(null)}
+      onFillAnswer={(answer) => {
+        handleUpdateAnswer(answer, currentQIndex);
+        showExamToast(`✅ 已由 AI 助手填入第 ${currentQ?.num || currentQIndex + 1} 题答案：${answer}`, 'success');
+      }}
     />
   );
 
