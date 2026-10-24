@@ -168,7 +168,7 @@ packages:
     engines: {node: '>=20.0.0'}
 
   '@civilization/model-core@file:packages/civilization-model-core-0.1.0.tgz':
-    resolution: {integrity: sha512-etHZy6jUhXoUcGPkBuS9AyY1abXC2uGI3cfJo4AW49Ils2Tk8MZerXyx9lgkIMF4wMF893GxXRq6ou4bbfXr5A==, tarball: file:packages/civilization-model-core-0.1.0.tgz}
+    resolution: {integrity: sha512-Q2Tq4UCfzutRapA2BDxUtLuLgZ8whC2qKlzJzHaBIJvsPtFOy+TShMwt7t14p5LlmRQbz+rvin3lxQsOi7B95g==, tarball: file:packages/civilization-model-core-0.1.0.tgz}
     version: 0.1.0
 
   '@esbuild/aix-ppc64@0.21.5':

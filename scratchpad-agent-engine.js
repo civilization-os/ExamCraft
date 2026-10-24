@@ -113,7 +113,7 @@ export class ModelCoreToLoopAdapter {
         content: chunk.deltaContent || '',
         reasoningContent: chunk.deltaReasoning || '',
         toolCallDeltas: chunk.deltaToolCalls?.map((tc, index) => ({
-          index,
+          index: typeof tc.index === 'number' ? tc.index : index,
           id: tc.id,
           name: tc.name,
           arguments: typeof tc.arguments === 'string' ? tc.arguments : (tc.arguments ? JSON.stringify(tc.arguments) : '')
@@ -656,8 +656,15 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
       };
 
       if (onEvent) {
+        let safeEvent = event;
+        if (event.type === 'error') {
+          safeEvent = {
+            ...event,
+            error: event.error instanceof Error ? event.error.message : String(event.error || '模型异常')
+          };
+        }
         onEvent({
-          ...event,
+          ...safeEvent,
           metrics,
           canvasActions: [...canvasActions]
         });

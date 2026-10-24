@@ -2958,10 +2958,13 @@ export default function ScratchpadCanvas({
                 return updated;
               });
             } else if (event.type === 'error') {
+              const errorText = typeof event.error === 'object' && event.error !== null
+                ? (event.error.message || JSON.stringify(event.error))
+                : String(event.error || '模型异常');
               setAgentChatMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
-                    ? { ...m, isCompleted: true, content: `执行出错: ${event.error || '模型异常'}` }
+                    ? { ...m, isCompleted: true, content: `执行提示: ${errorText}` }
                     : m
                 )
               );
