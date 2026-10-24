@@ -2934,16 +2934,25 @@ apiRouter.post('/model/scratchpad-agent-stream', async (req, res) => {
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no'
   });
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
 
   const abortController = new AbortController();
-  req.on('close', () => {
+  req.on('aborted', () => {
     abortController.abort();
+  });
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
   });
 
   const model = createTrackedChatModel('scratchpad.write-draw');
   const maxContextTokens = Number(currentConfig.maxTokens) ? Math.min(Number(currentConfig.maxTokens) * 32, 131072) : 131072;
 
   try {
+    console.log(`[scratchpad-agent-stream] 开始执行 Agent Loop: "${spokenText.slice(0, 30)}"`);
     await runScratchpadAgentLoopStream({
       modelInstance: model,
       spokenText,
@@ -2956,10 +2965,14 @@ apiRouter.post('/model/scratchpad-agent-stream', async (req, res) => {
       onEvent: (event) => {
         if (!res.writableEnded) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
+          if (typeof res.flush === 'function') {
+            res.flush();
+          }
         }
       }
     });
 
+    console.log(`[scratchpad-agent-stream] Agent Loop 完成: "${spokenText.slice(0, 30)}"`);
     if (!res.writableEnded) {
       res.write('data: [DONE]\n\n');
       res.end();

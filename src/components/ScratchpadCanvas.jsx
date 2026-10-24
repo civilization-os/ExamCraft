@@ -2823,6 +2823,7 @@ export default function ScratchpadCanvas({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let streamEndedNormally = false;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -2836,7 +2837,10 @@ export default function ScratchpadCanvas({
           const trimmed = block.trim();
           if (!trimmed.startsWith('data:')) continue;
           const dataStr = trimmed.slice(5).trim();
-          if (dataStr === '[DONE]') break;
+          if (dataStr === '[DONE]') {
+            streamEndedNormally = true;
+            break;
+          }
 
           try {
             const event = JSON.parse(dataStr);
@@ -2953,7 +2957,27 @@ export default function ScratchpadCanvas({
             console.warn('[scratchpad] 解析 SSE 块失败:', e);
           }
         }
+
+        if (streamEndedNormally) break;
       }
+
+      // 兜底：如果流读完了但未收到 completed 事件，强制将消息置为 completed 避免一直转圈
+      setAgentChatMessages((prev) => {
+        const updated = prev.map((m) =>
+          m.id === assistantMsgId && !m.isCompleted
+            ? {
+                ...m,
+                isCompleted: true,
+                isThinkingExpanded: false,
+                content: m.content || (m.reasoningContent ? '已完成思考与分析。' : '执行完成。')
+              }
+            : m
+        );
+        try {
+          localStorage.setItem(agentChatStorageKey, JSON.stringify(updated.slice(-40)));
+        } catch {}
+        return updated;
+      });
 
       setAgentMetrics((prev) => ({ ...prev, isLive: false, tokenSpeed: 0 }));
     } catch (err) {
