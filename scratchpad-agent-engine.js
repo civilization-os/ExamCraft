@@ -128,6 +128,9 @@ export class ModelCoreToLoopAdapter {
  * 创建草稿纸 Agent 工具集
  */
 export function createScratchpadTools({ currentElements, canvasActions, onToolEvent }) {
+  // 记录本轮已执行操作的指纹，实现工具级幂等守卫与快速引导
+  const executedSignatures = new Set();
+
   // 1. read_scratchpad: 查阅画板
   const readScratchpad = defineLoopTool({
     name: 'read_scratchpad',
@@ -173,6 +176,16 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
     }),
     execute: ({ latexLines, title, targetElementId, conclusion }) => {
       const formattedContent = latexLines.join('\n');
+      const sigKey = `write:${formattedContent.trim()}`;
+      if (executedSignatures.has(sigKey)) {
+        return {
+          status: 'already_completed',
+          action: 'none',
+          message: '⚠️ 该数学板书已在上一轮成功写入草稿纸前端画布，无需重复执行。当前画板已包含该内容。请严禁再次调用写入工具，必须立即直接向考生输出规范友好的 Markdown 总结与答复，结束本轮对话。'
+        };
+      }
+      executedSignatures.add(sigKey);
+
       const existingWrite = currentElements.find((e) => (e.actions || []).some((a) => a.type === 'write'));
 
       if (targetElementId || existingWrite) {
@@ -185,11 +198,27 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
           title,
           conclusion
         });
+
+        // 内存同步更新
+        const targetElem = currentElements.find((e) => e.id === targetId);
+        if (targetElem) {
+          if (!targetElem.actions) targetElem.actions = [];
+          targetElem.actions.push({
+            type: 'write',
+            content: formattedContent,
+            title,
+            conclusion
+          });
+          if (title) targetElem.title = title;
+          if (conclusion) targetElem.conclusion = conclusion;
+        }
+
         return {
           status: 'success',
           action: 'append_to_board',
           targetElementId: targetId,
-          linesAppended: latexLines.length
+          linesAppended: latexLines.length,
+          instruction: '✅ 板书已成功追加到草稿纸画布！前端已实时渲染展示。请严禁再次调用写入工具，请立即向考生输出简明规范的 Markdown 文本答复与总结，结束本轮对话。'
         };
       } else {
         const newId = `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -201,11 +230,27 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
           conclusion,
           color: '#0f172a'
         });
+
+        // 内存同步更新
+        currentElements.push({
+          id: newId,
+          title: title || '📝 规范推导板书',
+          conclusion,
+          actions: [{
+            type: 'write',
+            content: formattedContent,
+            title: title || '📝 规范推导板书',
+            conclusion,
+            color: '#0f172a'
+          }]
+        });
+
         return {
           status: 'success',
           action: 'created_new_board',
           elementId: newId,
-          linesCount: latexLines.length
+          linesCount: latexLines.length,
+          instruction: '✅ 板书已成功创建并规范呈现于草稿纸画布！前端已实时渲染展示。请严禁再次调用写入工具，请立即向考生输出简明规范的 Markdown 文本答复与总结，结束本轮对话。'
         };
       }
     }
@@ -225,6 +270,16 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
       targetAxesId: z.string().optional().describe('指定叠加的已有坐标系ID，留空自动决策')
     }),
     execute: ({ category, expr, shapeType, plane, labels, color, targetAxesId }) => {
+      const sigKey = `draw:${category}:${expr || ''}:${shapeType || ''}:${plane || ''}`;
+      if (executedSignatures.has(sigKey)) {
+        return {
+          status: 'already_completed',
+          action: 'none',
+          message: '⚠️ 该图形或曲线已在上一轮成功绘制在草稿纸上。请严禁再次调用绘图工具，必须立即直接向考生输出自然语言文本说明与总结，结束本轮对话。'
+        };
+      }
+      executedSignatures.add(sigKey);
+
       if (category === 'function_plot' && expr) {
         const existingAxes = targetAxesId
           ? currentElements.find((e) => e.id === targetAxesId)
@@ -237,7 +292,16 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
             operation: 'append',
             actions: [{ type: 'plot', expr, label: `y = ${expr}`, color: color || '#1d4ed8' }]
           });
-          return { status: 'success', action: 'appended_plot', axesId: existingAxes.id, expr };
+          if (!existingAxes.actions) existingAxes.actions = [];
+          existingAxes.actions.push({ type: 'plot', expr, label: `y = ${expr}`, color: color || '#1d4ed8' });
+
+          return {
+            status: 'success',
+            action: 'appended_plot',
+            axesId: existingAxes.id,
+            expr,
+            instruction: '✅ 函数曲线已成功追加绘制至现有坐标系！前端已实时渲染展示。请严禁再次调用绘图工具，请立即向考生输出分析总结答复。'
+          };
         } else {
           const newAxesId = `axes_${Date.now()}`;
           canvasActions.push({
@@ -252,18 +316,37 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
             label: `y = ${expr}`,
             color: color || '#1d4ed8'
           });
-          return { status: 'success', action: 'created_axes_and_plot', axesId: newAxesId, expr };
+
+          currentElements.push({
+            id: newAxesId,
+            title: `📊 函数图像: y = ${expr}`,
+            actions: [
+              { type: 'axes', id: newAxesId, xLabel: 'x', yLabel: 'y' },
+              { type: 'plot', expr, label: `y = ${expr}`, color: color || '#1d4ed8' }
+            ]
+          });
+
+          return {
+            status: 'success',
+            action: 'created_axes_and_plot',
+            axesId: newAxesId,
+            expr,
+            instruction: '✅ 坐标系与函数图像已成功绘制！前端已实时渲染展示。请严禁再次调用绘图工具，请立即向考生输出分析总结答复。'
+          };
         }
       }
 
       if (category === 'geometry_3d') {
+        const geom3dId = `geom3d_${Date.now()}`;
         canvasActions.push({
           type: 'axes3d',
+          id: geom3dId,
           xLabel: 'x',
           yLabel: 'y',
           zLabel: 'z',
           color: '#334155'
         });
+        const actions = [{ type: 'axes3d', id: geom3dId, xLabel: 'x', yLabel: 'y', zLabel: 'z', color: '#334155' }];
         if (shapeType) {
           canvasActions.push({
             type: 'shape3d',
@@ -272,18 +355,57 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
             labels: labels || [],
             color: color || '#1d4ed8'
           });
+          actions.push({
+            type: 'shape3d',
+            shapeType,
+            plane: plane || 'xy',
+            labels: labels || [],
+            color: color || '#1d4ed8'
+          });
         }
-        return { status: 'success', action: 'created_3d_geometry', plane: plane || 'xy', shapeType };
+
+        currentElements.push({
+          id: geom3dId,
+          title: `📐 三维几何: ${shapeType || '立体空间'}`,
+          actions
+        });
+
+        return {
+          status: 'success',
+          action: 'created_3d_geometry',
+          plane: plane || 'xy',
+          shapeType,
+          instruction: '✅ 三维几何图形已成功生成并绘制在草稿纸上！前端已实时渲染展示。请严禁再次调用绘图工具，请立即向考生输出分析说明。'
+        };
       }
 
       // 2D 几何图形
+      const geom2dId = `geom2d_${Date.now()}`;
       canvasActions.push({
         type: 'shape',
+        id: geom2dId,
         shapeType: shapeType || 'triangle',
         labels: labels || ['A', 'B', 'C'],
         color: color || '#047857'
       });
-      return { status: 'success', action: 'created_2d_shape', shapeType };
+      currentElements.push({
+        id: geom2dId,
+        title: `📐 平面几何: ${shapeType || '几何图形'}`,
+        actions: [{
+          type: 'shape',
+          id: geom2dId,
+          shapeType: shapeType || 'triangle',
+          labels: labels || ['A', 'B', 'C'],
+          color: color || '#047857'
+        }]
+      });
+
+      return {
+        status: 'success',
+        action: 'created_2d_shape',
+        shapeType,
+        instruction: '✅ 平面几何图形已成功绘制在草稿纸上！前端已实时渲染展示。请严禁再次调用绘图工具，请立即向考生输出分析说明。'
+      };
     }
   });
 
@@ -312,7 +434,16 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
           operation: 'append',
           content: step
         });
-        return { status: 'success', action: 'substituted_equation', sourceEq, targetEq };
+        if (!el.actions) el.actions = [];
+        el.actions.push({ type: 'write', content: step });
+
+        return {
+          status: 'success',
+          action: 'substituted_equation',
+          sourceEq,
+          targetEq,
+          instruction: '✅ 等量代换步骤已成功追加至板书！前端已实时渲染。请严禁重复调用，请立即输出文本答复总结。'
+        };
       }
 
       if (operation === 'replace_content' && replaceContent) {
@@ -322,7 +453,13 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
           operation: 'replace',
           content: replaceContent
         });
-        return { status: 'success', action: 'replaced_content' };
+        el.actions = [{ type: 'write', content: replaceContent }];
+
+        return {
+          status: 'success',
+          action: 'replaced_content',
+          instruction: '✅ 板书内容已成功就地替换修正！前端已实时渲染。请严禁重复调用，请立即输出文本答复总结。'
+        };
       }
 
       if (operation === 'resize') {
@@ -332,7 +469,16 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
           scale: scale || 1.0,
           width: width || 520
         });
-        return { status: 'success', action: 'resized_element', scale, width };
+        el.scale = scale || 1.0;
+        el.width = width || 520;
+
+        return {
+          status: 'success',
+          action: 'resized_element',
+          scale,
+          width,
+          instruction: '✅ 板书卡片尺寸已成功调整！前端已实时渲染。请严禁重复调用，请立即输出文本答复总结。'
+        };
       }
 
       return { status: 'noop' };
@@ -353,13 +499,27 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
           type: 'delete_element',
           targetElementId
         });
-        return { status: 'success', action: 'deleted_element', targetElementId };
+        const idx = currentElements.findIndex((e) => e.id === targetElementId);
+        if (idx !== -1) currentElements.splice(idx, 1);
+
+        return {
+          status: 'success',
+          action: 'deleted_element',
+          targetElementId,
+          instruction: '✅ 目标图元已从草稿纸擦除！前端已实时更新。请严禁重复调用，请立即向考生输出答复。'
+        };
       }
       if (scope === 'all_board') {
         canvasActions.push({
           type: 'clear_board'
         });
-        return { status: 'success', action: 'cleared_all_board' };
+        currentElements.length = 0;
+
+        return {
+          status: 'success',
+          action: 'cleared_all_board',
+          instruction: '✅ 草稿纸画板已全部清空！前端已实时更新。请严禁重复调用，请立即向考生输出答复。'
+        };
       }
       return { status: 'noop' };
     }
@@ -393,7 +553,7 @@ export async function runScratchpadAgentLoopStream({
     tools,
     config: {
       maxIterations: 8,
-      maxRepeatedCalls: 2,
+      maxRepeatedCalls: 3,
       maxRepairAttempts: 2
     }
   });
@@ -408,8 +568,10 @@ export async function runScratchpadAgentLoopStream({
 2. 帮写不帮算 (Assist, Never Cheat)：
    - 忠实、规范地将考生的口述思路整理为学术标准的 LaTeX 分步板书（每步一行，公式包裹在 $...$ 中）；
    - 严禁替考生做题、严禁主动算出考生未给出的未知结论或最终数值。
-3. 优雅的总结回复：
-   - 工具调用完成后，请用简短规范的 Markdown 向考生汇报操作结果或关键结论（可包含 KaTeX 数学公式）。
+3. 工具单次生效与严禁重复调用（绝对铁律）：
+   - 针对考生的每一句口述指令，写入或绘图工具只需且只能调用 1 次！
+   - 一旦工具返回 status 为 'success' 或 'already_completed'，前端草稿纸画布就已经实时渲染生效，严禁使用相同或相似参数再次调用该工具！
+   - 工具调用成功后，你的下一步必须是——直接输出规范精炼的 Markdown 文本答复向考生汇报与总结（可包含 KaTeX 数学公式），结束本轮对话。绝对不可继续调用工具！
 
 【当前题目背景】:
 ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
@@ -517,6 +679,54 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
       }
       return { success: false, aborted: true, canvasActions };
     }
+
+    // 针对死循环熔断或超轮次熔断的自愈降级处理
+    if (
+      err.name === 'LoopInfiniteLoopError' ||
+      err.name === 'LoopMaxIterationsError' ||
+      err.message?.includes('Infinite loop detected')
+    ) {
+      console.warn(`[scratchpad-agent-engine] 触发循环防护熔断 (${err.name}):`, err.message);
+      if (canvasActions.length > 0) {
+        console.log(`[scratchpad-agent-engine] 画板已有 ${canvasActions.length} 项有效操作，自动转为优雅收敛完成。`);
+        const fallbackText = '\n\n✅ 板书推导与图形已规范记录至草稿纸。请继续下一步思路。';
+        if (onEvent) {
+          onEvent({
+            type: 'text-delta',
+            delta: fallbackText,
+            canvasActions: [...canvasActions]
+          });
+          onEvent({
+            type: 'completed',
+            metrics: {
+              iteration: currentIteration,
+              maxIterations: 8,
+              inputTokens: estimatedInputTokens,
+              outputTokens: accumulatedOutputTokens + 20,
+              totalTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
+              tokenSpeed: 0,
+              contextTokens: estimatedInputTokens,
+              maxContextTokens
+            },
+            canvasActions: [...canvasActions]
+          });
+        }
+        return {
+          success: true,
+          canvasActions,
+          metrics: {
+            iteration: currentIteration,
+            inputTokens: estimatedInputTokens,
+            outputTokens: accumulatedOutputTokens + 20,
+            totalTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
+            tokenSpeed: 0,
+            contextTokens: estimatedInputTokens,
+            maxContextTokens
+          }
+        };
+      }
+    }
+
     throw err;
   }
 }
