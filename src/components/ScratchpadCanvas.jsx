@@ -49,7 +49,8 @@ const supMap = {
   'H': 'ᴴ', 'I': 'ᴵ', 'J': 'ᴶ', 'K': 'ᴷ', 'L': 'ᴸ',
   'M': 'ᴹ', 'N': 'ᴺ', 'O': 'ᴼ', 'P': 'ᴾ', 'R': 'ᴿ',
   'T': 'ᵀ', 'U': 'ᵁ', 'W': 'ᵂ',
-  '*': '﹡'
+  '*': '﹡',
+  '/': 'ᐟ'
 };
 
 const subMap = {
@@ -195,7 +196,13 @@ const formatMathExpression = (str) => {
   return s;
 };
 
-const parseMathContentSegments = (rawMath) => {
+const parseMathContentSegments = (rawMathInput) => {
+  // 预处理上标分式（如 ^\frac{1}{3} 或 ^{\frac{1}{3}}）转换为上标字符，避免被误截为基线垂直大分式
+  const rawMath = String(rawMathInput || '').replace(/\^\s*\{?\s*\\(?:dfrac|tfrac|frac)\{([^}]+)\}\{([^}]+)\}\s*\}?/g, (_, num, den) => {
+    const sNum = num.split('').map((c) => supMap[c] || c).join('');
+    const sDen = den.split('').map((c) => supMap[c] || c).join('');
+    return `${sNum}ᐟ${sDen}`;
+  });
   const segments = [];
   const matrixPattern = /\\begin\{(pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix)\}([\s\S]*?)\\end\{\1\}/g;
   let lastIndex = 0;
@@ -3413,7 +3420,7 @@ export default function ScratchpadCanvas({
 
           <div className="hidden xl:flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/30 border border-secondary/20 text-secondary text-[11px] font-medium font-sans" data-no-drag>
             <span className="material-symbols-outlined text-[13px]">shield</span>
-            <span>铁律：AI 帮画帮写不帮算，只能局限于您说出的内容</span>
+            <span>考场草稿助手：智能协助代换、画图与演算整理 · 严守不泄题红线</span>
           </div>
         </div>
 
@@ -4327,7 +4334,7 @@ export default function ScratchpadCanvas({
                 {/* 底层：辅助提示与操作主按钮 */}
                 <div className="flex items-center justify-between pt-0.5">
                   <span className="text-[10px] text-outline truncate max-w-[200px]" title={isAgentRunning ? agentLoopStage : '只操作草稿纸，不填写答题区'}>
-                    {isAgentRunning ? (agentLoopStage || 'Agent Loop 思考并操作中…') : '🛡️ 闭卷考试防作弊模式：只操作草稿纸，严禁索取外部定理与答案'}
+                    {isAgentRunning ? (agentLoopStage || 'Agent Loop 思考并操作中…') : '🛡️ 考场草稿助手：协助代换、画图与演算整理，严禁索取外部公式与解法'}
                   </span>
 
                   {isAgentRunning ? (
