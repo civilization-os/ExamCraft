@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.4"><img src="https://img.shields.io/badge/Release-v1.2.4-blue.svg?logo=github" alt="Release v1.2.4"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.5"><img src="https://img.shields.io/badge/Release-v1.2.5-blue.svg?logo=github" alt="Release v1.2.5"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -86,7 +86,7 @@
 - **全场景同步与统计**：
   - 访客（Guest）模式与注册账户全兼容，支持本地持久化与云端保存；
   - 个人中心一键汇聚生成试卷数、实战模考交卷数与错题本积累进度；
-- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.4`）。
+- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.5`）。
 
 ### 4. 专注模式在线答题考场 (Focus Mode Exam Room)
 - **多端实时答题持久化同步 (Zustand + Cloud Real-time Debounced Sync)** 🆕：
