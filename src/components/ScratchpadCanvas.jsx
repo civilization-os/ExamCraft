@@ -636,6 +636,116 @@ export const isElementFormula = (elem) => {
 /**
  * 纯净纸质图元（无生硬外框与白底，墨水直接落在稿纸上，支持整体拖拽、尺寸缩放与橡皮擦除）
  */
+/**
+ * 智能净化并去重图元列表（自愈机制：合并因重复流式下发产生的堆叠公式卡片，清理冗余图元）
+ */
+export const sanitizeAndDeduplicateElements = (rawElements = [], containerWidth = 720) => {
+  if (!Array.isArray(rawElements) || rawElements.length === 0) return [];
+
+  const writeElements = [];
+  const otherElements = [];
+
+  for (const el of rawElements) {
+    if (!el || typeof el !== 'object') continue;
+    if (isElementFormula(el)) {
+      writeElements.push(el);
+    } else {
+      otherElements.push(el);
+    }
+  }
+
+  const cleaned = [];
+
+  // 1. 处理公式板书卡片：如果有多个重复或冗余累积的板书卡片，合并为一张规范主板书
+  if (writeElements.length > 0) {
+    if (writeElements.length === 1) {
+      const single = writeElements[0];
+      const writeAct = (single.actions || []).find((a) => a.type === 'write');
+      const text = writeAct?.content || '';
+      const w = Math.max(single.width || 520, 520);
+      cleaned.push({
+        ...single,
+        width: w,
+        height: estimateBoardHeight(text, w),
+        zone: 'formula'
+      });
+    } else {
+      // 存在多个板书卡片（例如被 bug 轰炸出的 294 项），智能提炼所有唯一推导行
+      const allLines = [];
+      const seenLineSet = new Set();
+      let bestTitle = '';
+      let bestConclusion = '';
+      let minX = 99999;
+      let minY = 99999;
+      let maxW = 520;
+
+      for (const we of writeElements) {
+        const writeAct = (we.actions || []).find((a) => a.type === 'write');
+        const text = writeAct?.content || '';
+        const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          if (!seenLineSet.has(line)) {
+            seenLineSet.add(line);
+            allLines.push(line);
+          }
+        }
+        if (we.title && !bestTitle) bestTitle = we.title;
+        if (we.conclusion && !bestConclusion) bestConclusion = we.conclusion;
+        if (typeof we.x === 'number' && we.x < minX) minX = we.x;
+        if (typeof we.y === 'number' && we.y < minY) minY = we.y;
+        if (typeof we.width === 'number' && we.width > maxW) maxW = we.width;
+      }
+
+      const mergedContent = allLines.join('\n');
+      const formulaW = Math.max(maxW, 520, Math.min(680, containerWidth - 40));
+      const firstValid = writeElements[0];
+      const masterWriteElem = {
+        id: firstValid.id || 'elem_master_formula',
+        title: bestTitle || generateSmartBoardTitle(mergedContent),
+        conclusion: bestConclusion || extractBoardConclusion(mergedContent),
+        collapsed: false,
+        titleCustom: Boolean(firstValid.titleCustom),
+        x: minX !== 99999 ? minX : Math.floor(containerWidth / 2) + 16,
+        y: minY !== 99999 ? minY : 56,
+        width: formulaW,
+        height: estimateBoardHeight(mergedContent, formulaW),
+        scale: firstValid.scale || 1.0,
+        actions: [{
+          type: 'write',
+          content: mergedContent,
+          title: bestTitle,
+          conclusion: bestConclusion,
+          color: '#0f172a'
+        }],
+        zone: 'formula',
+        createdAt: firstValid.createdAt || Date.now(),
+        updatedAt: Date.now()
+      };
+      cleaned.push(masterWriteElem);
+    }
+  }
+
+  // 2. 处理坐标系、函数曲线与几何图形，严格按 ID 与结构签名去重
+  const seenIds = new Set();
+  const seenSignatures = new Set();
+
+  for (const el of otherElements) {
+    if (seenIds.has(el.id)) continue;
+    seenIds.add(el.id);
+
+    const sig = `${el.zone || 'draw'}_${(el.actions || []).map((a) => `${a.type}:${a.expr || a.shapeType || ''}`).join(';')}`;
+    if (seenSignatures.has(sig)) continue;
+    seenSignatures.add(sig);
+
+    cleaned.push({
+      ...el,
+      zone: 'draw'
+    });
+  }
+
+  return cleaned;
+};
+
 function DraggableCanvasElement({
   element,
   tool,
@@ -1114,7 +1224,8 @@ export default function ScratchpadCanvas({
     try {
       const saved = localStorage.getItem(`${storageKey}_elements`);
       const parsed = saved ? JSON.parse(saved) : [];
-      return (Array.isArray(parsed) ? parsed : []).map((el) => {
+      const sanitized = sanitizeAndDeduplicateElements(Array.isArray(parsed) ? parsed : [], 720);
+      return sanitized.map((el) => {
         const isWrite = (el.actions || []).some((a) => a.type === 'write');
         if (isWrite && (el.width < 460 || !el.width)) {
           const content = el.actions.find((a) => a.type === 'write')?.content || '';
@@ -1132,15 +1243,18 @@ export default function ScratchpadCanvas({
     }
   });
 
+  const appliedActionIdsRef = useRef(new Set());
   const lastSavedElementsStrRef = useRef(JSON.stringify(elements));
   const prevElementsStorageKeyRef = useRef(storageKey);
 
   // 当切换题目或存储 Key 变动时，实时载入该题的专属图元
   useEffect(() => {
     try {
+      appliedActionIdsRef.current.clear();
       const saved = localStorage.getItem(`${storageKey}_elements`);
       const parsed = saved ? JSON.parse(saved) : [];
-      const loaded = (Array.isArray(parsed) ? parsed : []).map((el) => {
+      const sanitized = sanitizeAndDeduplicateElements(Array.isArray(parsed) ? parsed : [], 720);
+      const loaded = sanitized.map((el) => {
         const isWrite = (el.actions || []).some((a) => a.type === 'write');
         if (isWrite && (el.width < 460 || !el.width)) {
           const content = el.actions.find((a) => a.type === 'write')?.content || '';
@@ -2318,11 +2432,10 @@ export default function ScratchpadCanvas({
       return { x: zoneStartX, y: candidateY };
     }
 
-    // 3. 兜底微偏移排列（绝对限制在各自所属分区的 X 轴范围内，绝不越界重叠）
-    const last = zoneElements[zoneElements.length - 1];
+    // 3. 纵向自然向下排列（草稿纸支持垂直滚动，绝不循环取模造成覆盖重叠）
     return {
-      x: Math.min(zoneStartX + ((last.x - zoneStartX + 24) % Math.max(availableZoneW - elemWidth, 40)), zoneEndX - elemWidth),
-      y: (last.y + 24) % Math.max(containerH - elemHeight, 100) + headerOffset
+      x: zoneStartX,
+      y: maxBottom + pad
     };
   }, [elements]);
 
@@ -2337,7 +2450,8 @@ export default function ScratchpadCanvas({
     let drawY = headerOffset;
     let formulaY = headerOffset;
 
-    const newElements = elements.map((el) => {
+    const cleanList = sanitizeAndDeduplicateElements(elements, containerW);
+    const newElements = cleanList.map((el) => {
       const isFormula = isElementFormula(el);
       if (isFormula) {
         const x = midX + 16;
@@ -2531,8 +2645,17 @@ export default function ScratchpadCanvas({
   const applyCanvasActions = useCallback((incomingActions) => {
     if (!Array.isArray(incomingActions) || !incomingActions.length) return;
 
+    // 0. 幂等消费防重：通过 actionId 或内容指纹过滤已消费的动作
+    const unappliedActions = incomingActions.filter((a) => {
+      const sig = a.actionId || a.id || `${a.type}_${a.targetElementId || ''}_${(a.content || '').slice(0, 40)}_${a.expr || ''}_${a.shapeType || ''}`;
+      if (appliedActionIdsRef.current.has(sig)) return false;
+      appliedActionIdsRef.current.add(sig);
+      return true;
+    });
+    if (!unappliedActions.length) return;
+
     // 1. 处理 update_element、delete_element 与 clear_board
-    const editActions = incomingActions.filter((a) => a.type === 'update_element' || a.type === 'delete_element' || a.type === 'clear_board');
+    const editActions = unappliedActions.filter((a) => a.type === 'update_element' || a.type === 'delete_element' || a.type === 'clear_board');
     if (editActions.length) {
       setElements((previous) => {
         let next = [...previous];
@@ -2631,106 +2754,135 @@ export default function ScratchpadCanvas({
     }
 
     // 2. 处理新建图元
-    const actionsToCreate = incomingActions.filter((a) => a.type !== 'update_element' && a.type !== 'delete_element' && a.type !== 'clear_board');
-    if (actionsToCreate.length) {
-      let elemActs = actionsToCreate;
-      if (elemActs.some((a) => a.type === 'plot') && !elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d')) {
-        elemActs = [{ type: 'axes', xLabel: 'x', yLabel: 'y' }, ...elemActs];
-      }
+    const actionsToCreate = unappliedActions.filter((a) => a.type !== 'update_element' && a.type !== 'delete_element' && a.type !== 'clear_board');
+    if (!actionsToCreate.length) return;
 
-      let elemTitle = '草稿演算图元';
-      const hasPlot = elemActs.some((a) => a.type === 'plot');
-      const hasAxes = elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d');
-      const has3DAxes = elemActs.some((a) => a.type === 'axes3d');
-      const hasShape = elemActs.some((a) => a.type === 'shape' || a.type === 'shape3d');
-      const hasWrite = elemActs.some((a) => a.type === 'write');
-      const isCircleAct = elemActs.some(
-        (a) => a.type === 'circle' || (a.type === 'shape' && (a.shapeType === 'circle' || String(a.shapeType || '').includes('圆')))
-      );
-      const isDraw = hasPlot || hasAxes || hasShape || isCircleAct;
+    let elemActs = actionsToCreate;
+    if (elemActs.some((a) => a.type === 'plot') && !elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d')) {
+      elemActs = [{ type: 'axes', xLabel: 'x', yLabel: 'y' }, ...elemActs];
+    }
 
-      if (hasWrite && !isDraw) {
-        setElements((previous) => {
-          const existingWrite = previous.find((el) => (el.actions || []).some((a) => a.type === 'write'));
-          if (existingWrite) {
-            const writeAct = elemActs.find((a) => a.type === 'write');
-            if (writeAct?.content) {
-              return previous.map((el) => {
-                if (el.id !== existingWrite.id) return el;
-                const oldWrite = (el.actions || []).find((a) => a.type === 'write');
-                const oldContent = String(oldWrite?.content || '');
-                const newLines = writeAct.content.split('\n').map((l) => l.trim()).filter(Boolean);
-                const existingLines = new Set(oldContent.split('\n').map((l) => l.trim()).filter(Boolean));
-                const appendLines = newLines.filter((l) => !existingLines.has(l));
-                const merged = [oldContent.trim(), ...appendLines].filter(Boolean).join('\n');
-                const updatedActions = (el.actions || []).map((a) => (a.type === 'write' ? { ...a, content: merged } : a));
-                const formulaBoardW = Math.max(el.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
-                const newHeight = estimateBoardHeight(merged, formulaBoardW);
-                const smartTitle = el.titleCustom ? el.title : generateSmartBoardTitle(merged, writeAct.title);
-                const smartConclusion = extractBoardConclusion(merged, writeAct.conclusion);
-                return {
-                  ...el,
-                  title: smartTitle,
-                  conclusion: smartConclusion,
-                  width: formulaBoardW,
-                  height: newHeight,
-                  actions: updatedActions,
-                  updatedAt: Date.now()
-                };
-              });
-            }
-          }
-          return previous;
-        });
-      }
+    const hasPlot = elemActs.some((a) => a.type === 'plot');
+    const hasAxes = elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d');
+    const has3DAxes = elemActs.some((a) => a.type === 'axes3d');
+    const hasShape = elemActs.some((a) => a.type === 'shape' || a.type === 'shape3d');
+    const hasWrite = elemActs.some((a) => a.type === 'write');
+    const isCircleAct = elemActs.some(
+      (a) => a.type === 'circle' || (a.type === 'shape' && (a.shapeType === 'circle' || String(a.shapeType || '').includes('圆')))
+    );
+    const isDraw = hasPlot || hasAxes || hasShape || isCircleAct;
 
-      const targetZone = isDraw ? 'draw' : 'formula';
-      const containerW = containerRef.current?.clientWidth || 700;
-      const midX = Math.floor(containerW / 2);
-      const maxZoneW = Math.max(200, (isDraw ? midX : containerW - midX) - 36);
-
-      let elemWidth = Math.min(320, maxZoneW);
-      let elemHeight = 270;
-
-      if (isCircleAct) {
-        elemTitle = '⭕ 几何图形: 圆 O 与半径 r';
-        elemWidth = Math.min(270, maxZoneW);
-        elemHeight = 250;
-      } else if (hasPlot) {
-        const plotAct = elemActs.find((a) => a.type === 'plot');
-        const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
-        elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
-        elemWidth = Math.min(310, maxZoneW);
-        elemHeight = 270;
-      } else if (has3DAxes) {
-        elemTitle = '📐 三维坐标系';
-        elemWidth = Math.min(320, maxZoneW);
-        elemHeight = 290;
-      } else if (hasAxes) {
-        elemTitle = '📈 直角坐标系';
-        elemWidth = Math.min(300, maxZoneW);
-        elemHeight = 270;
-      } else if (hasShape) {
-        const shapeAct = elemActs.find((a) => a.type === 'shape');
-        const shapeNameMap = { right_triangle: '直角三角形', circle: '圆形与半径', triangle: '三角形' };
-        elemTitle = `📐 几何图形: ${shapeNameMap[shapeAct?.shapeType] || '几何图形'}`;
-        elemWidth = Math.min(270, maxZoneW);
-        elemHeight = 240;
-      } else if (hasWrite) {
+    // 【关键分支 A】：公式板书写入与合并（绝不重复建卡片）
+    if (hasWrite && !isDraw) {
+      setElements((previous) => {
+        const existingWrite = previous.find((el) => (el.actions || []).some((a) => a.type === 'write'));
         const writeAct = elemActs.find((a) => a.type === 'write');
-        const formulaBoardW = Math.max(480, Math.min(700, containerW - 40));
-        elemTitle = generateSmartBoardTitle(writeAct?.content || '', writeAct?.title);
-        elemWidth = formulaBoardW;
-        elemHeight = estimateBoardHeight(writeAct?.content || '', elemWidth);
+        const contentToAdd = (writeAct?.content || '').trim();
+
+        if (existingWrite) {
+          // 增量合并至现有主板书
+          return previous.map((el) => {
+            if (el.id !== existingWrite.id) return el;
+            const oldWrite = (el.actions || []).find((a) => a.type === 'write');
+            const oldContent = String(oldWrite?.content || '');
+            const newLines = contentToAdd.split('\n').map((l) => l.trim()).filter(Boolean);
+            const existingLines = new Set(oldContent.split('\n').map((l) => l.trim()).filter(Boolean));
+            const appendLines = newLines.filter((l) => !existingLines.has(l));
+            const merged = [oldContent.trim(), ...appendLines].filter(Boolean).join('\n');
+            const updatedActions = (el.actions || []).map((a) => (a.type === 'write' ? { ...a, content: merged } : a));
+            const formulaBoardW = Math.max(el.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
+            const newHeight = estimateBoardHeight(merged, formulaBoardW);
+            const smartTitle = el.titleCustom ? el.title : generateSmartBoardTitle(merged, writeAct?.title);
+            const smartConclusion = extractBoardConclusion(merged, writeAct?.conclusion);
+            return {
+              ...el,
+              title: smartTitle,
+              conclusion: smartConclusion,
+              width: formulaBoardW,
+              height: newHeight,
+              actions: updatedActions,
+              updatedAt: Date.now()
+            };
+          });
+        } else {
+          // 当前画布无板书，创建唯一的主板书卡片
+          const containerW = containerRef.current?.clientWidth || 700;
+          const formulaBoardW = Math.max(480, Math.min(700, containerW - 40));
+          const pos = findNextAvailablePosition(formulaBoardW, estimateBoardHeight(contentToAdd, formulaBoardW), 'formula');
+          const newId = writeAct?.id || `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const smartTitle = generateSmartBoardTitle(contentToAdd, writeAct?.title);
+          const smartConclusion = extractBoardConclusion(contentToAdd, writeAct?.conclusion);
+
+          const newElem = {
+            id: newId,
+            title: smartTitle,
+            conclusion: smartConclusion,
+            collapsed: false,
+            titleCustom: false,
+            x: pos.x,
+            y: pos.y,
+            width: formulaBoardW,
+            height: estimateBoardHeight(contentToAdd, formulaBoardW),
+            actions: elemActs,
+            zone: 'formula',
+            createdAt: Date.now()
+          };
+          return [...previous, newElem];
+        }
+      });
+      return; // 🔴 核心守卫：处理完板书后立即返回，绝不穿透至下方新建图元逻辑！
+    }
+
+    // 【关键分支 B】：几何与坐标系画图（画图区防重与创建）
+    const targetZone = 'draw';
+    const containerW = containerRef.current?.clientWidth || 700;
+    const midX = Math.floor(containerW / 2);
+    const maxZoneW = Math.max(200, midX - 36);
+
+    let elemTitle = '草稿演算图元';
+    let elemWidth = Math.min(320, maxZoneW);
+    let elemHeight = 270;
+
+    if (isCircleAct) {
+      elemTitle = '⭕ 几何图形: 圆 O 与半径 r';
+      elemWidth = Math.min(270, maxZoneW);
+      elemHeight = 250;
+    } else if (hasPlot) {
+      const plotAct = elemActs.find((a) => a.type === 'plot');
+      const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
+      elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
+      elemWidth = Math.min(310, maxZoneW);
+      elemHeight = 270;
+    } else if (has3DAxes) {
+      elemTitle = '📐 三维坐标系';
+      elemWidth = Math.min(320, maxZoneW);
+      elemHeight = 290;
+    } else if (hasAxes) {
+      elemTitle = '📈 直角坐标系';
+      elemWidth = Math.min(300, maxZoneW);
+      elemHeight = 270;
+    } else if (hasShape) {
+      const shapeAct = elemActs.find((a) => a.type === 'shape');
+      const shapeNameMap = { right_triangle: '直角三角形', circle: '圆形与半径', triangle: '三角形' };
+      elemTitle = `📐 几何图形: ${shapeNameMap[shapeAct?.shapeType] || '几何图形'}`;
+      elemWidth = Math.min(270, maxZoneW);
+      elemHeight = 240;
+    }
+
+    const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
+    const firstAct = elemActs[0];
+    const newElemId = firstAct?.id || `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+    setElements((previous) => {
+      // 若已存在相同 ID 的图形图元，就地更新它，避免重复叠加
+      const existingIdx = previous.findIndex((el) => el.id === newElemId);
+      if (existingIdx !== -1) {
+        return previous.map((el, i) => (i === existingIdx ? { ...el, actions: elemActs, updatedAt: Date.now() } : el));
       }
-
-      const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
-      const initialWriteAct = elemActs.find((a) => a.type === 'write');
-
       const newElem = {
-        id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: newElemId,
         title: elemTitle,
-        conclusion: initialWriteAct ? extractBoardConclusion(initialWriteAct.content || '', initialWriteAct.conclusion) : '',
+        conclusion: '',
         collapsed: false,
         titleCustom: false,
         x: pos.x,
@@ -2741,9 +2893,8 @@ export default function ScratchpadCanvas({
         zone: targetZone,
         createdAt: Date.now()
       };
-
-      setElements((prev) => [...prev, newElem]);
-    }
+      return [...previous, newElem];
+    });
   }, [findNextAvailablePosition]);
 
   // ==================== 核心 Agent Loop 执行逻辑 (流式与中断) ====================

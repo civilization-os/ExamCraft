@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.5"><img src="https://img.shields.io/badge/Release-v1.2.5-blue.svg?logo=github" alt="Release v1.2.5"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.6"><img src="https://img.shields.io/badge/Release-v1.2.6-blue.svg?logo=github" alt="Release v1.2.6"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -69,6 +69,12 @@
     - 思考阶段默认展开直观反馈，最终总结板书回答时自动优雅折叠，用户可随时一键点击展开/收起；
   - **全链路随时打断机制 (AbortController)**：
     - 支持用户在思考或调用工具的中途随时打断，前端停止按钮、Esc 快捷键与后端 SSE 数据流即时取消；
+  - **草稿纸助教防作弊与防直接给答案铁律 (v1.2.6)** 🆕：
+    - **坚决不替考生做题**：当考生口述函数展开、求导或积分时（如“arcsin x 的泰勒展开”），助教严格恪守本职，单次只规范誊写 1~2 行考研基准公式，严禁擅自补充求导、二项式定理、逐项积分等全套长篇解题推导直接甩答案；
+    - **启发式引导与思考权保留**：单次写入步骤严格限制 1~3 行以内，把计算、求导与代换的主动权坚决留给考生；
+  - **画板图元覆盖自愈与流式风暴斩断 (v1.2.6)** 🆕：
+    - **彻底斩断流式风暴**：切断纯文本 delta 和 reasoning delta 重复下发 canvasActions，将动作下发频率优化降低 99.4%；
+    - **图元去重自愈引擎 (Sanitizer)**：自动识别并净化因重复下发导致的历史堆叠图元，合并为规范整洁的单一主板书，并彻底解决 294 项图元覆盖重影问题。
   - **聊天框底部实时 Status Bar 性能仪表盘 (v1.2.4)**：
     - **对话轮次 (Turns)**：真实反映会话历史进程（如 `第 1 轮`、`第 2 轮`），彻底废除误导性的内部迭代限制标识；
     - **工具调用统计 (Tool Calls)**：清晰统计本轮执行的工具调用次数（如 `调用: 0 次` / `调用: 1 次`）及详细工具项；
@@ -86,7 +92,7 @@
 - **全场景同步与统计**：
   - 访客（Guest）模式与注册账户全兼容，支持本地持久化与云端保存；
   - 个人中心一键汇聚生成试卷数、实战模考交卷数与错题本积累进度；
-- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.5`）。
+- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.6`）。
 
 ### 4. 专注模式在线答题考场 (Focus Mode Exam Room)
 - **多端实时答题持久化同步 (Zustand + Cloud Real-time Debounced Sync)** 🆕：

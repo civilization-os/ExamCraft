@@ -167,15 +167,17 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
   // 2. write_math_derivation: 誊写/追加数学板书
   const writeMath = defineLoopTool({
     name: 'write_math_derivation',
-    description: '在草稿板上规范誊写或追加数学推导步骤（以分步 LaTeX 呈现）。忠实呈现考生的推导脉络。',
+    description: '在草稿板上规范誊写或追加数学推导步骤（以分步 LaTeX 呈现）。必须严守助教本职，单次严格限制 1~3 行必要步骤，严禁一次性输出长篇证明或替考生推导做题。',
     schema: z.object({
-      latexLines: z.array(z.string()).describe('规范的LaTeX推导行列表，每步独立一行，如 ["\\\\because x = \\\\sin y", "\\\\therefore x\' = \\\\cos y \\\\cdot y\'"]'),
-      title: z.string().optional().describe('贴切具体的板书卡片小标题，如 "📝 y = \\arcsin x 求导推演"'),
+      latexLines: z.array(z.string()).max(3).describe('规范的LaTeX推导行列表，单次严格限制 1~3 行核心步骤，严禁输出超长推导或直接替考生做题，如 ["\\\\arcsin x = x + \\\\frac{x^3}{6} + o(x^3)"]') ,
+      title: z.string().optional().describe('贴切具体的板书卡片小标题，如 "📝 arcsin x 常用麦克劳林展开"'),
       targetElementId: z.string().optional().describe('追加的目标板书图元ID，不传则自动维护现有主板书'),
-      conclusion: z.string().optional().describe('当前推导的核心结论公式，用于折叠时展示，如 "(\\arcsin x)\' = \\frac{1}{\\sqrt{1-x^2}}"')
+      conclusion: z.string().optional().describe('当前推导的核心结论公式，用于折叠时展示，如 "\\arcsin x = x + \\frac{x^3}{6} + o(x^3)"')
     }),
     execute: ({ latexLines, title, targetElementId, conclusion }) => {
-      const formattedContent = latexLines.join('\n');
+      // 截断保护：确保不超过 3 行
+      const safeLines = (latexLines || []).slice(0, 3);
+      const formattedContent = safeLines.join('\n');
       const sigKey = `write:${formattedContent.trim()}`;
       if (executedSignatures.has(sigKey)) {
         return {
@@ -190,7 +192,9 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
 
       if (targetElementId || existingWrite) {
         const targetId = targetElementId || existingWrite.id;
+        const actionId = `act_update_${targetId}_${Date.now()}`;
         canvasActions.push({
+          actionId,
           type: 'update_element',
           targetElementId: targetId,
           operation: 'append',
@@ -217,14 +221,16 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
           status: 'success',
           action: 'append_to_board',
           targetElementId: targetId,
-          linesAppended: latexLines.length,
+          linesAppended: safeLines.length,
           instruction: '✅ 板书已成功追加到草稿纸画布！前端已实时渲染展示。请严禁再次调用写入工具，请立即向考生输出简明规范的 Markdown 文本答复与总结，结束本轮对话。'
         };
       } else {
         const newId = `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const actionId = `act_create_${newId}`;
         canvasActions.push({
-          type: 'write',
           id: newId,
+          actionId,
+          type: 'write',
           content: formattedContent,
           title: title || '📝 规范推导板书',
           conclusion,
@@ -249,7 +255,7 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
           status: 'success',
           action: 'created_new_board',
           elementId: newId,
-          linesCount: latexLines.length,
+          linesCount: safeLines.length,
           instruction: '✅ 板书已成功创建并规范呈现于草稿纸画布！前端已实时渲染展示。请严禁再次调用写入工具，请立即向考生输出简明规范的 Markdown 文本答复与总结，结束本轮对话。'
         };
       }
@@ -559,19 +565,23 @@ export async function runScratchpadAgentLoopStream({
   });
 
   const systemPrompt = `你是一名严谨、专注且富有数学素养的考场草稿纸助教（Scratchpad Assistant）。
-你的核心任务是协助考生在草稿纸上规范记录数学推导板书、绘制几何图形与函数曲线、执行等式代换与局部纠错。
+你的核心定位是协助考生在草稿纸上规范记录板书、绘制几何图形与函数曲线、执行等式代换。
 
-【核心工作准则】：
-1. 观察与行动优先 (Action via Tools)：
-   - 考生的口述凡是涉及推导、写式子、代换、画图或擦除，**必须通过调用对应工具在画板上切实执行**。
+【考场助教核心铁律（最高优先级）】：
+1. 帮写不帮算、绝不越俎代庖（防作弊与防直接给答案铁律）：
+   - 你是草稿纸助教，绝对不是做题枪手或搜题软件，考生的独立思考权神圣不可侵犯，严禁替考生做题！
+   - 严禁替考生推导证明：当考生提及某个函数的泰勒/麦克劳林展开、导数、极限或积分时（如“arcsin x 的泰勒展开”）：
+     * 严禁擅自推导解题全过程（严禁主动写求导、二项式定理展开、逐项积分等证明推算，绝不直接甩答案！）；
+     * 严禁无节制高阶展开：若考生未指定具体阶数，最多只记录考研最常用的基准公式（如 $\\arcsin x = x + \\frac{x^3}{6} + o(x^3)$），严禁自行推算至 $x^5, x^7$ 等高阶；
+     * 单次板书极简克制：单次调用 write_math_derivation 的 latexLines 严格控制在 1~3 行以内！把思考、求导与代换的主动权留给考生；
+     * 在答复考生的 Markdown 文本中，只做启发式提问与简明确认（例如：“已在草稿纸为您记录了 $\\arcsin x$ 的基准展开式。请问您接下来需要代入计算哪一步极限，还是需要我帮您记录特定的阶数展开？”），严禁直接代考生做完整道题。
+2. 观察与行动优先 (Action via Tools)：
+   - 考生的口述凡是涉及推导、写式子、代换、画图或擦除，必须通过调用对应工具在画板上切实执行；
    - 修改、代换或删除已有板书前，若不确定画板图元状态，先调用 \`read_scratchpad\` 查阅最新真实板书。
-2. 帮写不帮算 (Assist, Never Cheat)：
-   - 忠实、规范地将考生的口述思路整理为学术标准的 LaTeX 分步板书（每步一行，公式包裹在 $...$ 中）；
-   - 严禁替考生做题、严禁主动算出考生未给出的未知结论或最终数值。
 3. 工具单次生效与严禁重复调用（绝对铁律）：
    - 针对考生的每一句口述指令，写入或绘图工具只需且只能调用 1 次！
    - 一旦工具返回 status 为 'success' 或 'already_completed'，前端草稿纸画布就已经实时渲染生效，严禁使用相同或相似参数再次调用该工具！
-   - 工具调用成功后，你的下一步必须是——直接输出规范精炼的 Markdown 文本答复向考生汇报与总结（可包含 KaTeX 数学公式），结束本轮对话。绝对不可继续调用工具！
+   - 工具调用成功后，你的下一步必须是——直接输出规范精炼的中文 Markdown 文本答复向考生汇报与总结（可包含 KaTeX 数学公式），结束本轮对话。绝对不可继续调用工具！
 4. 全程规范中文与专业输出（严禁暴露底层接口或内部调试）：
    - 思考过程与最终答复必须统一使用自然地道的中文，严禁使用英文内心独白或英文碎片；
    - 工具调用必须通过标准的 Function Calling 结构化接口提交，严禁在正文回答中伪造任何 XML 标签（如 <parameter>、<tool> 等）或裸 JSON 代码块；
@@ -663,10 +673,15 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
             error: event.error instanceof Error ? event.error.message : String(event.error || '模型异常')
           };
         }
+
+        // 斩断流式风暴：纯流式文字（text-delta 与 reasoning-delta）绝不重复全量携带 canvasActions！
+        // 只有当工具执行产生实质画板变动（tool-result）或者循环完成（completed）时才下发 canvasActions
+        const shouldIncludeCanvasActions = event.type === 'tool-result' || event.type === 'completed';
+
         onEvent({
           ...safeEvent,
           metrics,
-          canvasActions: [...canvasActions]
+          ...(shouldIncludeCanvasActions && canvasActions.length > 0 ? { canvasActions: [...canvasActions] } : {})
         });
       }
     }
@@ -726,8 +741,7 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
       if (onEvent) {
         onEvent({
           type: 'text-delta',
-          delta: fallbackText,
-          canvasActions: [...canvasActions]
+          delta: fallbackText
         });
         onEvent({
           type: 'completed',

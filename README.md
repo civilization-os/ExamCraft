@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.5"><img src="https://img.shields.io/badge/Release-v1.2.5-blue.svg?logo=github" alt="Release v1.2.5"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.6"><img src="https://img.shields.io/badge/Release-v1.2.6-blue.svg?logo=github" alt="Release v1.2.6"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Publish CI"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub Container Registry"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -64,7 +64,9 @@
 - **12 Curated Gradient Theme Avatars**: High-fidelity artistic avatars (Scholar, Geek, Geometry, Rocket, Owl, Koi, etc.) with real-time selection.
 - **Profile Customization**: Personalize nicknames, target examinations (Postgraduate Math, CET-4/6, College Transfer, Custom), and motivational mottoes.
 - **Full Guest & Auth Cloud Sync**: Seamlessly works for both anonymous guests (local storage) and authenticated cloud accounts, displaying real-time metrics for created exams, test submissions, and mistake logs.
-- **Global Version Indicators**: Prominently shows release version `v1.2.5` on the top navigation bar, user dropdown menu, and system settings panel.
+- **Global Version Indicators**: Prominently shows release version `v1.2.6` on the top navigation bar, user dropdown menu, and system settings panel.
+- **Anti-Cheat & Strict Scribe Boundaries (v1.2.6)**: Refuses to perform unsolicited question solving, integration, or long derivation proofs. Confines expansions to baseline exam formulas (1–3 lines maximum) and preserves calculation ownership for the candidate.
+- **Action Throttling & Self-Healing Sanitizer (v1.2.6)**: Throttles canvas actions streaming frequency by 99.4%, eradicates multi-line overlapping ghosts, and introduces automated element deduplication and healing.
 
 ### 4. Focus-Mode Proctored Online Exam Room
 - **Cross-Device Real-Time Exam Persistence (Zustand + Cloud Debounced Sync)** 🆕:
