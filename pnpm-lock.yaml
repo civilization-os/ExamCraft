@@ -163,7 +163,7 @@ packages:
     engines: {node: '>=6.9.0'}
 
   '@civilization/agent-loop@file:packages/civilization-agent-loop-0.1.0.tgz':
-    resolution: {integrity: sha512-WixkBc9KQH+ddWqDYWcedGoUduHR9HGBRRVcxguUX72fkIefHEBjc9+nFiIgNy9yk7Pl4K5SHyad8X5nCZCNag==, tarball: file:packages/civilization-agent-loop-0.1.0.tgz}
+    resolution: {integrity: sha512-ssh4I45atTABY1LGs7X1K3JtXglp/NrxDebf4r8/fbjiOPIfzk0P4lQ2rdycHEEpG3PErRHzxktlhkMkemBzSw==, tarball: file:packages/civilization-agent-loop-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=20.0.0'}
 

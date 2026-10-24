@@ -1,6 +1,29 @@
 import { AgentLoop, defineLoopTool } from '@civilization/agent-loop';
 import { z } from 'zod';
 
+function formatToolsForModelCore(tools) {
+  if (!tools || !tools.length) return undefined;
+  return tools.map((t) => {
+    let rawParams = t.definition?.parameters || t.parameters;
+    if (rawParams && rawParams.definitions && rawParams.$ref) {
+      const defKey = rawParams.$ref.replace('#/definitions/', '');
+      if (rawParams.definitions[defKey]) {
+        rawParams = rawParams.definitions[defKey];
+      }
+    }
+    const safeParams = {
+      type: 'object',
+      properties: (rawParams && typeof rawParams === 'object' && rawParams.properties) ? rawParams.properties : {},
+      ...(rawParams?.required ? { required: rawParams.required } : {})
+    };
+    return {
+      name: t.name,
+      description: t.description || '',
+      parameters: safeParams
+    };
+  });
+}
+
 /**
  * ModelCoreToLoopAdapter
  * 将 @civilization/model-core 的 BaseChatModel 桥接为 @civilization/agent-loop 所需的 ILoopChatModel
@@ -11,11 +34,7 @@ export class ModelCoreToLoopAdapter {
   }
 
   async invoke({ messages, tools, signal, temperature, maxTokens }) {
-    const formattedTools = tools?.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters || {}
-    }));
+    const formattedTools = formatToolsForModelCore(tools);
 
     const unifiedMessages = messages.map((m) => ({
       role: m.role,
@@ -69,11 +88,7 @@ export class ModelCoreToLoopAdapter {
       return;
     }
 
-    const formattedTools = tools?.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters || {}
-    }));
+    const formattedTools = formatToolsForModelCore(tools);
 
     const unifiedMessages = messages.map((m) => ({
       role: m.role,

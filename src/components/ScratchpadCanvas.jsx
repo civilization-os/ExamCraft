@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import katex from 'katex';
 import SelectMenu from './SelectMenu';
 import MathMarkdown from './MathMarkdown';
@@ -1239,6 +1240,7 @@ export default function ScratchpadCanvas({
   const [isAssistantCollapsed, setIsAssistantCollapsed] = useState(false);
   const [mobileWorkspaceTab, setMobileWorkspaceTab] = useState('canvas');
   const [spokenInput, setSpokenInput] = useState('');
+  const [activeAuxDrawer, setActiveAuxDrawer] = useState(null); // 'derivation' | 'formulas' | null
   const [showFormulaReference, setShowFormulaReference] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const agentRequestInFlightRef = useRef(false);
@@ -3610,463 +3612,519 @@ export default function ScratchpadCanvas({
                 </div>
               </div>
 
-              {/* 数学推导语言智能工具坞 (涵盖因为所以、全称存在量词、设令假设、递进论证与QED) */}
-              <div className="px-1 py-1 border-b border-outline-variant/20">
-                <MathDerivationDock
-                  onInsertPrompt={handleAppendSpokenPrompt}
-                  onWriteToBoard={(latex, label) => handleQuickWriteToBoard(latex, label)}
-                  onCopyLatex={(latex, label) => showToast(`已复制「${label}」LaTeX 符号`, 'info')}
-                />
-              </div>
+              {/* 辅助工具快捷药丸栏：极简轻量，彻底释放纵向对话视口 */}
+              <div className="flex items-center justify-between gap-1.5 py-1 px-0.5 border-b border-outline-variant/15">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* 药丸 A：数学推导语言坞 (因为所以/设令/推出/QED) */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveAuxDrawer((prev) => (prev === 'derivation' ? null : 'derivation'))}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-medium transition-all duration-200 cursor-pointer border ${
+                      activeAuxDrawer === 'derivation'
+                        ? 'bg-primary text-on-primary border-primary shadow-2xs'
+                        : 'bg-surface-container-lowest/90 hover:bg-surface-container text-on-surface border-outline-variant/30'
+                    }`}
+                    title="展开/收起数学推导语言智能工具坞（因为所以、设令假设、推出、充要与QED）"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">calculate</span>
+                    <span>推导语言</span>
+                    <span className={`material-symbols-outlined text-[13px] transition-transform duration-200 ${activeAuxDrawer === 'derivation' ? 'rotate-180' : ''}`}>
+                      expand_more
+                    </span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => setShowFormulaReference((visible) => !visible)}
-                aria-expanded={showFormulaReference}
-                className="w-full flex items-center justify-between border-b border-outline-variant/20 px-1 py-1.5 text-left text-[11px] text-on-surface-variant/75 hover:text-primary transition"
-              >
-                <span className="flex items-center gap-1.5"><span className="material-symbols-outlined text-[14px]">functions</span>题目公式参考 <span className="rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">{mathChips.length}</span></span>
-                <span className="material-symbols-outlined text-[15px]">{showFormulaReference ? 'expand_less' : 'expand_more'}</span>
-              </button>
-
-              {/* 公式参考按需展开，避免压缩聊天区域 */}
-              {showFormulaReference && <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-surface-container-lowest/80 border border-outline-variant/30 max-h-[180px] overflow-hidden">
-              <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-surface-container-lowest/80 border border-outline-variant/30">
-                <div className="flex items-center justify-between gap-1 flex-wrap">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-on-surface">
-                    <span className="material-symbols-outlined text-[15px] text-primary">functions</span>
-                    <span>第 {questionNum || '当前'} 题公式快捷输入</span>
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-primary/10 text-primary font-bold">
+                  {/* 药丸 B：题干公式快捷参考 */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveAuxDrawer((prev) => (prev === 'formulas' ? null : 'formulas'))}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-medium transition-all duration-200 cursor-pointer border ${
+                      activeAuxDrawer === 'formulas'
+                        ? 'bg-primary text-on-primary border-primary shadow-2xs'
+                        : 'bg-surface-container-lowest/90 hover:bg-surface-container text-on-surface border-outline-variant/30'
+                    }`}
+                    title="展开/收起本题已知公式与选项参数快捷参考"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">functions</span>
+                    <span>题目公式</span>
+                    <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold ${
+                      activeAuxDrawer === 'formulas' ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                    }`}>
                       {mathChips.length}
                     </span>
-                  </div>
+                    <span className={`material-symbols-outlined text-[13px] transition-transform duration-200 ${activeAuxDrawer === 'formulas' ? 'rotate-180' : ''}`}>
+                      expand_more
+                    </span>
+                  </button>
+                </div>
 
-                  <div className="flex items-center gap-1">
-                    {/* 分类筛选 (若项目较多时展示) */}
-                    {mathChips.length > 3 && (
-                      <div className="hidden sm:flex items-center gap-0.5 text-[10px] bg-surface-container p-0.5 rounded-md">
-                        {[
-                          { id: 'all', label: '全部' },
-                          { id: 'core', label: '题干公式' },
-                          { id: 'option', label: '选项参数' }
-                        ].map((tab) => (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => setChipFilter(tab.id)}
-                            className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
-                              chipFilter === tab.id
-                                ? 'bg-surface-container-lowest text-primary font-bold shadow-2xs'
-                                : 'text-on-surface-variant hover:text-on-surface'
-                            }`}
-                          >
-                            {tab.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                <div className="flex items-center gap-1 text-[9.5px] text-outline font-mono">
+                  {elements.length > 0 && <span>画板 {elements.length} 项</span>}
+                </div>
+              </div>
 
-                    {/* AI 智能提取已知式按钮 */}
-                    <button
-                      type="button"
-                      onClick={handleAiExtractChips}
-                      disabled={isExtractingChips || isAgentRunning}
-                      className="px-2 py-0.5 rounded-md bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-medium border border-primary/20 transition flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                      title="由 AI 解析本题题干，原样提取题干中出现的已知式与选项参数（严守防作弊，严禁提供题外定理）"
-                    >
-                      <span className={`material-symbols-outlined text-[13px] ${isExtractingChips ? 'animate-spin' : ''}`}>
-                        {isExtractingChips ? 'sync' : 'auto_awesome'}
+              {/* 丝滑抽屉展开区 (AnimatePresence + Spring 物理弹簧过渡) */}
+              <AnimatePresence mode="wait">
+                {activeAuxDrawer === 'derivation' && (
+                  <motion.div
+                    key="derivation-dock"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ type: 'spring', bounce: 0.12, duration: 0.28 }}
+                    className="overflow-hidden border-b border-outline-variant/20 bg-surface-container-lowest/70 rounded-xl p-1 shadow-2xs"
+                  >
+                    <div className="flex items-center justify-between pb-1 px-1 text-[10px] text-outline border-b border-outline-variant/15 mb-1">
+                      <span className="font-semibold text-on-surface flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[13px] text-primary">calculate</span>
+                        推导语言与量词符号
                       </span>
-                      <span>{isExtractingChips ? 'AI 提取中...' : '✨ AI 提取已知式'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 公式快捷胶囊列表 */}
-                <div className="flex items-center gap-1.5 flex-wrap max-h-[105px] overflow-y-auto pr-0.5 select-none">
-                  {filteredChips.length === 0 ? (
-                    <div className="text-[11px] text-outline py-1 px-1 flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px]">info</span>
-                      <span>题干未检测到公式，可点击右上角「✨ AI 提取已知式」</span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveAuxDrawer(null)}
+                        className="text-outline hover:text-on-surface transition p-0.5 rounded cursor-pointer"
+                        title="收起推导工具坞"
+                      >
+                        <span className="material-symbols-outlined text-[13px]">close</span>
+                      </button>
                     </div>
-                  ) : (
-                    filteredChips.map((chip) => {
-                      const isAi = chip.id?.startsWith('chip_ai');
-                      const isOption = chip.category === 'option';
-                      const isCore = chip.category === 'core';
-                      return (
-                        <div
-                          key={chip.id}
-                          className={`group/chip inline-flex items-center rounded-md border text-[11px] transition shadow-2xs ${
-                            isAi
-                              ? 'border-purple-300 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20'
-                              : isOption
-                              ? 'border-blue-300/60 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-950/20'
-                              : 'border-outline-variant/40 bg-surface-container-lowest hover:border-primary/50'
-                          }`}
-                        >
-                          {/* 胶囊主干：点击填入口述输入框 */}
-                          <button
-                            type="button"
-                            onClick={() => handleAppendSpokenPrompt(chip)}
-                            disabled={isAgentRunning}
-                            className="px-2 py-0.5 flex items-center gap-1 font-mono text-[11px] text-on-surface hover:text-primary transition cursor-pointer truncate max-w-[210px]"
-                            title={`左键填入指令框：${chip.latex}`}
-                          >
-                            {isAi && (
-                              <span className="text-[9px] px-1 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 font-sans font-bold">
-                                AI
-                              </span>
-                            )}
-                            {isOption && !isAi && (
-                              <span className="text-[9px] px-1 rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 font-sans font-bold">
-                                选项
-                              </span>
-                            )}
-                            {isCore && !isAi && (
-                              <span className="text-[9px] px-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-sans font-bold">
-                                题干
-                              </span>
-                            )}
-                            <span className="truncate inline-flex items-center">
-                              {chip.latex ? <KatexInline math={chip.latex} /> : formatMathExpression(chip.label)}
-                            </span>
-                          </button>
+                    <MathDerivationDock
+                      onInsertPrompt={handleAppendSpokenPrompt}
+                      onWriteToBoard={(latex, label) => handleQuickWriteToBoard(latex, label)}
+                      onCopyLatex={(latex, label) => showToast(`已复制「${label}」LaTeX 符号`, 'info')}
+                    />
+                  </motion.div>
+                )}
 
-                          {/* 右侧快捷微操作：一键直接抄入画板 */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleQuickWriteToBoard(chip.latex, chip.label);
-                            }}
-                            disabled={isAgentRunning}
-                            className="px-1.5 py-0.5 bg-surface-container/60 hover:bg-primary hover:text-white text-on-surface-variant transition border-l border-outline-variant/30 cursor-pointer flex items-center gap-0.5 text-[10px]"
-                            title={`一键将「${chip.label || chip.latex}」抄入草稿画板与板书`}
-                          >
-                            <span className="material-symbols-outlined text-[12px]">edit_note</span>
-                            <span className="text-[9px] hidden sm:inline">抄入</span>
-                          </button>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div></div>}
+                {activeAuxDrawer === 'formulas' && (
+                  <motion.div
+                    key="formulas-dock"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ type: 'spring', bounce: 0.12, duration: 0.28 }}
+                    className="overflow-hidden border-b border-outline-variant/20 bg-surface-container-lowest/70 rounded-xl p-2 shadow-2xs space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-1 flex-wrap pb-1 border-b border-outline-variant/15">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-on-surface">
+                        <span className="material-symbols-outlined text-[14px] text-primary">functions</span>
+                        <span>第 {questionNum || '当前'} 题公式快捷输入</span>
+                        <span className="px-1.5 py-0.2 rounded-full text-[9.5px] font-mono bg-primary/10 text-primary font-bold">
+                          {mathChips.length}
+                        </span>
+                      </div>
 
-              <div ref={agentChatScrollRef} role="log" aria-live="polite" aria-label="草稿纸助手对话" className="flex-1 min-h-[72px] overflow-y-auto px-1 py-2 space-y-3 select-text">
-                {agentChatMessages.length === 0 ? (
-                  <div className="h-full min-h-[100px] flex flex-col items-center justify-center gap-2 text-center px-2">
-                    <div className="w-9 h-9 rounded-2xl bg-primary/10 text-primary flex items-center justify-center"><span className="material-symbols-outlined text-[20px]">draw</span></div>
-                    <div><div className="text-[12px] font-semibold text-on-surface">草稿纸助手已就绪</div><div className="mt-1 text-[10px] leading-relaxed text-on-surface-variant">基于真实 Agent Loop 执行引擎：按步思考、调用工具操作草稿纸。</div></div>
-                    <div className="flex flex-wrap justify-center gap-1.5 mt-1">
-                      {[
-                        { label: '画坐标系', prompt: '帮我画一个标准的直角坐标系' },
-                        { label: '画抛物线', prompt: '画一个直角坐标系并绘制二次函数 y=x^2 抛物线' },
-                        { label: '写下公式', prompt: '帮我把公式写到草稿纸上：' }
-                      ].map((suggestion) => <button key={suggestion.label} type="button" onClick={() => setSpokenInput(suggestion.prompt)} disabled={isAgentRunning} className="rounded-full border border-primary/15 bg-surface-container-lowest/80 px-2.5 py-1 text-[10px] text-primary hover:bg-primary/10 transition disabled:opacity-40">{suggestion.label}</button>)}
-                    </div>
-                    <span className="text-[9px] text-outline mt-1">真实 Loop 循环 · 工具自主调用 · 支持随时打断</span>
-                  </div>
-                ) : agentChatMessages.map((message) => {
-                  const hasThoughtOrTools = Boolean(message.reasoningContent || (message.toolCalls && message.toolCalls.length > 0));
-                  const isThoughtExpanded = expandedThoughts[message.id] !== undefined
-                    ? expandedThoughts[message.id]
-                    : (!message.isCompleted && hasThoughtOrTools);
-
-                  return (
-                    <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[94%] rounded-xl px-3 py-2 text-[11px] leading-relaxed break-words select-text ${
-                        message.role === 'user'
-                          ? 'bg-primary text-on-primary rounded-2xl rounded-br-sm shadow-sm'
-                          : message.status === 'blocked'
-                          ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/50 rounded-bl-sm'
-                          : message.status === 'error'
-                          ? 'bg-error/10 text-error border border-error/20 rounded-bl-sm'
-                          : 'bg-white/85 dark:bg-surface-container-high/70 text-on-surface rounded-2xl rounded-bl-sm shadow-xs border border-outline-variant/20'
-                      }`}>
-                        {message.role !== 'user' && (
-                          <div className="flex items-center justify-between text-[10px] font-semibold text-on-surface-variant mb-1.5 pb-1 border-b border-outline-variant/20">
-                            <div className="flex items-center gap-1">
-                              <span className="material-symbols-outlined text-[13px] text-primary">draw</span>
-                              <span>{message.status === 'blocked' ? '安全提示' : message.status === 'error' ? '执行未完成' : '草稿纸助教'}</span>
-                            </div>
-                            {message.metrics && (
-                              <span className="text-[9px] text-outline font-normal font-mono">
-                                迭代 {message.metrics.iteration || 1} 轮 · 共 {message.metrics.totalTokens || (message.metrics.inputTokens + message.metrics.outputTokens) || 0} tok
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* 思考过程与工具调用过程 (可收缩淡色文字) */}
-                        {message.role !== 'user' && hasThoughtOrTools && (
-                          <div className="mb-2 rounded-xl border border-outline-variant/30 bg-surface-container-low/50 overflow-hidden text-[10.5px]">
-                            <button
-                              type="button"
-                              onClick={() => toggleThoughtExpanded(message.id)}
-                              className="w-full flex items-center justify-between px-2.5 py-1.5 hover:bg-surface-container-high/40 transition cursor-pointer text-on-surface-variant font-medium select-none"
-                              title="点击折叠或展开思考过程与工具调用细节"
-                            >
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span className={`material-symbols-outlined text-[14px] ${!message.isCompleted ? 'text-primary animate-pulse' : 'text-outline'}`}>
-                                  psychology
-                                </span>
-                                <span className="truncate">
-                                  {!message.isCompleted
-                                    ? '深度思考与工具调用中…'
-                                    : `深度思考过程${message.toolCalls?.length ? ` · 调用了 ${message.toolCalls.length} 项工具` : ''}`}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1 text-[10px] text-outline shrink-0">
-                                {!message.isCompleted && (
-                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-ping mr-1" />
-                                )}
-                                <span
-                                  className="material-symbols-outlined text-[14px] transition-transform duration-200"
-                                  style={{ transform: isThoughtExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                                >
-                                  expand_more
-                                </span>
-                              </div>
-                            </button>
-
-                            {isThoughtExpanded && (
-                              <div className="px-2.5 pb-2 pt-1 border-t border-outline-variant/15 space-y-2">
-                                {/* 工具调用药丸徽标 */}
-                                {message.toolCalls && message.toolCalls.length > 0 && (
-                                  <div className="flex flex-wrap gap-1">
-                                    {message.toolCalls.map((tc, idx) => {
-                                      const isExecuting = tc.status === 'executing';
-                                      const toolLabelMap = {
-                                        read_scratchpad: '查阅画板',
-                                        write_math_derivation: '誊写板书',
-                                        draw_geometry_or_plot: '绘制图表',
-                                        update_or_substitute: '等量代换',
-                                        delete_or_clear: '擦除清空'
-                                      };
-                                      const label = toolLabelMap[tc.name] || tc.name;
-                                      return (
-                                        <span
-                                          key={tc.id || idx}
-                                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9.5px] border ${
-                                            isExecuting
-                                              ? 'bg-primary/10 border-primary/30 text-primary animate-pulse'
-                                              : 'bg-surface-container-high/60 border-outline-variant/30 text-on-surface-variant'
-                                          }`}
-                                          title={tc.result ? (typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result)) : tc.name}
-                                        >
-                                          <span className="material-symbols-outlined text-[11px]">
-                                            {isExecuting ? 'sync' : 'build'}
-                                          </span>
-                                          <span>{label}</span>
-                                          {isExecuting && <span className="animate-spin text-[9px]">◌</span>}
-                                        </span>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-
-                                {/* 淡色思考内容流 */}
-                                {message.reasoningContent && (
-                                  <div className="font-mono text-on-surface-variant/75 leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap select-text pr-1 text-[10px] bg-surface-container-lowest/60 p-2 rounded-lg border border-outline-variant/15">
-                                    {message.reasoningContent}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* 正式回答内容 (支持 Markdown & KaTeX 数学公式渲染) */}
-                        {message.role === 'user' ? (
-                          <div className="text-[11px] leading-relaxed whitespace-pre-wrap">{message.content}</div>
-                        ) : (
-                          <div className="space-y-1">
-                            {message.content ? (
-                              <MathMarkdown content={message.content} className="text-[11px] leading-relaxed select-text" />
-                            ) : (
-                              !message.isCompleted && (
-                                <div className="flex items-center gap-1.5 text-[10.5px] text-on-surface-variant/70 italic py-0.5">
-                                  <span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>
-                                  <span>正在整理最终板书与答复…</span>
-                                </div>
-                              )
-                            )}
-                            {message.isAborted && (
-                              <div className="inline-flex items-center gap-1 text-[9.5px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                                <span className="material-symbols-outlined text-[12px]">cancel</span>
-                                <span>已由用户中断回答</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {message.details?.length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {message.details.map((detail) => (
-                              <span key={detail} className="rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px]">
-                                {detail}
-                              </span>
+                      <div className="flex items-center gap-1">
+                        {mathChips.length > 3 && (
+                          <div className="flex items-center gap-0.5 text-[9.5px] bg-surface-container p-0.5 rounded-md">
+                            {[
+                              { id: 'all', label: '全部' },
+                              { id: 'core', label: '题干' },
+                              { id: 'option', label: '选项' }
+                            ].map((tab) => (
+                              <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => setChipFilter(tab.id)}
+                                className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
+                                  chipFilter === tab.id
+                                    ? 'bg-surface-container-lowest text-primary font-bold shadow-2xs'
+                                    : 'text-on-surface-variant hover:text-on-surface'
+                                }`}
+                              >
+                                {tab.label}
+                              </button>
                             ))}
                           </div>
                         )}
+
+                        <button
+                          type="button"
+                          onClick={handleAiExtractChips}
+                          disabled={isExtractingChips || isAgentRunning}
+                          className="px-2 py-0.5 rounded-md bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-medium border border-primary/20 transition flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                          title="由 AI 解析本题题干，原样提取题干中出现的已知式与选项参数（严守防作弊，严禁提供题外定理）"
+                        >
+                          <span className={`material-symbols-outlined text-[12px] ${isExtractingChips ? 'animate-spin' : ''}`}>
+                            {isExtractingChips ? 'sync' : 'auto_awesome'}
+                          </span>
+                          <span>{isExtractingChips ? '提取中...' : 'AI 提取已知式'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setActiveAuxDrawer(null)}
+                          className="text-outline hover:text-on-surface transition p-0.5 rounded cursor-pointer ml-1"
+                          title="收起公式参考"
+                        >
+                          <span className="material-symbols-outlined text-[13px]">close</span>
+                        </button>
                       </div>
                     </div>
-                  );
-                })}
-                {isAgentRunning && !agentChatMessages.some((m) => m.role === 'assistant' && !m.isCompleted) && (
-                  <div className="flex justify-start">
-                    <div className="rounded-xl rounded-bl-sm bg-surface-container px-2.5 py-1.5 text-[10px] text-primary flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>
-                      {agentLoopStage || 'Agent Loop 正在初始化…'}
+
+                    {/* 公式快捷胶囊列表 */}
+                    <div className="flex items-center gap-1.5 flex-wrap max-h-[110px] overflow-y-auto pr-0.5 select-none">
+                      {filteredChips.length === 0 ? (
+                        <div className="text-[10.5px] text-outline py-1 px-1 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[13px]">info</span>
+                          <span>题干未检测到公式，可点击右上角「AI 提取已知式」</span>
+                        </div>
+                      ) : (
+                        filteredChips.map((chip) => {
+                          const isAi = chip.id?.startsWith('chip_ai');
+                          const isOption = chip.category === 'option';
+                          const isCore = chip.category === 'core';
+                          return (
+                            <div
+                              key={chip.id}
+                              className={`group/chip inline-flex items-center rounded-lg border text-[10.5px] transition shadow-2xs overflow-hidden ${
+                                isAi
+                                  ? 'border-purple-300 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20'
+                                  : isOption
+                                  ? 'border-blue-300/60 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-950/20'
+                                  : 'border-outline-variant/40 bg-surface-container-lowest hover:border-primary/50'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleAppendSpokenPrompt(chip)}
+                                disabled={isAgentRunning}
+                                className="px-2 py-0.5 flex items-center gap-1 font-mono text-[10.5px] text-on-surface hover:text-primary transition cursor-pointer truncate max-w-[210px]"
+                                title={`左键填入指令框：${chip.latex}`}
+                              >
+                                {isAi && (
+                                  <span className="text-[9px] px-1 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 font-sans font-bold">
+                                    AI
+                                  </span>
+                                )}
+                                {isOption && !isAi && (
+                                  <span className="text-[9px] px-1 rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 font-sans font-bold">
+                                    选项
+                                  </span>
+                                )}
+                                {isCore && !isAi && (
+                                  <span className="text-[9px] px-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-sans font-bold">
+                                    题干
+                                  </span>
+                                )}
+                                <span className="truncate inline-flex items-center">
+                                  {chip.latex ? <KatexInline math={chip.latex} /> : formatMathExpression(chip.label)}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleQuickWriteToBoard(chip.latex, chip.label);
+                                }}
+                                disabled={isAgentRunning}
+                                className="px-1.5 py-0.5 bg-surface-container/60 hover:bg-primary hover:text-white text-on-surface-variant transition border-l border-outline-variant/30 cursor-pointer flex items-center gap-0.5 text-[9.5px]"
+                                title={`一键将「${chip.label || chip.latex}」抄入草稿画板与板书`}
+                              >
+                                <span className="material-symbols-outlined text-[11px]">edit_note</span>
+                                <span className="hidden sm:inline">抄入</span>
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* 中部对话流视口：开阔明朗，拥有主要纵向空间 */}
+              <div ref={agentChatScrollRef} role="log" aria-live="polite" aria-label="草稿纸助手对话" className="flex-1 min-h-[90px] overflow-y-auto px-1 py-1.5 space-y-2.5 select-text">
+                {agentChatMessages.length === 0 ? (
+                  <div className="h-full min-h-[140px] flex flex-col items-center justify-center gap-2 text-center px-3 py-4">
+                    <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-2xs">
+                      <span className="material-symbols-outlined text-[22px]">draw</span>
+                    </div>
+                    <div>
+                      <div className="text-[12.5px] font-semibold text-on-surface">草稿纸助教就绪</div>
+                      <div className="mt-1 text-[10.5px] leading-relaxed text-on-surface-variant max-w-[280px]">
+                        基于真实 Agent Loop 执行引擎：按步思考，自主调用查阅、誊写板书、绘制曲线等工具。
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-1.5 mt-1.5">
+                      {[
+                        { label: '📐 画坐标系', prompt: '帮我画一个标准的直角坐标系' },
+                        { label: '📈 画抛物线', prompt: '画一个直角坐标系并绘制二次函数 y=x^2 抛物线' },
+                        { label: '📝 誊写公式', prompt: '帮我把公式规范写到草稿纸上：' }
+                      ].map((suggestion) => (
+                        <button
+                          key={suggestion.label}
+                          type="button"
+                          onClick={() => setSpokenInput(suggestion.prompt)}
+                          disabled={isAgentRunning}
+                          className="rounded-full border border-primary/20 bg-surface-container-lowest/90 px-2.5 py-1 text-[10px] text-primary hover:bg-primary/10 transition-all duration-150 disabled:opacity-40 shadow-2xs cursor-pointer"
+                        >
+                          {suggestion.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
+                ) : (
+                  agentChatMessages.map((message) => {
+                    const hasThoughtOrTools = Boolean(message.reasoningContent || (message.toolCalls && message.toolCalls.length > 0));
+                    const isThoughtExpanded = expandedThoughts[message.id] !== undefined
+                      ? expandedThoughts[message.id]
+                      : (!message.isCompleted && hasThoughtOrTools);
+
+                    return (
+                      <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[94%] rounded-2xl px-3 py-2 text-[11px] leading-relaxed break-words select-text shadow-2xs ${
+                          message.role === 'user'
+                            ? 'bg-primary text-on-primary rounded-br-xs shadow-sm'
+                            : message.status === 'blocked'
+                            ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/50 rounded-bl-xs'
+                            : message.status === 'error'
+                            ? 'bg-error/10 text-error border border-error/20 rounded-bl-xs'
+                            : 'bg-surface-container-lowest text-on-surface rounded-bl-xs border border-outline-variant/25'
+                        }`}>
+                          {message.role !== 'user' && (
+                            <div className="flex items-center justify-between text-[10px] font-semibold text-on-surface-variant mb-1 pb-1 border-b border-outline-variant/15">
+                              <div className="flex items-center gap-1">
+                                <span className="material-symbols-outlined text-[13px] text-primary">draw</span>
+                                <span>{message.status === 'blocked' ? '安全提示' : message.status === 'error' ? '执行未完成' : '草稿纸助教'}</span>
+                              </div>
+                              {message.metrics && (
+                                <span className="text-[9px] text-outline font-normal font-mono">
+                                  {message.metrics.iteration || 1} 轮 · 共 {message.metrics.totalTokens || (message.metrics.inputTokens + message.metrics.outputTokens) || 0} tok
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* 思考过程与工具调用过程 (可收缩淡色文字，带 Spring 动效) */}
+                          {message.role !== 'user' && hasThoughtOrTools && (
+                            <div className="mb-2 rounded-xl border border-outline-variant/25 bg-surface-container-low/40 overflow-hidden text-[10px]">
+                              <button
+                                type="button"
+                                onClick={() => toggleThoughtExpanded(message.id)}
+                                className="w-full flex items-center justify-between px-2.5 py-1.5 hover:bg-surface-container-high/40 transition cursor-pointer text-on-surface-variant font-medium select-none"
+                                title="点击折叠或展开深度思考与工具调用过程"
+                              >
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={`material-symbols-outlined text-[13px] ${!message.isCompleted ? 'text-primary animate-pulse' : 'text-outline'}`}>
+                                    psychology
+                                  </span>
+                                  <span className="truncate">
+                                    {!message.isCompleted
+                                      ? '深度思考与工具调用中…'
+                                      : `深度思考过程${message.toolCalls?.length ? ` · 调用了 ${message.toolCalls.length} 项工具` : ''}`}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1 text-[9.5px] text-outline shrink-0">
+                                  {!message.isCompleted && (
+                                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-ping mr-1" />
+                                  )}
+                                  <span
+                                    className="material-symbols-outlined text-[13px] transition-transform duration-200"
+                                    style={{ transform: isThoughtExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                                  >
+                                    expand_more
+                                  </span>
+                                </div>
+                              </button>
+
+                              {isThoughtExpanded && (
+                                <div className="px-2.5 pb-2 pt-1 border-t border-outline-variant/15 space-y-1.5">
+                                  {/* 工具调用药丸徽标 */}
+                                  {message.toolCalls && message.toolCalls.length > 0 && (
+                                    <div className="flex flex-wrap gap-1">
+                                      {message.toolCalls.map((tc, idx) => {
+                                        const isExecuting = tc.status === 'executing';
+                                        const toolLabelMap = {
+                                          read_scratchpad: '查阅画板',
+                                          write_math_derivation: '誊写板书',
+                                          draw_geometry_or_plot: '绘制图表',
+                                          update_or_substitute: '等量代换',
+                                          delete_or_clear: '擦除清空'
+                                        };
+                                        const label = toolLabelMap[tc.name] || tc.name;
+                                        return (
+                                          <span
+                                            key={tc.id || idx}
+                                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] border ${
+                                              isExecuting
+                                                ? 'bg-primary/10 border-primary/30 text-primary animate-pulse'
+                                                : 'bg-surface-container-high/60 border-outline-variant/30 text-on-surface-variant'
+                                            }`}
+                                            title={tc.result ? (typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result)) : tc.name}
+                                          >
+                                            <span className="material-symbols-outlined text-[10px]">
+                                              {isExecuting ? 'sync' : 'build'}
+                                            </span>
+                                            <span>{label}</span>
+                                            {isExecuting && <span className="animate-spin text-[8px]">◌</span>}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {/* 淡色思考内容流 */}
+                                  {message.reasoningContent && (
+                                    <div className="font-mono text-on-surface-variant/75 leading-relaxed max-h-40 overflow-y-auto whitespace-pre-wrap select-text pr-1 text-[9.5px] bg-surface-container-lowest/60 p-2 rounded-lg border border-outline-variant/15">
+                                      {message.reasoningContent}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* 正式回答内容 (支持 Markdown & KaTeX 数学公式渲染) */}
+                          {message.role === 'user' ? (
+                            <div className="text-[11px] leading-relaxed whitespace-pre-wrap">{message.content}</div>
+                          ) : (
+                            <div className="space-y-1">
+                              {message.content ? (
+                                <MathMarkdown content={message.content} className="text-[11px] leading-relaxed select-text" />
+                              ) : (
+                                !message.isCompleted && (
+                                  <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/70 italic py-0.5">
+                                    <span className="material-symbols-outlined text-[12px] animate-spin">progress_activity</span>
+                                    <span>正在整理最终板书与答复…</span>
+                                  </div>
+                                )
+                              )}
+                              {message.isAborted && (
+                                <div className="inline-flex items-center gap-1 text-[9px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                  <span className="material-symbols-outlined text-[11px]">cancel</span>
+                                  <span>已由用户中断回答</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
 
-              {/* 口述/需求输入框 */}
-              <div className="relative">
-                <label htmlFor="scratchpad-ai-prompt" className="sr-only">草稿纸 AI 帮画或帮写指令</label>
-                <textarea
-                  id="scratchpad-ai-prompt"
-                  value={spokenInput}
-                  onChange={(e) => setSpokenInput(e.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape' && isAgentRunning) {
-                      event.preventDefault();
-                      handleAbortAgentLoop();
-                    } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                      event.preventDefault();
-                      if (!isAgentRunning) {
-                        handleTriggerAgentLoop();
+              {/* 模块 3：一体化 AI Command Deck 底座 (输入框 + 内嵌状态栏 + 操作栏浑然一体) */}
+              <div className="relative rounded-2xl border border-outline-variant/35 bg-surface-container-lowest/90 backdrop-blur-xs p-2 shadow-xs focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 transition-all duration-200 flex flex-col gap-1.5">
+                {/* 顶层：极简舒适的输入文本框 */}
+                <div className="relative">
+                  <label htmlFor="scratchpad-ai-prompt" className="sr-only">草稿纸 AI 帮画或帮写指令</label>
+                  <textarea
+                    id="scratchpad-ai-prompt"
+                    value={spokenInput}
+                    onChange={(e) => setSpokenInput(e.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape' && isAgentRunning) {
+                        event.preventDefault();
+                        handleAbortAgentLoop();
+                      } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        if (!isAgentRunning) {
+                          handleTriggerAgentLoop();
+                        }
                       }
-                    }
-                  }}
-                  placeholder={isAgentRunning ? "草稿纸助教正在执行中… 按 Esc 或点击下方停止按钮可打断" : "聊聊天，或告诉我画什么、誊写什么… Enter 发送，Shift+Enter 换行"}
-                  rows={2}
-                  className="w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/40 text-[12px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary resize-none leading-relaxed pr-6"
-                />
-                {spokenInput && !isAgentRunning && (
-                  <button
-                    type="button"
-                    onClick={() => setSpokenInput('')}
-                    className="absolute top-2 right-2 p-0.5 rounded-full hover:bg-surface-container text-outline hover:text-on-surface transition cursor-pointer"
-                    title="清空当前输入框"
-                  >
-                    <span className="material-symbols-outlined text-[13px]">close</span>
-                  </button>
-                )}
-              </div>
+                    }}
+                    placeholder={isAgentRunning ? "草稿纸助教正在执行中… 按 Esc 或点击下方停止按钮可打断" : "聊聊天，或告诉我画什么、誊写什么… Enter 发送，Shift+Enter 换行"}
+                    rows={2}
+                    className="w-full bg-transparent text-[11.5px] text-on-surface placeholder:text-outline/70 focus:outline-none resize-none leading-relaxed pr-6"
+                  />
+                  {spokenInput && !isAgentRunning && (
+                    <button
+                      type="button"
+                      onClick={() => setSpokenInput('')}
+                      className="absolute top-0 right-0 p-0.5 rounded-full hover:bg-surface-container text-outline hover:text-on-surface transition cursor-pointer"
+                      title="清空当前输入框"
+                    >
+                      <span className="material-symbols-outlined text-[12px]">close</span>
+                    </button>
+                  )}
+                </div>
 
-              {/* 实时 Status Bar：轮次、消耗 Token、Token 速度、上下文占用 */}
-              <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-surface-container-low/70 border border-outline-variant/30 text-[10px] text-on-surface-variant select-none gap-2">
-                {/* 状态指示与轮次 */}
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="flex items-center gap-1 shrink-0">
-                    <span className={`inline-block w-2 h-2 rounded-full ${
+                {/* 中层：内嵌式 Status Bar 监控指示带 */}
+                <div className="flex items-center justify-between px-2 py-0.5 rounded-lg bg-surface-container-low/60 border border-outline-variant/20 text-[9.5px] text-on-surface-variant font-mono select-none gap-2">
+                  {/* 状态与轮次 */}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full ${
                       agentMetrics.isLive
                         ? 'bg-emerald-500 animate-pulse'
                         : 'bg-outline/40'
                     }`} />
-                    <span className="font-semibold text-on-surface text-[10px]">
+                    <span className="font-semibold text-on-surface text-[9px]">
                       {agentMetrics.isLive ? 'Loop 运行中' : '就绪'}
                     </span>
-                  </div>
-
-                  <span className="text-outline-variant/60">|</span>
-
-                  <div className="flex items-center gap-1 shrink-0" title="当前执行迭代轮次 / 最大允许轮数">
+                    <span className="text-outline-variant/60">·</span>
                     <span className="text-outline">轮次:</span>
-                    <span className="font-mono font-medium text-primary">
-                      {agentMetrics.iteration}
-                    </span>
-                    <span className="text-outline font-mono">/{agentMetrics.maxIterations || 8}</span>
-                  </div>
-                </div>
-
-                {/* Token 消耗、速度与上下文占用 */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Token 消耗 */}
-                  <div
-                    className="flex items-center gap-1"
-                    title={`Token 消耗: 总计 ${agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)} (输入: ${agentMetrics.inputTokens} / 输出: ${agentMetrics.outputTokens})`}
-                  >
-                    <span className="text-outline">消耗:</span>
-                    <span className="font-mono font-medium text-on-surface">
-                      {agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)}
-                    </span>
-                    <span className="text-[9px] text-outline font-mono hidden sm:inline">
-                      ({agentMetrics.inputTokens}入/{agentMetrics.outputTokens}出)
-                    </span>
+                    <span className="font-medium text-primary">{agentMetrics.iteration}</span>
+                    <span className="text-outline">/{agentMetrics.maxIterations || 8}</span>
                   </div>
 
-                  <span className="text-outline-variant/60">|</span>
-
-                  {/* Token 速度 */}
-                  <div
-                    className="flex items-center gap-1"
-                    title="Token 处理速度 (Tokens / 秒)"
-                  >
-                    <span className="text-outline">速度:</span>
-                    <span className={`font-mono font-medium ${agentMetrics.tokenSpeed > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-on-surface'}`}>
-                      {agentMetrics.tokenSpeed || 0}
-                    </span>
-                    <span className="text-[9px] text-outline font-mono">tok/s</span>
-                  </div>
-
-                  <span className="text-outline-variant/60">|</span>
-
-                  {/* 上下文占用 */}
-                  <div
-                    className="flex items-center gap-1.5"
-                    title={`当前上下文占用: ${agentMetrics.contextTokens || agentMetrics.inputTokens || 0} / ${agentMetrics.maxContextTokens || 131072} Tokens (${contextPercent}%)`}
-                  >
-                    <span className="text-outline">上下文:</span>
-                    <div className="w-8 h-1.5 bg-outline-variant/30 rounded-full overflow-hidden flex items-center">
-                      <div
-                        className={`h-full transition-all duration-300 rounded-full ${
-                          contextPercent > 80 ? 'bg-error' : contextPercent > 50 ? 'bg-amber-500' : 'bg-primary'
-                        }`}
-                        style={{ width: `${contextPercent}%` }}
-                      />
+                  {/* Token 消耗、速度与上下文 */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-0.5" title={`Token 消耗: 总计 ${agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)} (输入: ${agentMetrics.inputTokens} / 输出: ${agentMetrics.outputTokens})`}>
+                      <span className="text-outline">消耗:</span>
+                      <span className="font-medium text-on-surface">
+                        {agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)}
+                      </span>
                     </div>
-                    <span className="font-mono font-medium text-on-surface">
-                      {contextPercent}%
-                    </span>
+
+                    <span className="text-outline-variant/60">·</span>
+
+                    <div className="flex items-center gap-0.5" title="处理速度 (Tokens / 秒)">
+                      <span className="text-outline">速度:</span>
+                      <span className={`font-medium ${agentMetrics.tokenSpeed > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-on-surface'}`}>
+                        {agentMetrics.tokenSpeed || 0}
+                      </span>
+                      <span className="text-[8.5px] text-outline">tok/s</span>
+                    </div>
+
+                    <span className="text-outline-variant/60">·</span>
+
+                    <div className="flex items-center gap-1" title={`当前上下文占用: ${agentMetrics.contextTokens || agentMetrics.inputTokens || 0} / ${agentMetrics.maxContextTokens || 131072} Tokens (${contextPercent}%)`}>
+                      <span className="text-outline">上下文:</span>
+                      <div className="w-6 h-1 bg-outline-variant/30 rounded-full overflow-hidden flex items-center">
+                        <div
+                          className={`h-full transition-all duration-300 rounded-full ${
+                            contextPercent > 80 ? 'bg-error' : contextPercent > 50 ? 'bg-amber-500' : 'bg-primary'
+                          }`}
+                          style={{ width: `${contextPercent}%` }}
+                        />
+                      </div>
+                      <span className="font-medium text-on-surface">{contextPercent}%</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Agent 触发按钮与操作状态 */}
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] text-outline truncate" title={isAgentRunning ? agentLoopStage : '只操作草稿纸，不填写答题区'}>
-                  {isAgentRunning ? (agentLoopStage || 'Agent Loop 正在思考并操作…') : '只操作草稿纸，不填写答题区'}
-                </span>
+                {/* 底层：辅助提示与操作主按钮 */}
+                <div className="flex items-center justify-between pt-0.5">
+                  <span className="text-[10px] text-outline truncate max-w-[200px]" title={isAgentRunning ? agentLoopStage : '只操作草稿纸，不填写答题区'}>
+                    {isAgentRunning ? (agentLoopStage || 'Agent Loop 思考并操作中…') : '只操作草稿纸，不代答答题区'}
+                  </span>
 
-                {isAgentRunning ? (
-                  <button
-                    type="button"
-                    onClick={handleAbortAgentLoop}
-                    className="px-3 py-1.5 rounded-lg bg-error hover:bg-error/90 text-white text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer shadow-xs shrink-0"
-                    title="立即中断当前思考与画板操作"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">stop_circle</span>
-                    <span>停止执行</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleTriggerAgentLoop()}
-                    disabled={!spokenInput.trim()}
-                    className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-40 shadow-xs shrink-0"
-                  >
-                    <span className="material-symbols-outlined text-[13px]">
-                      auto_fix_high
-                    </span>
-                    <span>发送并操作草稿纸</span>
-                  </button>
-                )}
+                  {isAgentRunning ? (
+                    <button
+                      type="button"
+                      onClick={handleAbortAgentLoop}
+                      className="px-3 py-1 rounded-xl bg-error hover:bg-error/90 text-white text-[11px] font-semibold transition-all duration-150 flex items-center gap-1 cursor-pointer shadow-xs shrink-0 animate-pulse"
+                      title="立即中断当前思考与画板操作"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">stop_circle</span>
+                      <span>停止执行</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleTriggerAgentLoop()}
+                      disabled={!spokenInput.trim()}
+                      className="px-3.5 py-1 rounded-xl bg-primary hover:bg-primary/90 text-on-primary text-[11px] font-semibold transition-all duration-150 flex items-center gap-1 cursor-pointer disabled:opacity-40 shadow-xs shrink-0"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">
+                        auto_fix_high
+                      </span>
+                      <span>发送并操作草稿纸</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
