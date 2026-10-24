@@ -1211,6 +1211,30 @@ export default function ScratchpadCanvas({
     });
   }, [elements]);
 
+
+  // ==================== 统一 UI 弹窗与 Toast 状态 ====================
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: '确认',
+    confirmType: 'danger',
+    onConfirm: () => {}
+  });
+
+  const [toast, setToast] = useState({
+    show: false,
+    message: '',
+    type: 'info'
+  });
+
+  const showToast = useCallback((message, type = 'info') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast((prev) => ({ ...prev, show: false }));
+    }, 3500);
+  }, []);
+
   // ==================== Agent Loop 状态 ====================
   const [isAssistantCollapsed, setIsAssistantCollapsed] = useState(false);
   const [mobileWorkspaceTab, setMobileWorkspaceTab] = useState('canvas');
@@ -1313,28 +1337,6 @@ export default function ScratchpadCanvas({
     if (chat) chat.scrollTop = chat.scrollHeight;
   }, [agentChatMessages.length, isAgentRunning, agentLoopStage]);
 
-  // ==================== 统一 UI 弹窗与 Toast 状态 ====================
-  const [confirmDialog, setConfirmDialog] = useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    confirmText: '确认',
-    confirmType: 'danger',
-    onConfirm: () => {}
-  });
-
-  const [toast, setToast] = useState({
-    show: false,
-    message: '',
-    type: 'info'
-  });
-
-  const showToast = useCallback((message, type = 'info') => {
-    setToast({ show: true, message, type });
-    setTimeout(() => {
-      setToast((prev) => ({ ...prev, show: false }));
-    }, 3500);
-  }, []);
 
   // ==================== 画板尺寸自适应与高分辨率适配 ====================
   const resizeCanvas = useCallback(() => {
