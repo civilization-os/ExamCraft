@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.3"><img src="https://img.shields.io/badge/Release-v1.2.3-blue.svg?logo=github" alt="Release v1.2.3"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.4"><img src="https://img.shields.io/badge/Release-v1.2.4-blue.svg?logo=github" alt="Release v1.2.4"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -69,11 +69,11 @@
     - 思考阶段默认展开直观反馈，最终总结板书回答时自动优雅折叠，用户可随时一键点击展开/收起；
   - **全链路随时打断机制 (AbortController)**：
     - 支持用户在思考或调用工具的中途随时打断，前端停止按钮、Esc 快捷键与后端 SSE 数据流即时取消；
-  - **聊天框底部实时 Status Bar 性能仪表盘**：
-    - **轮次 (Iteration)**：实时追踪当前执行轮次与上限（如 `1/8`）；
-    - **消耗 Token**：动态统计总 Token 消耗及细分指标（`总消耗 (输入/输出)`）；
-    - **Token 速度**：实时测算并高亮展示输出速率（`tok/s`）；
-    - **上下文占用 (Context %)**：直观展示当前上下文占模型窗口容量的百分比及微型进度条（如 `1.2k/128k`），状态一目了然；
+  - **聊天框底部实时 Status Bar 性能仪表盘 (v1.2.4)**：
+    - **对话轮次 (Turns)**：真实反映会话历史进程（如 `第 1 轮`、`第 2 轮`），彻底废除误导性的内部迭代限制标识；
+    - **工具调用统计 (Tool Calls)**：清晰统计本轮执行的工具调用次数（如 `调用: 0 次` / `调用: 1 次`）及详细工具项；
+    - **Token 消耗与速度**：动态统计总 Token 消耗及实时生成速率（`tok/s`）；
+    - **上下文占用与流式生成动效条 (Context & Live Shimmer)**：将全会话历史、题目与输出纳入上下文精确测算（支持如 `0.8%` 精确百分比），且在助教输出与思考时配备实时微光脉冲流光动效；
   - **遵循 Motion 与 UI Motion Atlas 空间动效重构 (v1.2.1)** 🆕：
     - **消除纵向拥挤堆叠**：将推导语言坞与题干公式参考重构为顶栏轻量药丸胶囊（Pill Switcher），默认收缩不占高度，对话视口空间扩大 80% 以上；
     - **Spring 物理弹簧抽屉 (AnimatePresence)**：点击药丸时平滑下拉展开对应工具坞，再次点击丝滑回弹收缩；
@@ -86,7 +86,7 @@
 - **全场景同步与统计**：
   - 访客（Guest）模式与注册账户全兼容，支持本地持久化与云端保存；
   - 个人中心一键汇聚生成试卷数、实战模考交卷数与错题本积累进度；
-- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.3`）。
+- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.4`）。
 
 ### 4. 专注模式在线答题考场 (Focus Mode Exam Room)
 - **多端实时答题持久化同步 (Zustand + Cloud Real-time Debounced Sync)** 🆕：
