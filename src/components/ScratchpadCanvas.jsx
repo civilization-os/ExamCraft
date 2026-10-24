@@ -1260,7 +1260,7 @@ export default function ScratchpadCanvas({
 
   const [agentMetrics, setAgentMetrics] = useState({
     iteration: 1,
-    maxIterations: 8,
+    toolCallsCount: 0,
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
@@ -1279,12 +1279,25 @@ export default function ScratchpadCanvas({
     }));
   }, []);
 
-  const contextPercent = useMemo(() => {
-    const used = agentMetrics.contextTokens || agentMetrics.inputTokens || 0;
+  // 当前会话的真实对话轮次（由历史用户问题数量确定，完全由上下文与消息历史驱动，绝无假上限）
+  const currentTurnNumber = useMemo(() => {
+    const userMsgCount = agentChatMessages.filter((m) => m.role === 'user').length;
+    return isAgentRunning ? userMsgCount : Math.max(1, userMsgCount);
+  }, [agentChatMessages, isAgentRunning]);
+
+  // 上下文占用真实比例与展示格式化
+  const contextRatio = useMemo(() => {
+    const used = agentMetrics.contextTokens || agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens) || 0;
     const max = agentMetrics.maxContextTokens || 131072;
-    if (!max) return 0;
-    return Math.min(100, Math.max(0, Math.round((used / max) * 100)));
-  }, [agentMetrics.contextTokens, agentMetrics.inputTokens, agentMetrics.maxContextTokens]);
+    if (!max || used <= 0) return 0;
+    return Math.min(100, (used / max) * 100);
+  }, [agentMetrics.contextTokens, agentMetrics.totalTokens, agentMetrics.inputTokens, agentMetrics.outputTokens, agentMetrics.maxContextTokens]);
+
+  const displayContextPercent = useMemo(() => {
+    if (contextRatio <= 0) return '0%';
+    if (contextRatio < 1) return `${contextRatio.toFixed(1)}%`;
+    return `${Math.round(contextRatio)}%`;
+  }, [contextRatio]);
 
   // 跨题目切换时从本地持久化同步消息
   useEffect(() => {
@@ -2848,7 +2861,7 @@ export default function ScratchpadCanvas({
             if (event.metrics) {
               setAgentMetrics({
                 iteration: event.metrics.iteration || 1,
-                maxIterations: event.metrics.maxIterations || 8,
+                toolCallsCount: event.metrics.toolCallsCount || 0,
                 inputTokens: event.metrics.inputTokens || 0,
                 outputTokens: event.metrics.outputTokens || 0,
                 totalTokens: event.metrics.totalTokens || 0,
@@ -2864,7 +2877,7 @@ export default function ScratchpadCanvas({
             }
 
             if (event.type === 'iteration-start') {
-              setAgentLoopStage(`THINK · 第 ${event.iteration} 轮迭代中…`);
+              setAgentLoopStage(event.iteration > 1 ? `THINK · 第 ${event.iteration} 步推理中…` : 'THINK · 正在深度思考…');
             } else if (event.type === 'reasoning-delta') {
               setAgentLoopStage('THINK · 正在深度思考…');
               setAgentChatMessages((prev) =>
@@ -3912,11 +3925,17 @@ export default function ScratchpadCanvas({
                                 <span className="material-symbols-outlined text-[13px] text-primary">draw</span>
                                 <span>{message.status === 'blocked' ? '安全提示' : message.status === 'error' ? '执行未完成' : '草稿纸助教'}</span>
                               </div>
-                              {message.metrics && (
-                                <span className="text-[9px] text-outline font-normal font-mono">
-                                  {message.metrics.iteration || 1} 轮 · 共 {message.metrics.totalTokens || (message.metrics.inputTokens + message.metrics.outputTokens) || 0} tok
-                                </span>
-                              )}
+                              {message.metrics && (() => {
+                                const toolsCount = message.toolCalls?.length ?? message.metrics.toolCallsCount ?? 0;
+                                const totalTok = message.metrics.totalTokens || (message.metrics.inputTokens + message.metrics.outputTokens) || 0;
+                                return (
+                                  <span className="text-[9px] text-outline font-normal font-mono flex items-center gap-1">
+                                    <span>{toolsCount > 0 ? `${toolsCount} 次工具调用` : '直接回复'}</span>
+                                    <span>·</span>
+                                    <span>共 {totalTok} tok</span>
+                                  </span>
+                                );
+                              })()}
                             </div>
                           )}
 
@@ -4066,8 +4085,15 @@ export default function ScratchpadCanvas({
                 </div>
 
                 {/* 中层：内嵌式 Status Bar 监控指示带 */}
-                <div className="flex items-center justify-between px-2 py-0.5 rounded-lg bg-surface-container-low/60 border border-outline-variant/20 text-[9.5px] text-on-surface-variant font-mono select-none gap-2">
-                  {/* 状态与轮次 */}
+                <div className="relative overflow-hidden flex items-center justify-between px-2.5 py-1 rounded-lg bg-surface-container-low/75 border border-outline-variant/20 text-[9.5px] text-on-surface-variant font-mono select-none gap-2">
+                  {/* 当大模型说话或思考中时的顶部流光动效进度条 */}
+                  {agentMetrics.isLive && (
+                    <div className="absolute top-0 left-0 right-0 h-[2px] overflow-hidden bg-primary/20">
+                      <div className="h-full w-full bg-gradient-to-r from-transparent via-primary to-transparent animate-pulse" />
+                    </div>
+                  )}
+
+                  {/* 状态、真实对话轮次与本轮工具调用次数 */}
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className={`inline-block w-1.5 h-1.5 rounded-full ${
                       agentMetrics.isLive
@@ -4075,17 +4101,23 @@ export default function ScratchpadCanvas({
                         : 'bg-outline/40'
                     }`} />
                     <span className="font-semibold text-on-surface text-[9px]">
-                      {agentMetrics.isLive ? 'Loop 运行中' : '就绪'}
+                      {agentMetrics.isLive
+                        ? (agentLoopStage ? agentLoopStage.split(' · ')[0] : '思考回复中')
+                        : '就绪'}
                     </span>
                     <span className="text-outline-variant/60">·</span>
-                    <span className="text-outline">轮次:</span>
-                    <span className="font-medium text-primary">{agentMetrics.iteration}</span>
-                    <span className="text-outline">/{agentMetrics.maxIterations || 8}</span>
+                    <span className="text-outline">第</span>
+                    <span className="font-semibold text-primary">{currentTurnNumber}</span>
+                    <span className="text-outline">轮</span>
+                    <span className="text-outline-variant/60">·</span>
+                    <span className="text-outline">调用:</span>
+                    <span className="font-medium text-on-surface">{agentMetrics.toolCallsCount || 0}</span>
+                    <span className="text-outline">次</span>
                   </div>
 
-                  {/* Token 消耗、速度与上下文 */}
+                  {/* Token 消耗、速度与上下文真实进度条 */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <div className="flex items-center gap-0.5" title={`Token 消耗: 总计 ${agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)} (输入: ${agentMetrics.inputTokens} / 输出: ${agentMetrics.outputTokens})`}>
+                    <div className="flex items-center gap-0.5" title={`Token 消耗: 本轮总计 ${agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)} (输入: ${agentMetrics.inputTokens} / 输出: ${agentMetrics.outputTokens})`}>
                       <span className="text-outline">消耗:</span>
                       <span className="font-medium text-on-surface">
                         {agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)}
@@ -4094,7 +4126,7 @@ export default function ScratchpadCanvas({
 
                     <span className="text-outline-variant/60">·</span>
 
-                    <div className="flex items-center gap-0.5" title="处理速度 (Tokens / 秒)">
+                    <div className="flex items-center gap-0.5" title="输出速度 (Tokens / 秒)">
                       <span className="text-outline">速度:</span>
                       <span className={`font-medium ${agentMetrics.tokenSpeed > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-on-surface'}`}>
                         {agentMetrics.tokenSpeed || 0}
@@ -4104,17 +4136,20 @@ export default function ScratchpadCanvas({
 
                     <span className="text-outline-variant/60">·</span>
 
-                    <div className="flex items-center gap-1" title={`当前上下文占用: ${agentMetrics.contextTokens || agentMetrics.inputTokens || 0} / ${agentMetrics.maxContextTokens || 131072} Tokens (${contextPercent}%)`}>
+                    <div
+                      className="flex items-center gap-1.5"
+                      title={`当前上下文占用: ${agentMetrics.contextTokens || agentMetrics.totalTokens || agentMetrics.inputTokens || 0} / ${agentMetrics.maxContextTokens || 131072} Tokens (${displayContextPercent})`}
+                    >
                       <span className="text-outline">上下文:</span>
-                      <div className="w-6 h-1 bg-outline-variant/30 rounded-full overflow-hidden flex items-center">
+                      <div className="w-12 h-1.5 bg-outline-variant/25 rounded-full overflow-hidden flex items-center p-[0.5px]">
                         <div
                           className={`h-full transition-all duration-300 rounded-full ${
-                            contextPercent > 80 ? 'bg-error' : contextPercent > 50 ? 'bg-amber-500' : 'bg-primary'
-                          }`}
-                          style={{ width: `${contextPercent}%` }}
+                            contextRatio > 80 ? 'bg-error' : contextRatio > 50 ? 'bg-amber-500' : 'bg-primary'
+                          } ${agentMetrics.isLive ? 'animate-pulse' : ''}`}
+                          style={{ width: `${Math.max(contextRatio > 0 ? 5 : 0, contextRatio)}%` }}
                         />
                       </div>
-                      <span className="font-medium text-on-surface">{contextPercent}%</span>
+                      <span className="font-medium text-on-surface">{displayContextPercent}</span>
                     </div>
                   </div>
                 </div>

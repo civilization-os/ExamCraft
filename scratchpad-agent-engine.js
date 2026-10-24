@@ -580,9 +580,11 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
     { role: 'system', content: systemPrompt }
   ];
 
+  let conversationChars = 0;
   if (Array.isArray(recentConversation) && recentConversation.length > 0) {
     for (const msg of recentConversation.slice(-6)) {
       if (msg && typeof msg.content === 'string') {
+        conversationChars += msg.content.length;
         messages.push({
           role: msg.role === 'user' ? 'user' : 'assistant',
           content: msg.content
@@ -598,7 +600,18 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
 
   const startTime = Date.now();
   let accumulatedOutputTokens = 0;
-  let estimatedInputTokens = Math.ceil((systemPrompt.length + spokenText.length + JSON.stringify(currentElements).length) / 2);
+  let toolCallsCount = 0;
+  // 综合估算输入 Tokens（系统提示词 + 题目背景 + 画板元素 + 历史对话 + 用户输入 + 工具描述）
+  const estimatedInputTokens = Math.max(
+    1,
+    Math.ceil(
+      ((systemPrompt || '').length +
+        (spokenText || '').length +
+        conversationChars +
+        JSON.stringify(currentElements).length +
+        1200) / 2
+    )
+  );
   let currentIteration = 1;
 
   try {
@@ -614,6 +627,10 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
         currentIteration = event.iteration;
       }
 
+      if (event.type === 'tool-result') {
+        toolCallsCount++;
+      }
+
       if (event.type === 'text-delta' || event.type === 'reasoning-delta') {
         const deltaLen = (event.delta || '').length;
         accumulatedOutputTokens += Math.max(1, Math.ceil(deltaLen / 2));
@@ -625,12 +642,12 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
 
       const metrics = {
         iteration: currentIteration,
-        maxIterations: 8,
+        toolCallsCount,
         inputTokens: estimatedInputTokens,
         outputTokens: accumulatedOutputTokens,
         totalTokens,
         tokenSpeed,
-        contextTokens: estimatedInputTokens,
+        contextTokens: totalTokens,
         maxContextTokens
       };
 
@@ -646,12 +663,12 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
     const elapsedSec = Math.max(0.1, (Date.now() - startTime) / 1000);
     const finalMetrics = {
       iteration: currentIteration,
-      maxIterations: 8,
+      toolCallsCount,
       inputTokens: estimatedInputTokens,
       outputTokens: accumulatedOutputTokens,
       totalTokens: estimatedInputTokens + accumulatedOutputTokens,
       tokenSpeed: Number((accumulatedOutputTokens / elapsedSec).toFixed(1)),
-      contextTokens: estimatedInputTokens,
+      contextTokens: estimatedInputTokens + accumulatedOutputTokens,
       maxContextTokens,
       elapsedTime: Number(elapsedSec.toFixed(2))
     };
@@ -668,11 +685,12 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
           type: 'aborted',
           metrics: {
             iteration: currentIteration,
+            toolCallsCount,
             inputTokens: estimatedInputTokens,
             outputTokens: accumulatedOutputTokens,
             totalTokens: estimatedInputTokens + accumulatedOutputTokens,
             tokenSpeed: 0,
-            contextTokens: estimatedInputTokens,
+            contextTokens: estimatedInputTokens + accumulatedOutputTokens,
             maxContextTokens
           }
         });
@@ -700,12 +718,13 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
             type: 'completed',
             metrics: {
               iteration: currentIteration,
+              toolCallsCount,
               maxIterations: 8,
               inputTokens: estimatedInputTokens,
               outputTokens: accumulatedOutputTokens + 20,
               totalTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
               tokenSpeed: 0,
-              contextTokens: estimatedInputTokens,
+              contextTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
               maxContextTokens
             },
             canvasActions: [...canvasActions]
@@ -716,11 +735,12 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
           canvasActions,
           metrics: {
             iteration: currentIteration,
+            toolCallsCount,
             inputTokens: estimatedInputTokens,
             outputTokens: accumulatedOutputTokens + 20,
             totalTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
             tokenSpeed: 0,
-            contextTokens: estimatedInputTokens,
+            contextTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
             maxContextTokens
           }
         };
