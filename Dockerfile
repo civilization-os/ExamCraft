@@ -43,6 +43,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.js ./server.js
 COPY --from=builder /app/api-router.js ./api-router.js
+COPY --from=builder /app/scratchpad-agent-engine.js ./scratchpad-agent-engine.js
 COPY --from=builder /app/user-storage.js ./user-storage.js
 COPY --from=builder /app/mail-sender.js ./mail-sender.js
 COPY --from=builder /app/src ./src

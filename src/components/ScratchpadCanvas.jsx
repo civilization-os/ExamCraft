@@ -1218,36 +1218,95 @@ export default function ScratchpadCanvas({
   const [showFormulaReference, setShowFormulaReference] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const agentRequestInFlightRef = useRef(false);
+  const agentAbortControllerRef = useRef(null);
   const [agentLoopStage, setAgentLoopStage] = useState('');
   const agentChatStorageKey = `${storageKey}_agent_chat_v1`;
   const agentChatScrollRef = useRef(null);
-  const [agentChatRevision, setAgentChatRevision] = useState(0);
-  const agentChatMessages = useMemo(() => {
+
+  const [agentChatMessages, setAgentChatMessages] = useState(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(agentChatStorageKey) || '[]');
       return Array.isArray(stored) ? stored : [];
     } catch {
       return [];
     }
-  }, [agentChatStorageKey, agentChatRevision]);
+  });
 
-  const appendAgentChatMessage = useCallback((message) => {
+  const [agentMetrics, setAgentMetrics] = useState({
+    iteration: 1,
+    maxIterations: 8,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    tokenSpeed: 0,
+    contextTokens: 0,
+    maxContextTokens: 131072,
+    isLive: false
+  });
+
+  const [expandedThoughts, setExpandedThoughts] = useState({});
+
+  const toggleThoughtExpanded = useCallback((msgId) => {
+    setExpandedThoughts((prev) => ({
+      ...prev,
+      [msgId]: prev[msgId] !== undefined ? !prev[msgId] : false
+    }));
+  }, []);
+
+  const contextPercent = useMemo(() => {
+    const used = agentMetrics.contextTokens || agentMetrics.inputTokens || 0;
+    const max = agentMetrics.maxContextTokens || 131072;
+    if (!max) return 0;
+    return Math.min(100, Math.max(0, Math.round((used / max) * 100)));
+  }, [agentMetrics.contextTokens, agentMetrics.inputTokens, agentMetrics.maxContextTokens]);
+
+  // 跨题目切换时从本地持久化同步消息
+  useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(agentChatStorageKey) || '[]');
-      const messages = Array.isArray(stored) ? stored : [];
-      localStorage.setItem(agentChatStorageKey, JSON.stringify([
-        ...messages,
-        { id: `agent-chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), ...message }
-      ].slice(-40)));
-    } catch (error) {
-      console.warn('Agent chat history could not be saved:', error);
-    }
-    setAgentChatRevision((revision) => revision + 1);
+      setAgentChatMessages(Array.isArray(stored) ? stored : []);
+    } catch {}
   }, [agentChatStorageKey]);
+
+  const appendAgentChatMessage = useCallback((message) => {
+    setAgentChatMessages((prev) => {
+      const updated = [
+        ...prev,
+        { id: `agent-chat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), ...message }
+      ].slice(-40);
+      try {
+        localStorage.setItem(agentChatStorageKey, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  }, [agentChatStorageKey]);
+
   const clearAgentChat = useCallback(() => {
     try { localStorage.removeItem(agentChatStorageKey); } catch {}
-    setAgentChatRevision((revision) => revision + 1);
+    setAgentChatMessages([]);
   }, [agentChatStorageKey]);
+
+  const handleAbortAgentLoop = useCallback(() => {
+    if (agentAbortControllerRef.current) {
+      agentAbortControllerRef.current.abort();
+    }
+    agentRequestInFlightRef.current = false;
+    setIsAgentRunning(false);
+    setAgentLoopStage('');
+    setAgentMetrics((prev) => ({ ...prev, isLive: false, tokenSpeed: 0 }));
+    setAgentChatMessages((prev) => {
+      const updated = prev.map((msg, idx) =>
+        idx === prev.length - 1 && msg.role === 'assistant'
+          ? { ...msg, isAborted: true, isCompleted: true }
+          : msg
+      );
+      try {
+        localStorage.setItem(agentChatStorageKey, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    showToast('已中断草稿纸助手执行', 'info');
+  }, [agentChatStorageKey, showToast]);
 
   useEffect(() => {
     const chat = agentChatScrollRef.current;
@@ -2451,7 +2510,226 @@ export default function ScratchpadCanvas({
     showToast(`已填入推导语言：「${chip.label || textToAdd}」`, 'info');
   };
 
-  // ==================== 核心 Agent Loop 执行逻辑 ====================
+  // ==================== 画板图元动作增量应用器 ====================
+  const applyCanvasActions = useCallback((incomingActions) => {
+    if (!Array.isArray(incomingActions) || !incomingActions.length) return;
+
+    // 1. 处理 update_element、delete_element 与 clear_board
+    const editActions = incomingActions.filter((a) => a.type === 'update_element' || a.type === 'delete_element' || a.type === 'clear_board');
+    if (editActions.length) {
+      setElements((previous) => {
+        let next = [...previous];
+        for (const edit of editActions) {
+          if (edit.type === 'clear_board') {
+            next = [];
+            continue;
+          }
+          const targetIndex = next.findIndex((el) => el.id === edit.targetElementId);
+          if (targetIndex < 0) continue;
+          const target = next[targetIndex];
+          if (edit.type === 'delete_element') {
+            next = next.filter((el) => el.id !== target.id);
+            continue;
+          }
+
+          const hasWidth = Number(edit.width) > 0;
+          const hasHeight = Number(edit.height) > 0;
+          const hasScale = Number(edit.scale) > 0;
+          const targetScale = hasScale ? Number(Number(edit.scale).toFixed(2)) : (target.scale || 1.0);
+          const operation = ['append', 'replace', 'consolidate'].includes(edit.operation) ? edit.operation : 'append';
+          const isWriteElement = (target.actions || []).some((a) => a.type === 'write');
+
+          if (isWriteElement && typeof edit.content === 'string' && edit.content.trim()) {
+            const existingWrite = target.actions.find((a) => a.type === 'write');
+            const oldContent = String(existingWrite?.content || '');
+            let content = edit.content.trim();
+            if (operation === 'append') {
+              const existingLines = new Set(oldContent.split('\n').map((l) => l.trim()).filter(Boolean));
+              const newLines = content.split('\n').map((l) => l.trim()).filter((l) => l && !existingLines.has(l));
+              if (!newLines.length && !hasWidth && !hasScale) continue;
+              content = newLines.length ? [oldContent.trim(), ...newLines].filter(Boolean).join('\n') : oldContent;
+            }
+
+            const writeIndex = target.actions.findIndex((a) => a.type === 'write');
+            const updatedActions = target.actions.map((a, i) => (i === writeIndex ? { ...a, content } : a));
+            const formulaBoardW = hasWidth
+              ? Number(edit.width)
+              : Math.max(target.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
+            const newHeight = hasHeight ? Number(edit.height) : estimateBoardHeight(content, formulaBoardW);
+            const smartTitle = target.titleCustom ? target.title : generateSmartBoardTitle(content, edit.title);
+            const smartConclusion = extractBoardConclusion(content, edit.conclusion);
+
+            next[targetIndex] = {
+              ...target,
+              title: smartTitle,
+              conclusion: smartConclusion,
+              width: formulaBoardW,
+              height: newHeight,
+              scale: targetScale,
+              actions: updatedActions,
+              updatedAt: Date.now()
+            };
+          } else if (Array.isArray(edit.actions) && edit.actions.length) {
+            const editableTypes = new Set(['write', 'axes', 'axes3d', 'plot', 'shape', 'shape3d', 'circle']);
+            const safeActions = edit.actions.filter((a) => editableTypes.has(a?.type));
+            if (!safeActions.length) continue;
+
+            let newTitle = typeof edit.title === 'string' ? edit.title.slice(0, 100) : target.title;
+            if (operation === 'append' && safeActions.some((a) => a.type === 'plot') && !edit.title) {
+              const allPlotLabels = [...(target.actions || []), ...safeActions]
+                .filter((a) => a.type === 'plot')
+                .map((a) => formatMathExpression(a.label || a.expr || ''))
+                .filter(Boolean);
+              if (allPlotLabels.length) {
+                newTitle = `📈 坐标系 · ${allPlotLabels.join(' & ')}`;
+              }
+            }
+
+            next[targetIndex] = {
+              ...target,
+              title: newTitle,
+              width: hasWidth ? Number(edit.width) : target.width,
+              height: hasHeight ? Number(edit.height) : target.height,
+              scale: targetScale,
+              actions: operation === 'append' ? [...(target.actions || []), ...safeActions] : safeActions,
+              updatedAt: Date.now()
+            };
+          } else if (hasWidth || hasScale || hasHeight) {
+            const newW = hasWidth ? Number(edit.width) : (target.width || 520);
+            const writeAction = (target.actions || []).find((a) => a.type === 'write');
+            const newH = hasHeight
+              ? Number(edit.height)
+              : (writeAction ? estimateBoardHeight(writeAction.content, newW) : target.height);
+            next[targetIndex] = {
+              ...target,
+              width: newW,
+              height: newH,
+              scale: targetScale,
+              updatedAt: Date.now()
+            };
+          }
+        }
+        return next;
+      });
+    }
+
+    // 2. 处理新建图元
+    const actionsToCreate = incomingActions.filter((a) => a.type !== 'update_element' && a.type !== 'delete_element' && a.type !== 'clear_board');
+    if (actionsToCreate.length) {
+      let elemActs = actionsToCreate;
+      if (elemActs.some((a) => a.type === 'plot') && !elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d')) {
+        elemActs = [{ type: 'axes', xLabel: 'x', yLabel: 'y' }, ...elemActs];
+      }
+
+      let elemTitle = '草稿演算图元';
+      const hasPlot = elemActs.some((a) => a.type === 'plot');
+      const hasAxes = elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d');
+      const has3DAxes = elemActs.some((a) => a.type === 'axes3d');
+      const hasShape = elemActs.some((a) => a.type === 'shape' || a.type === 'shape3d');
+      const hasWrite = elemActs.some((a) => a.type === 'write');
+      const isCircleAct = elemActs.some(
+        (a) => a.type === 'circle' || (a.type === 'shape' && (a.shapeType === 'circle' || String(a.shapeType || '').includes('圆')))
+      );
+      const isDraw = hasPlot || hasAxes || hasShape || isCircleAct;
+
+      if (hasWrite && !isDraw) {
+        setElements((previous) => {
+          const existingWrite = previous.find((el) => (el.actions || []).some((a) => a.type === 'write'));
+          if (existingWrite) {
+            const writeAct = elemActs.find((a) => a.type === 'write');
+            if (writeAct?.content) {
+              return previous.map((el) => {
+                if (el.id !== existingWrite.id) return el;
+                const oldWrite = (el.actions || []).find((a) => a.type === 'write');
+                const oldContent = String(oldWrite?.content || '');
+                const newLines = writeAct.content.split('\n').map((l) => l.trim()).filter(Boolean);
+                const existingLines = new Set(oldContent.split('\n').map((l) => l.trim()).filter(Boolean));
+                const appendLines = newLines.filter((l) => !existingLines.has(l));
+                const merged = [oldContent.trim(), ...appendLines].filter(Boolean).join('\n');
+                const updatedActions = (el.actions || []).map((a) => (a.type === 'write' ? { ...a, content: merged } : a));
+                const formulaBoardW = Math.max(el.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
+                const newHeight = estimateBoardHeight(merged, formulaBoardW);
+                const smartTitle = el.titleCustom ? el.title : generateSmartBoardTitle(merged, writeAct.title);
+                const smartConclusion = extractBoardConclusion(merged, writeAct.conclusion);
+                return {
+                  ...el,
+                  title: smartTitle,
+                  conclusion: smartConclusion,
+                  width: formulaBoardW,
+                  height: newHeight,
+                  actions: updatedActions,
+                  updatedAt: Date.now()
+                };
+              });
+            }
+          }
+          return previous;
+        });
+      }
+
+      const targetZone = isDraw ? 'draw' : 'formula';
+      const containerW = containerRef.current?.clientWidth || 700;
+      const midX = Math.floor(containerW / 2);
+      const maxZoneW = Math.max(200, (isDraw ? midX : containerW - midX) - 36);
+
+      let elemWidth = Math.min(320, maxZoneW);
+      let elemHeight = 270;
+
+      if (isCircleAct) {
+        elemTitle = '⭕ 几何图形: 圆 O 与半径 r';
+        elemWidth = Math.min(270, maxZoneW);
+        elemHeight = 250;
+      } else if (hasPlot) {
+        const plotAct = elemActs.find((a) => a.type === 'plot');
+        const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
+        elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
+        elemWidth = Math.min(310, maxZoneW);
+        elemHeight = 270;
+      } else if (has3DAxes) {
+        elemTitle = '📐 三维坐标系';
+        elemWidth = Math.min(320, maxZoneW);
+        elemHeight = 290;
+      } else if (hasAxes) {
+        elemTitle = '📈 直角坐标系';
+        elemWidth = Math.min(300, maxZoneW);
+        elemHeight = 270;
+      } else if (hasShape) {
+        const shapeAct = elemActs.find((a) => a.type === 'shape');
+        const shapeNameMap = { right_triangle: '直角三角形', circle: '圆形与半径', triangle: '三角形' };
+        elemTitle = `📐 几何图形: ${shapeNameMap[shapeAct?.shapeType] || '几何图形'}`;
+        elemWidth = Math.min(270, maxZoneW);
+        elemHeight = 240;
+      } else if (hasWrite) {
+        const writeAct = elemActs.find((a) => a.type === 'write');
+        const formulaBoardW = Math.max(480, Math.min(700, containerW - 40));
+        elemTitle = generateSmartBoardTitle(writeAct?.content || '', writeAct?.title);
+        elemWidth = formulaBoardW;
+        elemHeight = estimateBoardHeight(writeAct?.content || '', elemWidth);
+      }
+
+      const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
+      const initialWriteAct = elemActs.find((a) => a.type === 'write');
+
+      const newElem = {
+        id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title: elemTitle,
+        conclusion: initialWriteAct ? extractBoardConclusion(initialWriteAct.content || '', initialWriteAct.conclusion) : '',
+        collapsed: false,
+        titleCustom: false,
+        x: pos.x,
+        y: pos.y,
+        width: elemWidth,
+        height: elemHeight,
+        actions: elemActs,
+        zone: targetZone,
+        createdAt: Date.now()
+      };
+
+      setElements((prev) => [...prev, newElem]);
+    }
+  }, [findNextAvailablePosition]);
+
+  // ==================== 核心 Agent Loop 执行逻辑 (流式与中断) ====================
   const handleTriggerAgentLoop = async (customPrompt = '') => {
     if (agentRequestInFlightRef.current) return;
     const textToRun = (customPrompt || spokenInput).trim();
@@ -2460,8 +2738,6 @@ export default function ScratchpadCanvas({
       return;
     }
 
-    // Take the history snapshot before appending this turn. The current request
-    // is sent separately so the model cannot mistake it for a previous message.
     let priorConversation = [];
     try {
       const stored = JSON.parse(localStorage.getItem(agentChatStorageKey) || '[]');
@@ -2473,24 +2749,48 @@ export default function ScratchpadCanvas({
       }
     } catch {}
 
-    appendAgentChatMessage({ role: 'user', content: textToRun });
+    const userMsgId = `msg_user_${Date.now()}`;
+    const assistantMsgId = `msg_agent_${Date.now()}`;
+
+    appendAgentChatMessage({ id: userMsgId, role: 'user', content: textToRun });
     setSpokenInput('');
 
     agentRequestInFlightRef.current = true;
     setIsAgentRunning(true);
-    setAgentLoopStage('THINK · 正在处理你的消息…');
+    setAgentLoopStage('THINK · 正在连接 Agent Loop 思考…');
+    setAgentMetrics((prev) => ({ ...prev, isLive: true }));
+
+    const abortController = new AbortController();
+    agentAbortControllerRef.current = abortController;
+
+    // 预置 assistant 占位消息
+    setAgentChatMessages((prev) => [
+      ...prev,
+      {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: '',
+        reasoningContent: '',
+        toolCalls: [],
+        metrics: null,
+        isCompleted: false,
+        isThinkingExpanded: true
+      }
+    ]);
 
     try {
-      const res = await fetch('/api/model/scratchpad-agent-loop', {
+      const response = await fetch('/api/model/scratchpad-agent-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           spokenText: textToRun,
-          contextProblem: contextProblem,
-          currentBoardContent: elements.flatMap((element) => (element.actions || []).map((action) => action.content || action.label || '')).filter(Boolean).join('\n').slice(-2000),
+          contextProblem,
           currentBoardElements: elements.slice(-30).map((element) => ({
             id: element.id,
             title: element.title,
+            conclusion: element.conclusion,
+            width: element.width,
+            height: element.height,
             actions: (element.actions || []).slice(0, 8).map((action) => ({
               type: action.type,
               content: typeof action.content === 'string' ? action.content.slice(0, 1800) : undefined,
@@ -2498,10 +2798,8 @@ export default function ScratchpadCanvas({
               expr: typeof action.expr === 'string' ? action.expr.slice(0, 180) : undefined,
               shapeType: action.shapeType,
               plane: action.plane,
-              xLabel: action.xLabel,
-              yLabel: action.yLabel,
-              zLabel: action.zLabel,
               color: action.color,
+              labels: action.labels,
               points: Array.isArray(action.points) ? action.points.slice(0, 8) : undefined
             }))
           })),
@@ -2510,297 +2808,169 @@ export default function ScratchpadCanvas({
             try { return localStorage.getItem('examcraft_scratchpad_agent_tone') || 'supportive'; }
             catch { return 'supportive'; }
           })()
-        })
+        }),
+        signal: abortController.signal
       });
 
-      const data = await res.json();
-      if (!data.success) {
-        const errorMessage = data.error || 'Agent Loop 执行失败，请检查模型配置后重试。';
-        appendAgentChatMessage({ role: 'assistant', status: 'error', content: errorMessage });
-        showToast(errorMessage, 'warn');
-        return;
+      if (!response.ok || !response.body) {
+        throw new Error(`连接流式循环端点失败 (HTTP ${response.status})`);
       }
 
-      const agentData = data.agentData;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      if (!agentData?.audit) {
-        throw new Error('模型返回结果不完整，请重试。');
-      }
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
 
-      if (!agentData.audit.passed) {
-        const blockedMessage = agentData.chatResponse || '抱歉，我不能帮助解题，也不能提供答案、步骤或提示。';
-        appendAgentChatMessage({ role: 'assistant', status: 'blocked', content: blockedMessage });
-        showToast('此请求无法处理。', 'warn');
-      } else if (agentData.intent === 'chat') {
-        appendAgentChatMessage({ role: 'assistant', status: 'success', content: agentData.chatResponse || '你好呀。' });
-      } else {
-        setAgentLoopStage('THINK · 正在同步画板…');
-        const incomingActions = agentData.canvasActions || [];
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
 
-        // 1. 先由 editActions 处理 update_element 与 delete_element（由 AI 明确指定 targetElementId 进行精准增改删）
-        if (incomingActions.length > 0) {
-          const editActions = incomingActions.filter((action) => action.type === 'update_element' || action.type === 'delete_element');
-          if (editActions.length) {
-            setElements((previous) => {
-              let next = [...previous];
-              for (const edit of editActions) {
-                const targetIndex = next.findIndex((element) => element.id === edit.targetElementId);
-                if (targetIndex < 0) continue;
-                const target = next[targetIndex];
-                if (edit.type === 'delete_element') {
-                  next = next.filter((element) => element.id !== target.id);
-                  continue;
-                }
+        for (const block of blocks) {
+          const trimmed = block.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const dataStr = trimmed.slice(5).trim();
+          if (dataStr === '[DONE]') break;
 
-                // 提取可能的尺寸与缩放参数（来自大模型指令：width, height, scale）
-                const hasWidth = Number(edit.width) > 0;
-                const hasHeight = Number(edit.height) > 0;
-                const hasScale = Number(edit.scale) > 0;
-                const targetScale = hasScale ? Number(Number(edit.scale).toFixed(2)) : (target.scale || 1.0);
+          try {
+            const event = JSON.parse(dataStr);
 
-                const operation = ['append', 'replace', 'consolidate'].includes(edit.operation) ? edit.operation : 'append';
-                const isWriteElement = (target.actions || []).some((action) => action.type === 'write')
-                  && (target.actions || []).every((action) => action.type === 'write');
-                if (isWriteElement && typeof edit.content === 'string' && edit.content.trim()) {
-                  const existingWrite = target.actions.find((action) => action.type === 'write');
-                  const oldContent = String(existingWrite?.content || '');
-                  let content = edit.content.trim();
-                  if (operation === 'append') {
-                    const existingLines = new Set(oldContent.split('\n').map((line) => line.trim()).filter(Boolean));
-                    const newLines = content.split('\n').map((line) => line.trim()).filter((line) => line && !existingLines.has(line));
-                    if (!newLines.length && !hasWidth && !hasScale) continue;
-                    if (newLines.length) {
-                      content = [oldContent.trim(), ...newLines].filter(Boolean).join('\n');
-                    } else {
-                      content = oldContent;
-                    }
-                  }
-
-                  const writeIndex = target.actions.findIndex((action) => action.type === 'write');
-                  const updatedActions = target.actions.map((action, index) => index === writeIndex
-                    ? { ...action, content }
-                    : action);
-                  const formulaBoardW = hasWidth
-                    ? Number(edit.width)
-                    : Math.max(target.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
-                  const newHeight = hasHeight ? Number(edit.height) : estimateBoardHeight(content, formulaBoardW);
-                  const smartTitle = target.titleCustom ? target.title : generateSmartBoardTitle(content, edit.title);
-                  const smartConclusion = extractBoardConclusion(content, edit.conclusion);
-                  next[targetIndex] = {
-                    ...target,
-                    title: smartTitle,
-                    conclusion: smartConclusion,
-                    width: formulaBoardW,
-                    height: newHeight,
-                    scale: targetScale,
-                    actions: updatedActions,
-                    updatedAt: Date.now()
-                  };
-                } else if (Array.isArray(edit.actions) && edit.actions.length) {
-                  const editableTypes = new Set(['write', 'axes', 'axes3d', 'plot', 'shape', 'shape3d', 'circle']);
-                  const safeActions = edit.actions.filter((action) => editableTypes.has(action?.type));
-                  if (!safeActions.length) continue;
-
-                  let newTitle = typeof edit.title === 'string' ? edit.title.slice(0, 100) : target.title;
-                  if (operation === 'append' && safeActions.some((a) => a.type === 'plot') && !edit.title) {
-                    const allPlotLabels = [...(target.actions || []), ...safeActions]
-                      .filter((a) => a.type === 'plot')
-                      .map((a) => formatMathExpression(a.label || a.expr || ''))
-                      .filter(Boolean);
-                    if (allPlotLabels.length) {
-                      newTitle = `📈 坐标系 · ${allPlotLabels.join(' & ')}`;
-                    }
-                  }
-
-                  next[targetIndex] = {
-                    ...target,
-                    title: newTitle,
-                    width: hasWidth ? Number(edit.width) : target.width,
-                    height: hasHeight ? Number(edit.height) : target.height,
-                    scale: targetScale,
-                    actions: operation === 'append' ? [...(target.actions || []), ...safeActions] : safeActions,
-                    updatedAt: Date.now()
-                  };
-                } else if (hasWidth || hasScale || hasHeight) {
-                  // 纯尺寸或比例调整（模型仅下发 width / scale / height，例如考生口述“把板书放大/拉宽/缩小”）
-                  const newW = hasWidth ? Number(edit.width) : (target.width || 520);
-                  const writeAction = (target.actions || []).find((a) => a.type === 'write');
-                  const newH = hasHeight
-                    ? Number(edit.height)
-                    : (writeAction ? estimateBoardHeight(writeAction.content, newW) : target.height);
-                  next[targetIndex] = {
-                    ...target,
-                    width: newW,
-                    height: newH,
-                    scale: targetScale,
-                    updatedAt: Date.now()
-                  };
-                }
-
-                if (operation === 'consolidate' && isWriteElement && Array.isArray(edit.mergeElementIds)) {
-                  const mergeableIds = new Set(next
-                    .filter((element) => element.id !== target.id
-                      && edit.mergeElementIds.includes(element.id)
-                      && (element.actions || []).some((action) => action.type === 'write')
-                      && (element.actions || []).every((action) => action.type === 'write'))
-                    .map((element) => element.id));
-                  if (mergeableIds.size) next = next.filter((element) => !mergeableIds.has(element.id));
-                }
-              }
-              return next;
-            });
-          }
-
-          // 2. 处理 actionsToCreate：由 AI 明确指示新建的独立图元动作，不依靠前端正则二次猜测
-          const actionsToCreate = incomingActions.filter((action) => action.type !== 'update_element' && action.type !== 'delete_element');
-          if (actionsToCreate.length) {
-            let elemActs = actionsToCreate;
-            // 确保新建的函数曲线具备直角坐标系
-            if (elemActs.some((a) => a.type === 'plot') && !elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d')) {
-              elemActs = [{ type: 'axes', xLabel: 'x', yLabel: 'y' }, ...elemActs];
+            if (event.metrics) {
+              setAgentMetrics({
+                iteration: event.metrics.iteration || 1,
+                maxIterations: event.metrics.maxIterations || 8,
+                inputTokens: event.metrics.inputTokens || 0,
+                outputTokens: event.metrics.outputTokens || 0,
+                totalTokens: event.metrics.totalTokens || 0,
+                tokenSpeed: event.metrics.tokenSpeed || 0,
+                contextTokens: event.metrics.contextTokens || 0,
+                maxContextTokens: event.metrics.maxContextTokens || 131072,
+                isLive: true
+              });
             }
 
-            let elemTitle = '草稿演算图元';
-            const hasPlot = elemActs.some((a) => a.type === 'plot');
-            const hasAxes = elemActs.some((a) => a.type === 'axes' || a.type === 'axes3d');
-            const has3DAxes = elemActs.some((a) => a.type === 'axes3d');
-            const hasShape = elemActs.some((a) => a.type === 'shape' || a.type === 'shape3d');
-            const hasWrite = elemActs.some((a) => a.type === 'write');
-            const isCircleAct = elemActs.some(
-              (a) =>
-                a.type === 'circle' ||
-                (a.type === 'shape' &&
-                  (a.shapeType === 'circle' ||
-                    a.shapeType === 'round' ||
-                    String(a.shapeType || '').includes('圆')))
-            );
-
-            const isDraw = hasPlot || hasAxes || hasShape || isCircleAct;
-
-            // 前端唯一板书守护：若本次仅包含纯数学板书 (hasWrite && !isDraw)，且画布上已有板书图元，自动合并追加，绝不分裂多张独立卡片
-            if (hasWrite && !isDraw) {
-              const existingWrite = elements.find((el) => (el.actions || []).some((a) => a.type === 'write'));
-              if (existingWrite) {
-                const writeAct = elemActs.find((a) => a.type === 'write');
-                if (writeAct?.content) {
-                  setElements((previous) => previous.map((el) => {
-                    if (el.id !== existingWrite.id) return el;
-                    const oldWrite = (el.actions || []).find((a) => a.type === 'write');
-                    const oldContent = String(oldWrite?.content || '');
-                    const newLines = writeAct.content.split('\n').map((l) => l.trim()).filter(Boolean);
-                    const existingLines = new Set(oldContent.split('\n').map((l) => l.trim()).filter(Boolean));
-                    const appendLines = newLines.filter((l) => !existingLines.has(l));
-                    const merged = [oldContent.trim(), ...appendLines].filter(Boolean).join('\n');
-                    const updatedActions = (el.actions || []).map((a) => a.type === 'write' ? { ...a, content: merged } : a);
-                    const formulaBoardW = Math.max(el.width || 380, 520, Math.min(700, (containerRef.current?.clientWidth || 700) - 40));
-                    const newHeight = estimateBoardHeight(merged, formulaBoardW);
-                    const smartTitle = el.titleCustom ? el.title : generateSmartBoardTitle(merged, writeAct.title);
-                    const smartConclusion = extractBoardConclusion(merged, writeAct.conclusion);
-                    return {
-                      ...el,
-                      title: smartTitle,
-                      conclusion: smartConclusion,
-                      width: formulaBoardW,
-                      height: newHeight,
-                      actions: updatedActions,
-                      updatedAt: Date.now()
-                    };
-                  }));
-                  return;
-                }
-              }
+            if (event.canvasActions?.length) {
+              applyCanvasActions(event.canvasActions);
             }
 
-            const targetZone = isDraw ? 'draw' : 'formula';
-
-            const containerW = containerRef.current?.clientWidth || 700;
-            const midX = Math.floor(containerW / 2);
-            const maxZoneW = Math.max(200, (isDraw ? midX : containerW - midX) - 36);
-
-            let elemWidth = Math.min(320, maxZoneW);
-            let elemHeight = 270;
-
-            if (isCircleAct) {
-              elemTitle = '⭕ 几何图形: 圆 O 与半径 r';
-              elemWidth = Math.min(270, maxZoneW);
-              elemHeight = 250;
-            } else if (hasPlot) {
-              const plotAct = elemActs.find((a) => a.type === 'plot');
-              const labelStr = formatMathExpression(plotAct?.label || plotAct?.expr || '');
-              elemTitle = `📈 函数图像: ${labelStr || 'y = x²'}`;
-              elemWidth = Math.min(310, maxZoneW);
-              elemHeight = 270;
-            } else if (has3DAxes) {
-              elemTitle = '📐 三维坐标系';
-              elemWidth = Math.min(320, maxZoneW);
-              elemHeight = 290;
-            } else if (hasAxes) {
-              elemTitle = '📈 直角坐标系';
-              elemWidth = Math.min(300, maxZoneW);
-              elemHeight = 270;
-            } else if (hasShape) {
-              const shapeAct = elemActs.find((a) => a.type === 'shape');
-              const shapeNameMap = {
-                right_triangle: '直角三角形',
-                circle: '圆形与半径',
-                triangle: '三角形'
-              };
-              elemTitle = `📐 几何图形: ${shapeNameMap[shapeAct?.shapeType] || '几何图形'}`;
-              elemWidth = Math.min(270, maxZoneW);
-              elemHeight = 240;
-            } else if (hasWrite) {
-              const writeAct = elemActs.find((a) => a.type === 'write');
-              const formulaBoardW = Math.max(480, Math.min(700, containerW - 40));
-              elemTitle = generateSmartBoardTitle(writeAct?.content || '', writeAct?.title);
-              elemWidth = formulaBoardW;
-              elemHeight = estimateBoardHeight(writeAct?.content || '', elemWidth);
+            if (event.type === 'iteration-start') {
+              setAgentLoopStage(`THINK · 第 ${event.iteration} 轮迭代中…`);
+            } else if (event.type === 'reasoning-delta') {
+              setAgentLoopStage('THINK · 正在深度思考…');
+              setAgentChatMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, reasoningContent: (m.reasoningContent || '') + event.delta }
+                    : m
+                )
+              );
+            } else if (event.type === 'text-delta') {
+              setAgentLoopStage('WRITE · 正在整理板书回答…');
+              setAgentChatMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, content: (m.content || '') + event.delta }
+                    : m
+                )
+              );
+            } else if (event.type === 'tool-call-start') {
+              const toolName = event.toolCall?.name || 'tool';
+              setAgentLoopStage(`TOOL · 正在调用「${toolName}」…`);
+              setAgentChatMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        toolCalls: [
+                          ...(m.toolCalls || []),
+                          { id: event.toolCall.id, name: toolName, status: 'executing' }
+                        ]
+                      }
+                    : m
+                )
+              );
+            } else if (event.type === 'tool-result') {
+              setAgentChatMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        toolCalls: (m.toolCalls || []).map((tc) =>
+                          tc.id === event.toolCallId || tc.name === event.toolName
+                            ? { ...tc, status: 'done', result: event.result }
+                            : tc
+                        )
+                      }
+                    : m
+                )
+              );
+            } else if (event.type === 'completed') {
+              setAgentChatMessages((prev) => {
+                const updated = prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        isCompleted: true,
+                        isThinkingExpanded: false,
+                        metrics: event.metrics || m.metrics
+                      }
+                    : m
+                );
+                try {
+                  localStorage.setItem(agentChatStorageKey, JSON.stringify(updated.slice(-40)));
+                } catch {}
+                return updated;
+              });
+              showToast('Agent Loop 思考与画板操作已全部完成！', 'success');
+            } else if (event.type === 'aborted') {
+              setAgentChatMessages((prev) => {
+                const updated = prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, isAborted: true, isCompleted: true }
+                    : m
+                );
+                try {
+                  localStorage.setItem(agentChatStorageKey, JSON.stringify(updated.slice(-40)));
+                } catch {}
+                return updated;
+              });
+            } else if (event.type === 'error') {
+              setAgentChatMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, isCompleted: true, content: `执行出错: ${event.error || '模型异常'}` }
+                    : m
+                )
+              );
             }
-
-            const pos = findNextAvailablePosition(elemWidth, elemHeight, targetZone);
-            const initialWriteAct = elemActs.find((a) => a.type === 'write');
-
-            const newElem = {
-              id: `elem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-              title: elemTitle,
-              conclusion: initialWriteAct ? extractBoardConclusion(initialWriteAct.content || '', initialWriteAct.conclusion) : '',
-              collapsed: false,
-              titleCustom: false,
-              x: pos.x,
-              y: pos.y,
-              width: elemWidth,
-              height: elemHeight,
-              actions: elemActs,
-              zone: targetZone,
-              createdAt: Date.now()
-            };
-
-            setElements((prev) => [...prev, newElem]);
+          } catch (e) {
+            console.warn('[scratchpad] 解析 SSE 块失败:', e);
           }
         }
-
-        const actionTypes = new Set((agentData.canvasActions || []).map((action) => action.type));
-        const details = [];
-        if (actionTypes.has('write')) details.push('已誊写规范板书');
-        if (actionTypes.has('update_element')) details.push('已同步更新画板图元');
-        if (actionTypes.has('delete_element')) details.push('已删除指定图元');
-        if (actionTypes.has('axes3d')) details.push('已绘制三维坐标系');
-        else if (actionTypes.has('axes')) details.push('已绘制直角坐标系');
-        if (actionTypes.has('plot')) details.push('已绘制函数曲线');
-        if (actionTypes.has('shape') || actionTypes.has('shape3d') || actionTypes.has('circle')) details.push('已绘制几何图形');
-        const defaultCompletion = details.length
-          ? `已按指令完成：${[...new Set(details)].join('；')}。`
-          : '已处理完成。';
-        const completionMessage = agentData.chatResponse?.trim() || defaultCompletion;
-        appendAgentChatMessage({ role: 'assistant', status: 'success', content: completionMessage, details: [...new Set(details)] });
-        showToast('AI 已在草稿板上为您完成画图与写字！', 'success');
       }
+
+      setAgentMetrics((prev) => ({ ...prev, isLive: false, tokenSpeed: 0 }));
     } catch (err) {
-      appendAgentChatMessage({ role: 'assistant', status: 'error', content: err.message || '执行失败，请重试。' });
-      showToast(`Agent Loop 异常: ${err.message}`, 'warn');
+      if (err.name === 'AbortError' || abortController.signal.aborted) {
+        showToast('已中断执行', 'info');
+      } else {
+        console.warn('[scratchpad] 流式接口异常:', err.message);
+        setAgentChatMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, isCompleted: true, content: `连接异常: ${err.message}` }
+              : m
+          )
+        );
+        showToast(`Agent 执行提示: ${err.message}`, 'warn');
+      }
     } finally {
       agentRequestInFlightRef.current = false;
       setIsAgentRunning(false);
       setAgentLoopStage('');
+      setAgentMetrics((prev) => ({ ...prev, isLive: false }));
     }
   };
 
@@ -3586,7 +3756,7 @@ export default function ScratchpadCanvas({
                 {agentChatMessages.length === 0 ? (
                   <div className="h-full min-h-[100px] flex flex-col items-center justify-center gap-2 text-center px-2">
                     <div className="w-9 h-9 rounded-2xl bg-primary/10 text-primary flex items-center justify-center"><span className="material-symbols-outlined text-[20px]">draw</span></div>
-                    <div><div className="text-[12px] font-semibold text-on-surface">草稿纸助手已就绪</div><div className="mt-1 text-[10px] leading-relaxed text-on-surface-variant">可以简单聊聊，也可以告诉我画什么或誊写什么。</div></div>
+                    <div><div className="text-[12px] font-semibold text-on-surface">草稿纸助手已就绪</div><div className="mt-1 text-[10px] leading-relaxed text-on-surface-variant">基于真实 Agent Loop 执行引擎：按步思考、调用工具操作草稿纸。</div></div>
                     <div className="flex flex-wrap justify-center gap-1.5 mt-1">
                       {[
                         { label: '画坐标系', prompt: '帮我画一个标准的直角坐标系' },
@@ -3594,30 +3764,163 @@ export default function ScratchpadCanvas({
                         { label: '写下公式', prompt: '帮我把公式写到草稿纸上：' }
                       ].map((suggestion) => <button key={suggestion.label} type="button" onClick={() => setSpokenInput(suggestion.prompt)} disabled={isAgentRunning} className="rounded-full border border-primary/15 bg-surface-container-lowest/80 px-2.5 py-1 text-[10px] text-primary hover:bg-primary/10 transition disabled:opacity-40">{suggestion.label}</button>)}
                     </div>
-                    <span className="text-[9px] text-outline mt-1">只按指令画写 · 不推导、不代答</span>
+                    <span className="text-[9px] text-outline mt-1">真实 Loop 循环 · 工具自主调用 · 支持随时打断</span>
                   </div>
-                ) : agentChatMessages.map((message) => (
-                  <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[92%] rounded-xl px-2.5 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words select-text ${
-                      message.role === 'user'
+                ) : agentChatMessages.map((message) => {
+                  const hasThoughtOrTools = Boolean(message.reasoningContent || (message.toolCalls && message.toolCalls.length > 0));
+                  const isThoughtExpanded = expandedThoughts[message.id] !== undefined
+                    ? expandedThoughts[message.id]
+                    : (!message.isCompleted && hasThoughtOrTools);
+
+                  return (
+                    <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[94%] rounded-xl px-3 py-2 text-[11px] leading-relaxed break-words select-text ${
+                        message.role === 'user'
                           ? 'bg-primary text-on-primary rounded-2xl rounded-br-sm shadow-sm'
-                        : message.status === 'blocked'
-                        ? 'bg-amber-50 text-amber-900 border border-amber-200 rounded-bl-sm'
-                        : message.status === 'error'
-                        ? 'bg-error/10 text-error border border-error/20 rounded-bl-sm'
-                        : 'bg-white/80 text-on-surface rounded-2xl rounded-bl-sm shadow-sm'
-                    }`}>
-                      {message.role !== 'user' && <div className="font-semibold text-[10px] mb-0.5">{message.status === 'blocked' ? '安全提示' : message.status === 'error' ? '执行未完成' : '草稿纸助手'}</div>}
-                      {message.role === 'user' ? (
-                        <div>{message.content}</div>
-                      ) : (
-                        <MathMarkdown content={message.content} className="text-[11px] leading-relaxed" />
-                      )}
-                      {message.details?.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{message.details.map((detail) => <span key={detail} className="rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px]">{detail}</span>)}</div>}
+                          : message.status === 'blocked'
+                          ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800/50 rounded-bl-sm'
+                          : message.status === 'error'
+                          ? 'bg-error/10 text-error border border-error/20 rounded-bl-sm'
+                          : 'bg-white/85 dark:bg-surface-container-high/70 text-on-surface rounded-2xl rounded-bl-sm shadow-xs border border-outline-variant/20'
+                      }`}>
+                        {message.role !== 'user' && (
+                          <div className="flex items-center justify-between text-[10px] font-semibold text-on-surface-variant mb-1.5 pb-1 border-b border-outline-variant/20">
+                            <div className="flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[13px] text-primary">draw</span>
+                              <span>{message.status === 'blocked' ? '安全提示' : message.status === 'error' ? '执行未完成' : '草稿纸助教'}</span>
+                            </div>
+                            {message.metrics && (
+                              <span className="text-[9px] text-outline font-normal font-mono">
+                                迭代 {message.metrics.iteration || 1} 轮 · 共 {message.metrics.totalTokens || (message.metrics.inputTokens + message.metrics.outputTokens) || 0} tok
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 思考过程与工具调用过程 (可收缩淡色文字) */}
+                        {message.role !== 'user' && hasThoughtOrTools && (
+                          <div className="mb-2 rounded-xl border border-outline-variant/30 bg-surface-container-low/50 overflow-hidden text-[10.5px]">
+                            <button
+                              type="button"
+                              onClick={() => toggleThoughtExpanded(message.id)}
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 hover:bg-surface-container-high/40 transition cursor-pointer text-on-surface-variant font-medium select-none"
+                              title="点击折叠或展开思考过程与工具调用细节"
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className={`material-symbols-outlined text-[14px] ${!message.isCompleted ? 'text-primary animate-pulse' : 'text-outline'}`}>
+                                  psychology
+                                </span>
+                                <span className="truncate">
+                                  {!message.isCompleted
+                                    ? '深度思考与工具调用中…'
+                                    : `深度思考过程${message.toolCalls?.length ? ` · 调用了 ${message.toolCalls.length} 项工具` : ''}`}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 text-[10px] text-outline shrink-0">
+                                {!message.isCompleted && (
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-ping mr-1" />
+                                )}
+                                <span
+                                  className="material-symbols-outlined text-[14px] transition-transform duration-200"
+                                  style={{ transform: isThoughtExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                                >
+                                  expand_more
+                                </span>
+                              </div>
+                            </button>
+
+                            {isThoughtExpanded && (
+                              <div className="px-2.5 pb-2 pt-1 border-t border-outline-variant/15 space-y-2">
+                                {/* 工具调用药丸徽标 */}
+                                {message.toolCalls && message.toolCalls.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {message.toolCalls.map((tc, idx) => {
+                                      const isExecuting = tc.status === 'executing';
+                                      const toolLabelMap = {
+                                        read_scratchpad: '查阅画板',
+                                        write_math_derivation: '誊写板书',
+                                        draw_geometry_or_plot: '绘制图表',
+                                        update_or_substitute: '等量代换',
+                                        delete_or_clear: '擦除清空'
+                                      };
+                                      const label = toolLabelMap[tc.name] || tc.name;
+                                      return (
+                                        <span
+                                          key={tc.id || idx}
+                                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9.5px] border ${
+                                            isExecuting
+                                              ? 'bg-primary/10 border-primary/30 text-primary animate-pulse'
+                                              : 'bg-surface-container-high/60 border-outline-variant/30 text-on-surface-variant'
+                                          }`}
+                                          title={tc.result ? (typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result)) : tc.name}
+                                        >
+                                          <span className="material-symbols-outlined text-[11px]">
+                                            {isExecuting ? 'sync' : 'build'}
+                                          </span>
+                                          <span>{label}</span>
+                                          {isExecuting && <span className="animate-spin text-[9px]">◌</span>}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                {/* 淡色思考内容流 */}
+                                {message.reasoningContent && (
+                                  <div className="font-mono text-on-surface-variant/75 leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap select-text pr-1 text-[10px] bg-surface-container-lowest/60 p-2 rounded-lg border border-outline-variant/15">
+                                    {message.reasoningContent}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 正式回答内容 (支持 Markdown & KaTeX 数学公式渲染) */}
+                        {message.role === 'user' ? (
+                          <div className="text-[11px] leading-relaxed whitespace-pre-wrap">{message.content}</div>
+                        ) : (
+                          <div className="space-y-1">
+                            {message.content ? (
+                              <MathMarkdown content={message.content} className="text-[11px] leading-relaxed select-text" />
+                            ) : (
+                              !message.isCompleted && (
+                                <div className="flex items-center gap-1.5 text-[10.5px] text-on-surface-variant/70 italic py-0.5">
+                                  <span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>
+                                  <span>正在整理最终板书与答复…</span>
+                                </div>
+                              )
+                            )}
+                            {message.isAborted && (
+                              <div className="inline-flex items-center gap-1 text-[9.5px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                                <span className="material-symbols-outlined text-[12px]">cancel</span>
+                                <span>已由用户中断回答</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {message.details?.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {message.details.map((detail) => (
+                              <span key={detail} className="rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px]">
+                                {detail}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {isAgentRunning && !agentChatMessages.some((m) => m.role === 'assistant' && !m.isCompleted) && (
+                  <div className="flex justify-start">
+                    <div className="rounded-xl rounded-bl-sm bg-surface-container px-2.5 py-1.5 text-[10px] text-primary flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>
+                      {agentLoopStage || 'Agent Loop 正在初始化…'}
                     </div>
                   </div>
-                ))}
-                {isAgentRunning && <div className="flex justify-start"><div className="rounded-xl rounded-bl-sm bg-surface-container px-2.5 py-1.5 text-[10px] text-primary flex items-center gap-1.5"><span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span>{agentLoopStage || '正在处理指令…'}</div></div>}
+                )}
               </div>
 
               {/* 口述/需求输入框 */}
@@ -3628,17 +3931,21 @@ export default function ScratchpadCanvas({
                   value={spokenInput}
                   onChange={(e) => setSpokenInput(e.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    if (event.key === 'Escape' && isAgentRunning) {
                       event.preventDefault();
-                      handleTriggerAgentLoop();
+                      handleAbortAgentLoop();
+                    } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      if (!isAgentRunning) {
+                        handleTriggerAgentLoop();
+                      }
                     }
                   }}
-                  placeholder="聊聊天，或告诉我画什么、誊写什么… Enter 发送，Shift+Enter 换行"
-                  disabled={isAgentRunning}
+                  placeholder={isAgentRunning ? "草稿纸助教正在执行中… 按 Esc 或点击下方停止按钮可打断" : "聊聊天，或告诉我画什么、誊写什么… Enter 发送，Shift+Enter 换行"}
                   rows={2}
                   className="w-full p-2 bg-surface-container-lowest rounded-lg border border-outline-variant/40 text-[12px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary resize-none leading-relaxed pr-6"
                 />
-                {spokenInput && (
+                {spokenInput && !isAgentRunning && (
                   <button
                     type="button"
                     onClick={() => setSpokenInput('')}
@@ -3650,20 +3957,114 @@ export default function ScratchpadCanvas({
                 )}
               </div>
 
-              {/* Agent 触发按钮与状态 */}
+              {/* 实时 Status Bar：轮次、消耗 Token、Token 速度、上下文占用 */}
+              <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-surface-container-low/70 border border-outline-variant/30 text-[10px] text-on-surface-variant select-none gap-2">
+                {/* 状态指示与轮次 */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className={`inline-block w-2 h-2 rounded-full ${
+                      agentMetrics.isLive
+                        ? 'bg-emerald-500 animate-pulse'
+                        : 'bg-outline/40'
+                    }`} />
+                    <span className="font-semibold text-on-surface text-[10px]">
+                      {agentMetrics.isLive ? 'Loop 运行中' : '就绪'}
+                    </span>
+                  </div>
+
+                  <span className="text-outline-variant/60">|</span>
+
+                  <div className="flex items-center gap-1 shrink-0" title="当前执行迭代轮次 / 最大允许轮数">
+                    <span className="text-outline">轮次:</span>
+                    <span className="font-mono font-medium text-primary">
+                      {agentMetrics.iteration}
+                    </span>
+                    <span className="text-outline font-mono">/{agentMetrics.maxIterations || 8}</span>
+                  </div>
+                </div>
+
+                {/* Token 消耗、速度与上下文占用 */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Token 消耗 */}
+                  <div
+                    className="flex items-center gap-1"
+                    title={`Token 消耗: 总计 ${agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)} (输入: ${agentMetrics.inputTokens} / 输出: ${agentMetrics.outputTokens})`}
+                  >
+                    <span className="text-outline">消耗:</span>
+                    <span className="font-mono font-medium text-on-surface">
+                      {agentMetrics.totalTokens || (agentMetrics.inputTokens + agentMetrics.outputTokens)}
+                    </span>
+                    <span className="text-[9px] text-outline font-mono hidden sm:inline">
+                      ({agentMetrics.inputTokens}入/{agentMetrics.outputTokens}出)
+                    </span>
+                  </div>
+
+                  <span className="text-outline-variant/60">|</span>
+
+                  {/* Token 速度 */}
+                  <div
+                    className="flex items-center gap-1"
+                    title="Token 处理速度 (Tokens / 秒)"
+                  >
+                    <span className="text-outline">速度:</span>
+                    <span className={`font-mono font-medium ${agentMetrics.tokenSpeed > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-on-surface'}`}>
+                      {agentMetrics.tokenSpeed || 0}
+                    </span>
+                    <span className="text-[9px] text-outline font-mono">tok/s</span>
+                  </div>
+
+                  <span className="text-outline-variant/60">|</span>
+
+                  {/* 上下文占用 */}
+                  <div
+                    className="flex items-center gap-1.5"
+                    title={`当前上下文占用: ${agentMetrics.contextTokens || agentMetrics.inputTokens || 0} / ${agentMetrics.maxContextTokens || 131072} Tokens (${contextPercent}%)`}
+                  >
+                    <span className="text-outline">上下文:</span>
+                    <div className="w-8 h-1.5 bg-outline-variant/30 rounded-full overflow-hidden flex items-center">
+                      <div
+                        className={`h-full transition-all duration-300 rounded-full ${
+                          contextPercent > 80 ? 'bg-error' : contextPercent > 50 ? 'bg-amber-500' : 'bg-primary'
+                        }`}
+                        style={{ width: `${contextPercent}%` }}
+                      />
+                    </div>
+                    <span className="font-mono font-medium text-on-surface">
+                      {contextPercent}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Agent 触发按钮与操作状态 */}
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] text-outline">只操作草稿纸，不填写答题区</span>
-                <button
-                  type="button"
-                  onClick={() => handleTriggerAgentLoop()}
-                  disabled={isAgentRunning || !spokenInput.trim()}
-                  className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-40 shadow-xs"
-                >
-                  <span className={`material-symbols-outlined text-[13px] ${isAgentRunning ? 'animate-spin' : ''}`}>
-                    {isAgentRunning ? 'progress_activity' : 'auto_fix_high'}
-                  </span>
-                  <span>{isAgentRunning ? '正在操作…' : '发送并操作草稿纸'}</span>
-                </button>
+                <span className="text-[10px] text-outline truncate" title={isAgentRunning ? agentLoopStage : '只操作草稿纸，不填写答题区'}>
+                  {isAgentRunning ? (agentLoopStage || 'Agent Loop 正在思考并操作…') : '只操作草稿纸，不填写答题区'}
+                </span>
+
+                {isAgentRunning ? (
+                  <button
+                    type="button"
+                    onClick={handleAbortAgentLoop}
+                    className="px-3 py-1.5 rounded-lg bg-error hover:bg-error/90 text-white text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer shadow-xs shrink-0"
+                    title="立即中断当前思考与画板操作"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">stop_circle</span>
+                    <span>停止执行</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleTriggerAgentLoop()}
+                    disabled={!spokenInput.trim()}
+                    className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-[11px] font-semibold transition flex items-center gap-1 cursor-pointer disabled:opacity-40 shadow-xs shrink-0"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">
+                      auto_fix_high
+                    </span>
+                    <span>发送并操作草稿纸</span>
+                  </button>
+                )}
               </div>
             </div>
 

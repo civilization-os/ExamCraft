@@ -1,6 +1,6 @@
 {
   "name": "examcraft-ai-workbench",
-  "version": "1.1.9",
+  "version": "1.2.0",
   "private": true,
   "description": "ExamCraft AI Workbench - 双入口智能组卷与在线考练工作台",
   "type": "module",
@@ -11,6 +11,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@civilization/agent-loop": "file:./packages/civilization-agent-loop-0.1.0.tgz",
     "@civilization/model-core": "file:./packages/civilization-model-core-0.1.0.tgz",
     "express": "^4.21.2",
     "katex": "^0.19.0",
@@ -21,6 +22,7 @@
     "pdfjs-dist": "4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "zod": "^4.6.7",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

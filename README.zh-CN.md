@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.1.9"><img src="https://img.shields.io/badge/Release-v1.1.9-blue.svg?logo=github" alt="Release v1.1.9"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/Release-v1.2.0-blue.svg?logo=github" alt="Release v1.2.0"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -55,11 +55,25 @@
   - 快捷公式胶囊 100% 局限于原题已白纸黑字写出的式子与选项参数；
   - 坚决杜绝任何擅自联想的泰勒展开式或等价无穷小外部定理，确保学术诚信。
 - **题卷独立持久化**：每一道题均拥有独立的草稿画板存档，切换题目或回看历史记录时完整还原。
-- **Agent Loop 规范板书演算与双向交互**：
-  - **板书自由缩放与拖拽**：支持手动拖拽板书位置与调整字体缩放比例（80% ~ 160%）；
-  - **用户直接在板编辑**：用户可随时直接点选板书就地修改或删除；
-  - **Agent「先读后写」铁律**：草稿纸助手在执行任何增删改操作前必须先调用工具读取当前画板的真实状态，杜绝覆盖用户手动更改；
-  - **等量代换智能推导**：后台静默解析已知等式池，支持口述“用cosy等式替换”精准等量代换，界面无多余繁杂按钮干扰。
+- **基于真实 Agent Loop 的自主演算与双向交互 (True Agent Loop Engine)** 🆕：
+  - **核心执行循环架构**：全面接入 `@civilization/agent-loop` 真实多轮 ReAct 执行引擎，废弃单次伪请求，具备完整的自主规划、观察、工具调用与结果自省闭环；
+  - **草稿纸 5 大标准工具抽象**：
+    1. `read_scratchpad`：执行操作前先查阅当前画板的图元结构、最新板书与几何坐标，杜绝覆盖用户手写内容；
+    2. `write_math_derivation`：结构化追加/誊写分步算式、公式标签与数学推导；
+    3. `draw_geometry_or_plot`：根据数学题意自动生成 2D 几何、3D 空间立体图形及函数曲线图元；
+    4. `update_or_substitute`：实现高精度的等量代换、消元变形与局部图元更新；
+    5. `delete_or_clear`：按条件精准擦除错误或失效的演算图元；
+  - **深度思考与工具折叠面板**：
+    - 流式接收并展示模型思考流（`reasoningContent`），采用低饱和度淡色等宽文字，减少视觉干扰；
+    - 实时呈现工具调用进度状态徽标（查阅画板、誊写板书、绘制图表等）；
+    - 思考阶段默认展开直观反馈，最终总结板书回答时自动优雅折叠，用户可随时一键点击展开/收起；
+  - **全链路随时打断机制 (AbortController)**：
+    - 支持用户在思考或调用工具的中途随时打断，前端停止按钮、Esc 快捷键与后端 SSE 数据流即时取消；
+  - **聊天框底部实时 Status Bar 性能仪表盘**：
+    - **轮次 (Iteration)**：实时追踪当前执行轮次与上限（如 `1/8`）；
+    - **消耗 Token**：动态统计总 Token 消耗及细分指标（`总消耗 (输入/输出)`）；
+    - **Token 速度**：实时测算并高亮展示输出速率（`tok/s`）；
+    - **上下文占用 (Context %)**：直观展示当前上下文占模型窗口容量的百分比及微型进度条（如 `1.2k/128k`），状态一目了然。
 
 ### 3. 个人中心与个性化档案系统 (User Profile & Avatar Center) 🆕
 - **12 款精美渐变主题头像**：涵盖学者、极客、数理几何、火箭、猫头鹰、锦鲤等高质感头像，点击即时预览；
@@ -67,7 +81,7 @@
 - **全场景同步与统计**：
   - 访客（Guest）模式与注册账户全兼容，支持本地持久化与云端保存；
   - 个人中心一键汇聚生成试卷数、实战模考交卷数与错题本积累进度；
-- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.1.0`）。
+- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.0`）。
 
 ### 4. 专注模式在线答题考场 (Focus Mode Exam Room)
 - **多端实时答题持久化同步 (Zustand + Cloud Real-time Debounced Sync)** 🆕：

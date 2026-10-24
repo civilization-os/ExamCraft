@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { createChatModel, validateModelConfig } from '@civilization/model-core';
+import { runScratchpadAgentLoopStream } from './scratchpad-agent-engine.js';
 import { normalizeQuestionType, isPseudoPassage } from './src/utils/questionTypes.js';
 import {
   registerUser,
@@ -2902,6 +2903,82 @@ export function resolveEquivalenceSubstitution(spokenText = '', boardText = '') 
   }
   return null;
 }
+
+// POST /api/model/scratchpad-agent-stream
+// 基于 @civilization/agent-loop 的真 Agent Loop 双模态流式执行端点
+apiRouter.post('/model/scratchpad-agent-stream', async (req, res) => {
+  const {
+    spokenText,
+    contextProblem,
+    currentBoardElements = [],
+    recentConversation = [],
+    assistantTone = 'supportive'
+  } = req.body;
+
+  if (!spokenText || !spokenText.trim()) {
+    return res.status(400).json({ success: false, error: '口述思路或草稿内容不能为空' });
+  }
+
+  // 检查 API Key
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: '尚未配置模型 API Key，请前往「系统设置」输入 API Key 后开启真 Agent Loop。'
+    });
+  }
+
+  // SSE 标头配置
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  const abortController = new AbortController();
+  req.on('close', () => {
+    abortController.abort();
+  });
+
+  const model = createTrackedChatModel('scratchpad.write-draw');
+  const maxContextTokens = Number(currentConfig.maxTokens) ? Math.min(Number(currentConfig.maxTokens) * 32, 131072) : 131072;
+
+  try {
+    await runScratchpadAgentLoopStream({
+      modelInstance: model,
+      spokenText,
+      contextProblem,
+      currentBoardElements,
+      recentConversation,
+      assistantTone,
+      maxContextTokens,
+      signal: abortController.signal,
+      onEvent: (event) => {
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+      }
+    });
+
+    if (!res.writableEnded) {
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
+  } catch (err) {
+    if (abortController.signal.aborted) {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'aborted', reason: 'User cancelled' })}\n\n`);
+        res.end();
+      }
+      return;
+    }
+    console.error('[scratchpad-agent-stream] 运行时异常:', err.message);
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || '模型循环执行异常' })}\n\n`);
+      res.end();
+    }
+  }
+});
 
 // POST /api/model/scratchpad-agent-loop
 // 考场草稿纸专属 Agent Loop：辅助考生帮写规范板书草稿与绘图
