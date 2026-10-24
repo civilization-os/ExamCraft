@@ -71,9 +71,20 @@ const formatMathExpression = (str) => {
   if (!str) return '';
   let s = String(str).replace(/\$/g, '').trim();
 
+  // 0. 优先清理结构控制与文本宏 (必须置于所有普通符号替换之前，严防 \left 误伤)
+  s = s.replace(/\\left\b\s*/g, '');
+  s = s.replace(/\\right\b\s*/g, '');
+  s = s.replace(/\\(?:text|mathrm|mathbf|mathit|textbf)\{([^}]+)\}/g, '$1');
+
+  // 空白符与对齐宏替换：\quad, \qquad, \enspace, \,, \;, \!
+  s = s.replace(/\\qquad\b/g, '      ');
+  s = s.replace(/\\quad\b/g, '   ');
+  s = s.replace(/\\(?:enspace|thickspace|medspace|thinspace)\b/g, ' ');
+  s = s.replace(/\\(?:[,;:!])/g, ' ');
+
   // 1. 函数名与分式/开方
   s = s.replace(/\\(sin|cos|tan|cot|sec|csc|ln|lg|log|exp|lim|max|min|det|deg)\b/g, '$1');
-  s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)');
+  s = s.replace(/\\(?:dfrac|tfrac|frac)\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)');
   s = s.replace(/\\sqrt\[([^\]]+)\]\{([^}]+)\}/g, (_, root, val) => {
     const rootSup = root.split('').map((c) => supMap[c] || c).join('');
     return `${rootSup}√(${val})`;
@@ -92,26 +103,28 @@ const formatMathExpression = (str) => {
   s = s.replace(/\\sum/g, '∑');
   s = s.replace(/\\prod/g, '∏');
 
-  // 3. 运算符与几何/逻辑符号
-  s = s.replace(/\\pm/g, '±');
-  s = s.replace(/\\mp/g, '∓');
-  s = s.replace(/\\times/g, '×');
-  s = s.replace(/\\div/g, '÷');
-  s = s.replace(/\\cdot/g, '·');
-  s = s.replace(/\\le|\\leq/g, '≤');
-  s = s.replace(/\\ge|\\geq/g, '≥');
-  s = s.replace(/\\neq|\\ne/g, '≠');
-  s = s.replace(/\\approx/g, '≈');
-  s = s.replace(/\\equiv/g, '≡');
-  s = s.replace(/\\to|\\rightarrow/g, '→');
-  s = s.replace(/\\leftarrow/g, '←');
+  // 3. 运算符与几何/逻辑符号 (严格加 \b 单词边界，防止误匹配 \left)
+  s = s.replace(/\\pm\b/g, '±');
+  s = s.replace(/\\mp\b/g, '∓');
+  s = s.replace(/\\times\b/g, '×');
+  s = s.replace(/\\div\b/g, '÷');
+  s = s.replace(/\\cdot\b/g, '·');
+  s = s.replace(/\\le\b|\\leq\b/g, '≤');
+  s = s.replace(/\\ge\b|\\geq\b/g, '≥');
+  s = s.replace(/\\neq\b|\\ne\b/g, '≠');
+  s = s.replace(/\\sim\b/g, '～');
+  s = s.replace(/\\simeq\b/g, '≃');
+  s = s.replace(/\\approx\b/g, '≈');
+  s = s.replace(/\\equiv\b/g, '≡');
+  s = s.replace(/\\to\b|\\rightarrow\b/g, '→');
+  s = s.replace(/\\leftarrow\b/g, '←');
   s = s.replace(/\\implies\b|\\Rightarrow\b/g, '⇒');
   s = s.replace(/\\iff\b|\\Leftrightarrow\b/g, '⇔');
   s = s.replace(/\\because\b/g, '∵');
   s = s.replace(/\\therefore\b/g, '∴');
   s = s.replace(/\\(arcsin|arccos|arctan)\b/g, '$1 ');
   s = s.replace(/\\(sin|cos|tan|cot|sec|csc|ln|lg|log|exp)\b/g, '$1 ');
-  s = s.replace(/\\infty/g, '∞');
+  s = s.replace(/\\infty\b/g, '∞');
   s = s.replace(/\\in\b/g, '∈');
   s = s.replace(/\\notin\b/g, '∉');
   s = s.replace(/\\subset\b/g, '⊂');
@@ -126,9 +139,9 @@ const formatMathExpression = (str) => {
   s = s.replace(/\\parallel\b/g, '∥');
   s = s.replace(/\\angle\b/g, '∠');
   s = s.replace(/\\triangle\b/g, '△');
-  s = s.replace(/\\degree|\^\\circ/g, '°');
+  s = s.replace(/\\degree\b|\^\\circ/g, '°');
 
-  // 4. 希腊字母 (小写)
+  // 4. 希腊字母 (小写与大写)
   s = s.replace(/\\alpha\b/g, 'α');
   s = s.replace(/\\beta\b/g, 'β');
   s = s.replace(/\\gamma\b/g, 'γ');
@@ -152,8 +165,6 @@ const formatMathExpression = (str) => {
   s = s.replace(/\\chi\b/g, 'χ');
   s = s.replace(/\\psi\b/g, 'ψ');
   s = s.replace(/\\omega\b/g, 'ω');
-
-  // 希腊字母 (大写)
   s = s.replace(/\\Delta\b/g, 'Δ');
   s = s.replace(/\\Gamma\b/g, 'Γ');
   s = s.replace(/\\Theta\b/g, 'Θ');
@@ -177,8 +188,7 @@ const formatMathExpression = (str) => {
   });
   s = s.replace(/_([0-9a-zA-Z+-])/g, (_, sub) => subMap[sub] || `_${sub}`);
 
-  // 7. 清理残留 LaTeX 控制词与分组括号
-  s = s.replace(/\\left|\\right/g, '');
+  // 7. 清理残留未识别的反斜杠命令与分组括号
   s = s.replace(/\\([a-zA-Z]+)/g, '$1');
   s = s.replace(/[{}]/g, '');
 
@@ -3772,8 +3782,14 @@ export default function ScratchpadCanvas({
                     <span className="material-symbols-outlined text-[18px]">edit_note</span>
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[13px] font-semibold leading-tight tracking-wide text-on-surface">草稿纸助手</div>
-                    <div className="mt-0.5 truncate text-[10px] leading-tight text-on-surface-variant">只按你的指令画写，不推导答案</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[13px] font-semibold leading-tight tracking-wide text-on-surface">考场草稿助手</span>
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-full text-[9px] font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                        <span className="material-symbols-outlined text-[10px]">shield</span>
+                        防作弊模式
+                      </span>
+                    </div>
+                    <div className="mt-0.5 truncate text-[10px] leading-tight text-on-surface-variant">考试进行中 · 严格防作弊 · 仅协助誊写与画图</div>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
@@ -4077,7 +4093,7 @@ export default function ScratchpadCanvas({
                             <div className="flex items-center justify-between text-[10px] font-semibold text-on-surface-variant mb-1 pb-1 border-b border-outline-variant/15">
                               <div className="flex items-center gap-1">
                                 <span className="material-symbols-outlined text-[13px] text-primary">draw</span>
-                                <span>{message.status === 'blocked' ? '安全提示' : message.status === 'error' ? '执行未完成' : '草稿纸助教'}</span>
+                                <span>{message.status === 'blocked' ? '🛡️ 防作弊拦截' : message.status === 'error' ? '执行未完成' : '考场草稿助手'}</span>
                               </div>
                               {message.metrics && (() => {
                                 const toolsCount = message.toolCalls?.length ?? message.metrics.toolCallsCount ?? 0;
@@ -4311,7 +4327,7 @@ export default function ScratchpadCanvas({
                 {/* 底层：辅助提示与操作主按钮 */}
                 <div className="flex items-center justify-between pt-0.5">
                   <span className="text-[10px] text-outline truncate max-w-[200px]" title={isAgentRunning ? agentLoopStage : '只操作草稿纸，不填写答题区'}>
-                    {isAgentRunning ? (agentLoopStage || 'Agent Loop 思考并操作中…') : '只操作草稿纸，不代答答题区'}
+                    {isAgentRunning ? (agentLoopStage || 'Agent Loop 思考并操作中…') : '🛡️ 闭卷考试防作弊模式：只操作草稿纸，严禁索取外部定理与答案'}
                   </span>
 
                   {isAgentRunning ? (

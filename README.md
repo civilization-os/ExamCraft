@@ -65,7 +65,10 @@
 - **Profile Customization**: Personalize nicknames, target examinations (Postgraduate Math, CET-4/6, College Transfer, Custom), and motivational mottoes.
 - **Full Guest & Auth Cloud Sync**: Seamlessly works for both anonymous guests (local storage) and authenticated cloud accounts, displaying real-time metrics for created exams, test submissions, and mistake logs.
 - **Global Version Indicators**: Prominently shows release version `v1.2.6` on the top navigation bar, user dropdown menu, and system settings panel.
-- **Anti-Cheat & Strict Scribe Boundaries (v1.2.6)**: Refuses to perform unsolicited question solving, integration, or long derivation proofs. Confines expansions to baseline exam formulas (1–3 lines maximum) and preserves calculation ownership for the candidate.
+- **Dual-Mode Agent Architecture (v1.2.6)**: 
+  - **In-Exam Scratchpad Assistant (`exam_scratchpad`)**: Strictly operates in proctored anti-cheat mode. Refuses unsolicited external formula lookups, Taylor expansions, or theorem answers. Exclusively transcribes candidate-dictated math lines, function plots, and geometric shapes.
+  - **Post-Exam Notebook Tutor (`notebook_tutor`)**: Dedicated tutor agent for exam review and mistake notebook analysis, unlocking full multi-step derivations, proof explanations, and isomorphic variant drills.
+- **Comprehensive LaTeX Formatter Fixes (v1.2.6)**: Fully resolves whitespace macros (`\quad`, `\qquad`, `\enspace`), eliminates the `\left(` bracket truncation bug (`≤ft(`), and renders equivalent infinitesimal symbols (`\sim` $\to$ `～`).
 - **Action Throttling & Self-Healing Sanitizer (v1.2.6)**: Throttles canvas actions streaming frequency by 99.4%, eradicates multi-line overlapping ghosts, and introduces automated element deduplication and healing.
 
 ### 4. Focus-Mode Proctored Online Exam Room

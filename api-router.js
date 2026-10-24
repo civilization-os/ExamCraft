@@ -2912,7 +2912,8 @@ apiRouter.post('/model/scratchpad-agent-stream', async (req, res) => {
     contextProblem,
     currentBoardElements = [],
     recentConversation = [],
-    assistantTone = 'supportive'
+    assistantTone = 'supportive',
+    mode = 'exam_scratchpad'
   } = req.body;
 
   if (!spokenText || !spokenText.trim()) {
@@ -2960,6 +2961,7 @@ apiRouter.post('/model/scratchpad-agent-stream', async (req, res) => {
       currentBoardElements,
       recentConversation,
       assistantTone,
+      mode,
       maxContextTokens,
       signal: abortController.signal,
       onEvent: (event) => {
@@ -2996,6 +2998,75 @@ apiRouter.post('/model/scratchpad-agent-stream', async (req, res) => {
 // POST /api/model/scratchpad-agent-loop
 // 考场草稿纸专属 Agent Loop：辅助考生帮写规范板书草稿与绘图
 // 意图、作弊防范与草稿规范化全部交由 AI Agent 深度理解与直接判断，不依赖脆弱的硬编码规则
+
+// POST /api/model/notebook-tutor-stream
+// 错题本 / 试卷答案解析专属名师助教 Agent（考试之后的复盘与研学流程）
+apiRouter.post('/model/notebook-tutor-stream', async (req, res) => {
+  const {
+    spokenText,
+    contextProblem,
+    currentBoardElements = [],
+    recentConversation = [],
+    assistantTone = 'supportive'
+  } = req.body;
+
+  if (!spokenText || !spokenText.trim()) {
+    return res.status(400).json({ success: false, error: '提问或解题要求不能为空' });
+  }
+
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.status(400).json({ success: false, error: '未配置大模型 API Key' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  const abortController = new AbortController();
+  req.on('close', () => abortController.abort());
+
+  try {
+    const model = createTrackedChatModel('scratchpad.write-draw');
+
+    await runScratchpadAgentLoopStream({
+      modelInstance: model,
+      spokenText,
+      contextProblem,
+      currentBoardElements,
+      recentConversation,
+      assistantTone,
+      mode: 'notebook_tutor', // 错题本名师助教模式
+      maxContextTokens: 131072,
+      signal: abortController.signal,
+      onEvent: (event) => {
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+          if (typeof res.flush === 'function') res.flush();
+        }
+      }
+    });
+
+    if (!res.writableEnded) {
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
+  } catch (err) {
+    if (abortController.signal.aborted) {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'aborted', reason: 'User cancelled' })}\n\n`);
+        res.end();
+      }
+      return;
+    }
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || '助教执行异常' })}\n\n`);
+      res.end();
+    }
+  }
+});
+
 apiRouter.post('/model/scratchpad-agent-loop', async (req, res) => {
   const { spokenText, contextProblem, currentBoardContent, currentBoardElements = [], recentConversation = [], assistantTone = 'supportive' } = req.body;
 
