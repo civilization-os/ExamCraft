@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.6"><img src="https://img.shields.io/badge/Release-v1.2.6-blue.svg?logo=github" alt="Release v1.2.6"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.7"><img src="https://img.shields.io/badge/Release-v1.2.7-blue.svg?logo=github" alt="Release v1.2.7"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -69,18 +69,18 @@
     - 思考阶段默认展开直观反馈，最终总结板书回答时自动优雅折叠，用户可随时一键点击展开/收起；
   - **全链路随时打断机制 (AbortController)**：
     - 支持用户在思考或调用工具的中途随时打断，前端停止按钮、Esc 快捷键与后端 SSE 数据流即时取消；
-  - **考场草稿辅助 Agent（闭卷防作弊模式）vs 错题本助教 Agent 架构分流 (v1.2.6)** 🆕：
+  - **考场草稿辅助 Agent（闭卷防作弊模式）vs 错题本助教 Agent 架构分流 (v1.2.7)** 🆕：
     - **考场中 · 严格防作弊模式 (`exam_scratchpad`)**：
       - 正式正名为「考场草稿助手 · 🛡️ 防作弊模式」，严格坚守闭卷考试铁律；
       - **坚决拒绝泄露任何外部定理或公式**：当考生在考试中提问函数展开、求导或索要解法时，助手严格拦截并予以防作弊提醒，绝不向草稿纸写入未口述公式；
       - **合规服务界限**：只帮考生规范誊写个人口述的推导算式、绘制指定几何/函数图形或执行代换；
     - **考试后 · 错题本与解析助教 Agent (`notebook_tutor`)**：
       - 预留并接入交卷后复盘与错题本场景的专属名师助教，放开权限全方位讲解求导证明、泰勒级数推导细节、失分陷阱剖析与举一反三变式训练；
-  - **公式排版解析器全面修复 (`\quad`、`\sim`、`\left`) (v1.2.6)** 🆕：
+  - **公式排版解析器全面修复 (`\quad`、`\sim`、`\left`) (v1.2.7)** 🆕：
     - **空白符与宏支持**：完美支持 `\quad`（转换为大空格）、`\qquad`、`\enspace`、`\,`，根治排版中 `\quad` 裸露变成单词 `quad` 的缺陷；
     - **防括号误转**：优先剥离 `\left` 与 `\right` 并增加单词边界，彻底消除 `\left(` 误被截断为 `≤ft(` 的历史遗留 Bug；
     - **等价符号美化**：支持 `\sim` 等价无穷小（～）、`\simeq`（≃）及高次方根 `\sqrt[3]{...}` 的高保真字符渲染；
-  - **画板图元覆盖自愈与流式风暴斩断 (v1.2.6)** 🆕：
+  - **画板图元覆盖自愈与流式风暴斩断 (v1.2.7)** 🆕：
     - **彻底斩断流式风暴**：切断纯文本 delta 和 reasoning delta 重复下发 canvasActions，将动作下发频率优化降低 99.4%；
     - **图元去重自愈引擎 (Sanitizer)**：自动识别并净化因重复下发导致的历史堆叠图元，合并为规范整洁的单一主板书，并彻底解决 294 项图元覆盖重影问题。
   - **聊天框底部实时 Status Bar 性能仪表盘 (v1.2.4)**：
@@ -100,7 +100,7 @@
 - **全场景同步与统计**：
   - 访客（Guest）模式与注册账户全兼容，支持本地持久化与云端保存；
   - 个人中心一键汇聚生成试卷数、实战模考交卷数与错题本积累进度；
-- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.6`）。
+- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.7`）。
 
 ### 4. 专注模式在线答题考场 (Focus Mode Exam Room)
 - **多端实时答题持久化同步 (Zustand + Cloud Real-time Debounced Sync)** 🆕：
