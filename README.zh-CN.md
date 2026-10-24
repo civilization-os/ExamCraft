@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.2.9"><img src="https://img.shields.io/badge/Release-v1.2.9-blue.svg?logo=github" alt="Release v1.2.9"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.3.0"><img src="https://img.shields.io/badge/Release-v1.3.0-blue.svg?logo=github" alt="Release v1.3.0"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -69,13 +69,12 @@
     - 思考阶段默认展开直观反馈，最终总结板书回答时自动优雅折叠，用户可随时一键点击展开/收起；
   - **全链路随时打断机制 (AbortController)**：
     - 支持用户在思考或调用工具的中途随时打断，前端停止按钮、Esc 快捷键与后端 SSE 数据流即时取消；
+  - **考试倒计时极简轻奢毛玻璃悬浮 HUD (v1.3.0)** 🆕：
+    - **避开顶栏黄金定位**：精确定位至 `top-18 right-6`，彻底消除对顶栏钱包、头像与操作菜单的遮挡压迫；
+    - **彻底废除全屏黑色模态遮罩与土味粗红边**：摒弃传统弹窗阻断答题的体验与刺眼发光圈，重塑为高透明度毛玻璃悬浮视窗（HUD），外层点击全穿透，做题、涂卡、书写 0% 打断；
+    - **遵循 Motion 与 UI Motion Atlas 弹簧动效**：基于 `motion/react` 实现 Spring 物理阻尼微入场、柔和微光指示灯与极细作答进度条；
+    - **10秒自动微缩与极简动态岛胶囊 (Minimized Pill)**：无操作 10 秒后平滑折叠为仅 30px 高的极简动态岛胶囊，悬停暂停，点击秒级柔和展开；
   - **AI 智能填充试卷答案与一键快捷回填 (v1.2.9)** 🆕：
-    - **口述即回填 (`fill_exam_answer`)**：在草稿纸演算完成后，考生只需口述“选A”、“选B”或“填入答案”，AI Agent 即可直接调用专用回填工具将答案同步勾选至试卷答题区与答题卡，无需离开草稿纸；
-    - **气泡快捷回填胶囊**：当助手回复中检测到与选项一致时，气泡底部自动浮现「✍️ 一键填入试卷答题区 (选项 A)」轻量按钮，点击秒级勾选；
-  - **考试倒计时非打断 MessageBox 浮动视窗 (v1.2.9)** 🆕：
-    - **彻底废除全屏黑色模态遮罩**：颠覆传统弹窗阻断答题的体验，重构为右上角悬浮消息盒（MessageBox HUD），外层点击全穿透，做题、涂卡、书写 0% 打断；
-    - **遵循 Motion 与 UI Motion Atlas 弹簧动效**：基于 `motion/react` 实现 Spring 物理入场、呼吸微光、紧急程度动态色彩（琥珀预警 / 珊瑚最后冲刺）；
-    - **12秒自动微缩与动态岛胶囊 (Minimized Pill)**：无操作 12 秒后平滑折叠为极简时间胶囊，悬停暂停，点击秒级展开，答题节奏完全由考生自主掌控；
   - **考场草稿辅助 Agent（闭卷防作弊模式）vs 错题本助教 Agent 架构分流 (v1.2.8)** 🆕：
     - **考场中 · 极简防泄题红线 (`exam_scratchpad`)**：
       - 正式正名为「考场草稿助手 · 🛡️ 防作弊模式」，**唯一红线：只要保证不主动透露未知的外部公式与题目答案即可**；
@@ -108,7 +107,7 @@
 - **全场景同步与统计**：
   - 访客（Guest）模式与注册账户全兼容，支持本地持久化与云端保存；
   - 个人中心一键汇聚生成试卷数、实战模考交卷数与错题本积累进度；
-- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.2.9`）。
+- **版本标识全局呈现**：顶栏 Logo 旁、用户下拉菜单及系统设置页统一醒目标注系统发行版本号（当前版本：`v1.3.0`）。
 
 ### 4. 专注模式在线答题考场 (Focus Mode Exam Room)
 - **多端实时答题持久化同步 (Zustand + Cloud Real-time Debounced Sync)** 🆕：
