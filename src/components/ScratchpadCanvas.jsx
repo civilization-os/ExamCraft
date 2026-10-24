@@ -3906,7 +3906,7 @@ export default function ScratchpadCanvas({
                     const hasThoughtOrTools = Boolean(message.reasoningContent || (message.toolCalls && message.toolCalls.length > 0));
                     const isThoughtExpanded = expandedThoughts[message.id] !== undefined
                       ? expandedThoughts[message.id]
-                      : (!message.isCompleted && hasThoughtOrTools);
+                      : false;
 
                     return (
                       <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>

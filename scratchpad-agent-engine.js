@@ -552,7 +552,7 @@ export async function runScratchpadAgentLoopStream({
     model: modelAdapter,
     tools,
     config: {
-      maxIterations: 8,
+      maxIterations: 6,
       maxRepeatedCalls: 3,
       maxRepairAttempts: 2
     }
@@ -572,6 +572,10 @@ export async function runScratchpadAgentLoopStream({
    - 针对考生的每一句口述指令，写入或绘图工具只需且只能调用 1 次！
    - 一旦工具返回 status 为 'success' 或 'already_completed'，前端草稿纸画布就已经实时渲染生效，严禁使用相同或相似参数再次调用该工具！
    - 工具调用成功后，你的下一步必须是——直接输出规范精炼的 Markdown 文本答复向考生汇报与总结（可包含 KaTeX 数学公式），结束本轮对话。绝对不可继续调用工具！
+4. 全程规范中文与专业输出（严禁暴露底层接口或内部调试）：
+   - 思考过程与最终答复必须统一使用自然地道的中文，严禁使用英文内心独白或英文碎片；
+   - 工具调用必须通过标准的 Function Calling 结构化接口提交，严禁在正文回答中伪造任何 XML 标签（如 <parameter>、<tool> 等）或裸 JSON 代码块；
+   - 严禁向考生倾倒底层接口报错、参数序列化或重试等系统内部调试信息，始终保持沉着、专业、专注。
 
 【当前题目背景】:
 ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
@@ -702,49 +706,52 @@ ${contextProblem ? contextProblem : '（无特定题目题干）'}`;
     if (
       err.name === 'LoopInfiniteLoopError' ||
       err.name === 'LoopMaxIterationsError' ||
-      err.message?.includes('Infinite loop detected')
+      err.message?.includes('Infinite loop detected') ||
+      err.message?.includes('maximum allowed iterations')
     ) {
       console.warn(`[scratchpad-agent-engine] 触发循环防护熔断 (${err.name}):`, err.message);
-      if (canvasActions.length > 0) {
-        console.log(`[scratchpad-agent-engine] 画板已有 ${canvasActions.length} 项有效操作，自动转为优雅收敛完成。`);
-        const fallbackText = '\n\n✅ 板书推导与图形已规范记录至草稿纸。请继续下一步思路。';
-        if (onEvent) {
-          onEvent({
-            type: 'text-delta',
-            delta: fallbackText,
-            canvasActions: [...canvasActions]
-          });
-          onEvent({
-            type: 'completed',
-            metrics: {
-              iteration: currentIteration,
-              toolCallsCount,
-              maxIterations: 8,
-              inputTokens: estimatedInputTokens,
-              outputTokens: accumulatedOutputTokens + 20,
-              totalTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
-              tokenSpeed: 0,
-              contextTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
-              maxContextTokens
-            },
-            canvasActions: [...canvasActions]
-          });
-        }
-        return {
-          success: true,
-          canvasActions,
+      console.log(`[scratchpad-agent-engine] 自动转为优雅收敛完成 (已有 ${canvasActions.length} 项有效画板操作)。`);
+      
+      const fallbackText = canvasActions.length > 0
+        ? '\n\n✅ 板书推导与图形已规范记录至草稿纸。请继续下一步思路。'
+        : '\n\n已完成思路梳理。需要我把哪一步具体推导公式或图形落到草稿纸上吗？请随时告诉我。';
+
+      if (onEvent) {
+        onEvent({
+          type: 'text-delta',
+          delta: fallbackText,
+          canvasActions: [...canvasActions]
+        });
+        onEvent({
+          type: 'completed',
           metrics: {
             iteration: currentIteration,
             toolCallsCount,
+            maxIterations: 6,
             inputTokens: estimatedInputTokens,
             outputTokens: accumulatedOutputTokens + 20,
             totalTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
             tokenSpeed: 0,
             contextTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
             maxContextTokens
-          }
-        };
+          },
+          canvasActions: [...canvasActions]
+        });
       }
+      return {
+        success: true,
+        canvasActions,
+        metrics: {
+          iteration: currentIteration,
+          toolCallsCount,
+          inputTokens: estimatedInputTokens,
+          outputTokens: accumulatedOutputTokens + 20,
+          totalTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
+          tokenSpeed: 0,
+          contextTokens: estimatedInputTokens + accumulatedOutputTokens + 20,
+          maxContextTokens
+        }
+      };
     }
 
     throw err;
