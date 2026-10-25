@@ -531,26 +531,28 @@ export function createScratchpadTools({ currentElements, canvasActions, onToolEv
     }
   });
 
-  // 6. fill_exam_answer: 自动回填试卷答题区
+  // 6. fill_exam_answer: 自动回填试卷答题区 (全题型支持：选择、填空、判断、主观题)
   const fillExamAnswer = defineLoopTool({
     name: 'fill_exam_answer',
-    description: '将推导结论或考生指定的选项/答案直接填入当前题目的试卷答题区。当考生说“选A”、“选B”、“帮我选A”、“填入答案”或者明确要求把答案选到答题卡时调用。',
+    description: '将推导结论或考生指定的答案直接填入当前题目的试卷答题区（支持全题型：单选、多选、填空、判断、主观解答题）。当考生说“选A”、“选B”、“填入 1/6”、“答案正确”、“把结论填到答题卡/试卷”时调用。',
     schema: z.object({
-      answer: z.string().describe('填入的答案内容。单选题或多选题传入选项字母如 "A"、"B"、"CD"；填空题传入具体结论数值或表达式如 "1/6"、"e^x"'),
-      reason: z.string().optional().describe('回填依据或简要结论说明，如 "经麦克劳林展开求导得 a=1/3, b=-1，对应选项 A"')
+      answer: z.string().describe('填入的具体答案内容。单选/多选题填选项字母如 "A"、"CD"；填空题填具体数值、公式或表达式如 "1/6"、"\\\\sqrt{2}"、"e^x"；判断题填 "正确"/"错误"；主观大题填最终计算结论或规范分步解答'),
+      questionType: z.enum(['choice', 'fill_blank', 'true_false', 'subjective']).optional().describe('当前题目所属题型'),
+      reason: z.string().optional().describe('回填依据或简要结论说明，如 "经麦克劳林展开求导得 a=1/3, b=-1"')
     }),
-    execute: ({ answer, reason }) => {
+    execute: ({ answer, questionType, reason }) => {
       const cleanAns = String(answer || '').trim();
       canvasActions.push({
         type: 'fill_answer',
         answer: cleanAns,
+        questionType,
         reason
       });
       return {
         status: 'success',
         action: 'filled_exam_answer',
         answer: cleanAns,
-        instruction: `✅ 答案【${cleanAns}】已成功自动填入试卷答题区！前端已实时同步勾选答题卡并高亮显示。请立即向考生输出简明答复告知已帮其填入。`
+        instruction: `✅ 答案【${cleanAns}】已成功自动填入试卷答题区！前端已实时同步答题卡并高亮显示。请立即向考生输出简明答复告知已帮其填入。`
       };
     }
   });
@@ -602,11 +604,15 @@ export async function runScratchpadAgentLoopStream({
 2. 积极协助代换、化简与排版演算（完全合规且必须积极执行）：
    - 只要草稿纸上已经存在考生写下的公式（或题干中已有已知式），当考生要求“把题干公式用我们已知公式替换”、“把第一行代入分子/分母”、“化简式子”、“合并同类项”等，你必须积极、聪明地协助考生完成代换，调用 write_math_derivation 或 update_or_substitute 将代换整理后的推导步骤清晰呈现在草稿板上！
    - 绝不要死板教条地要求考生把代换后的每个字符都一字不漏地念出来。草稿助手就是要替考生完成代换排版、式子整理与几何画图！
-3. 协助考生自动填充试卷答案（极速答题赋能）：
-   - 当考生说“选A”、“选B”、“填A”、“帮我选A”、“选第一个选项”，或者指令“把答案选上/填入答题卡/填入试卷”时，必须调用 fill_exam_answer 工具将对应选项或填空内容直接回填到试卷答题区！
-   - 并在文本答复中告知考生：“✅ 已为您将答案【A】填入试卷答题区！”
+3. 协助考生全题型自动回填试卷答案（极速答题赋能）：
+   - 无论单选、多选、填空、判断还是主观解答题，当考生口述答案或指示填入试卷答题卡时，必须调用 fill_exam_answer 工具直接回填到试卷答题区：
+     * 【单选/多选题】：考生说“选A”、“选B”、“多选选ACD”、“选第一个”等，回填对应选项字母（如 "A"、"CD"）；
+     * 【填空题】：考生说“填空填 1/6”、“答案是根号3”、“空里填 e^x”、“把结果填入”，回填具体数值、表达式或 LaTeX 规范串（如 "1/6"、"\\sqrt{3}"、"e^x"）；
+     * 【判断题】：考生说“选正确”、“填错误”、“这道题是对的”，回填 "正确" / "错误" 或对应标识；
+     * 【主观计算/证明大题】：考生说“把答案/结论填入试卷”、“将草稿过程誊写到答卷”，将核心计算结论或规范分步推导填入答题区；
+   - 并在文本答复中告知考生已成功填入：“✅ 已为您将答案【{填入的答案内容}】填入试卷答题区！”
 4. 常用工具调用指南：
-   - fill_exam_answer: 自动回填试卷答案（如选项 "A"、"B" 或填空答案）；
+   - fill_exam_answer: 自动回填试卷答案（支持单选/多选/填空/判断/大题结论）；
    - write_math_derivation: 在草稿纸上呈现规范的 LaTeX 演算或代换步骤（1~4 行），如题干公式代入、展开式代换；
    - draw_geometry_or_plot: 绘制几何图形或函数曲线；
    - update_or_substitute: 进行就地等量代换或板书局部调整；

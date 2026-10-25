@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.3.0"><img src="https://img.shields.io/badge/Release-v1.3.0-blue.svg?logo=github" alt="Release v1.3.0"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.3.1"><img src="https://img.shields.io/badge/Release-v1.3.1-blue.svg?logo=github" alt="Release v1.3.1"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -74,7 +74,10 @@
     - **彻底废除全屏黑色模态遮罩与土味粗红边**：摒弃传统弹窗阻断答题的体验与刺眼发光圈，重塑为高透明度毛玻璃悬浮视窗（HUD），外层点击全穿透，做题、涂卡、书写 0% 打断；
     - **遵循 Motion 与 UI Motion Atlas 弹簧动效**：基于 `motion/react` 实现 Spring 物理阻尼微入场、柔和微光指示灯与极细作答进度条；
     - **10秒自动微缩与极简动态岛胶囊 (Minimized Pill)**：无操作 10 秒后平滑折叠为仅 30px 高的极简动态岛胶囊，悬停暂停，点击秒级柔和展开；
-  - **AI 智能填充试卷答案与一键快捷回填 (v1.2.9)** 🆕：
+  - **AI 全题型智能填充试卷答案与自适应快捷回填 (v1.3.1)** 🆕：
+    - **覆盖全卷题型体系**：全面支持**单选/多选题**（字母代码填入）、**填空题**（数值/根式/分式/LaTeX公式填入）、**判断题**（正确/错误标定）以及**主观计算大题**（核心结论与分步推导填入）；
+    - **极速答题赋能工具 `fill_exam_answer`**：支持自动识别口述指令（如“选A”、“填入 1/6”、“答案是根号2”、“把结论填到答题卡”），精准调用工具直接回填对应题号答题区；
+    - **气泡结论智能胶囊**：对话气泡自适应识别提取推导结论，实时生成「✍️ 一键填入试卷答题区 (选项 A / 1/6 / 正确)」轻量快捷按钮，考生点击即可秒级完成填涂；
   - **考场草稿辅助 Agent（闭卷防作弊模式）vs 错题本助教 Agent 架构分流 (v1.2.8)** 🆕：
     - **考场中 · 极简防泄题红线 (`exam_scratchpad`)**：
       - 正式正名为「考场草稿助手 · 🛡️ 防作弊模式」，**唯一红线：只要保证不主动透露未知的外部公式与题目答案即可**；

@@ -4227,26 +4227,37 @@ export default function ScratchpadCanvas({
                                 </div>
                               )}
 
-                              {/* AI 推导选项快捷一键回填试卷 */}
+                              {/* AI 推导结论快捷一键回填试卷 (全题型支持：选择、填空、判断、主观题) */}
                               {message.role !== 'user' && typeof onFillAnswer === 'function' && message.content && (() => {
-                                const match = message.content.match(/(?:你选|建议选|选项|答案(?:是|为)?)\s*([A-D])\b/) ||
-                                              message.content.match(/[与等同于]\s*选项\s*([A-D])\b/) ||
-                                              message.content.match(/\b([A-D])\s*项\b/);
-                                const optionChar = match ? match[1] : null;
-                                if (!optionChar) return null;
+                                // 1. 优先提取明确的答案包裹：如 答案【...】、答案为【...】、填入【...】
+                                const bracketMatch = message.content.match(/(?:答案|结论|结果|填入|已填入)[：:\s]*[【\[「]([^】\]」]+)[】\]」]/);
+                                // 2. 选项提取：如 选A、选项A、选项为 B、多选 ACD
+                                const optionMatch = message.content.match(/(?:你选|建议选|选项|答案(?:是|为)?)\s*([A-D]{1,4})\b/) ||
+                                                    message.content.match(/[与等同于]\s*选项\s*([A-D]{1,4})\b/) ||
+                                                    message.content.match(/\b([A-D])\s*项\b/);
+                                // 3. 填空/判断提取：如 答案是 1/6、结论为：正确
+                                const fillMatch = message.content.match(/(?:答案(?:是|为)?|计算结果为|最终结论(?:为)?)[：:\s]*(\$?[^，,\n。]{1,24}\$?)/);
+
+                                const rawAns = bracketMatch ? bracketMatch[1] : (optionMatch ? optionMatch[1] : (fillMatch ? fillMatch[1] : null));
+                                const cleanAns = rawAns ? rawAns.replace(/^\$|\$/g, '').trim() : null;
+                                if (!cleanAns || cleanAns.length > 30) return null;
+
+                                const isOption = /^[A-D]{1,4}$/.test(cleanAns);
+                                const labelText = isOption ? `选项 ${cleanAns}` : cleanAns;
+
                                 return (
                                   <div className="pt-1.5 flex items-center gap-1.5">
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        onFillAnswer(optionChar);
-                                        showToast(`✅ 已填入试卷答题区：选项 ${optionChar}`, 'success');
+                                        onFillAnswer(cleanAns);
+                                        showToast(`✅ 已填入试卷答题区：${labelText}`, 'success');
                                       }}
                                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-semibold border border-primary/25 cursor-pointer transition-all shadow-2xs hover:scale-[1.02] active:scale-[0.98]"
-                                      title="一键将该选项填入试卷答题卡"
+                                      title="一键将该答案/结论填入试卷答题卡"
                                     >
                                       <span className="material-symbols-outlined text-[14px]">edit_square</span>
-                                      <span>✍️ 一键填入试卷答题区 (选项 {optionChar})</span>
+                                      <span>✍️ 一键填入试卷答题区 ({labelText})</span>
                                     </button>
                                   </div>
                                 );
