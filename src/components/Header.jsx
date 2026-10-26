@@ -67,6 +67,7 @@ export default function Header({
     { path: 'exam-generator', label: '智能组卷', icon: 'auto_fix_high' },
     { path: 'paper-library', label: '试卷库', icon: 'library_books' },
     { path: 'question-bank', label: '我的题集', icon: 'collections_bookmark' },
+    { path: 'vocabulary', label: '词汇/背单词', icon: 'menu_book' },
     { path: 'settings', label: '系统设置', icon: 'settings' }
   ];
 

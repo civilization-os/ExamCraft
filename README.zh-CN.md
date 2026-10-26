@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.3.1"><img src="https://img.shields.io/badge/Release-v1.3.1-blue.svg?logo=github" alt="Release v1.3.1"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.4.0"><img src="https://img.shields.io/badge/Release-v1.4.0-blue.svg?logo=github" alt="Release v1.4.0"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -69,6 +69,13 @@
     - 思考阶段默认展开直观反馈，最终总结板书回答时自动优雅折叠，用户可随时一键点击展开/收起；
   - **全链路随时打断机制 (AbortController)**：
     - 支持用户在思考或调用工具的中途随时打断，前端停止按钮、Esc 快捷键与后端 SSE 数据流即时取消；
+  - **考研英语艾宾浩斯智能背单词与真题切片研读模块 (v1.4.0)** 🆕：
+    - **五维词库体系与文件夹分类管理**：支持「全部生词」、「艾宾浩斯复盘 (待办)」、「考研核心高频」、「AI 错题提取生词」与「已掌握/斩获」动态多维筛选，支持按考研年份及自定义生词文件夹隔离管理；
+    - **真题切片与长难句沉浸研读**：深度整合历年考研真题阅读长难句原文语境，关键词高亮标注，并配以考研级权威参考译文与难度评级；
+    - **DeepSeek 构词联想与同义词高频辨析**：由 AI 深度剖析词根词缀衍生逻辑（如 `epi-` + `hemer-` + `-al`），并横向对比考研真题常考同义替换（如 `transient`、`fleeting`、`evanescent`）；
+    - **英美双音标与真人级语音发音**：集成 Web Speech API，英式 `/ɪ'fem.ər.əl/` 与美式 `/ə'fem.ər.əl/` 一键标准发声；
+    - **四级艾宾浩斯科学记忆反馈**：提供「完全忘记 (1天)」、「模糊犹豫 (3天)」、「基本掌握 (7天)」、「轻松秒杀 (14天)」梯度反馈，并支持键盘数字键 `1/2/3/4` 与 `空格` 翻卡秒级盲操；
+    - **AI 智能生词提取与 PDF 导出**：支持自由输入考研长难句或文章由 `model_core` 一键智能抽取生词入库，支持导出整套生词解析与闪卡一键打印；
   - **考试倒计时极简轻奢毛玻璃悬浮 HUD (v1.3.0)** 🆕：
     - **避开顶栏黄金定位**：精确定位至 `top-18 right-6`，彻底消除对顶栏钱包、头像与操作菜单的遮挡压迫；
     - **彻底废除全屏黑色模态遮罩与土味粗红边**：摒弃传统弹窗阻断答题的体验与刺眼发光圈，重塑为高透明度毛玻璃悬浮视窗（HUD），外层点击全穿透，做题、涂卡、书写 0% 打断；

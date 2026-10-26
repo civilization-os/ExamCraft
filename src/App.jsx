@@ -7,6 +7,7 @@ import PaperLibraryView from './views/PaperLibraryView';
 import ExamRoomView from './views/ExamRoomView';
 import ExamResultReportView from './views/ExamResultReportView';
 import MistakeNotebookView from './views/MistakeNotebookView';
+import VocabularyFlashcardsView from './views/VocabularyFlashcardsView';
 import SettingsView from './views/SettingsView';
 import AuthView from './views/AuthView';
 import UserProfileModal from './components/UserProfileModal';
@@ -28,7 +29,7 @@ import { deduplicateQuestions } from './utils/questionTypes';
 import { inferPaperSubject } from './utils/paperSubject';
 import { mergeAnswersSmartly } from './stores/useExamSessionStore';
 
-const APP_PATHS = new Set(['dashboard', 'exam-generator', 'paper-library', 'question-bank', 'settings', 'exam-room', 'exam-result', 'login']);
+const APP_PATHS = new Set(['dashboard', 'exam-generator', 'paper-library', 'question-bank', 'vocabulary', 'settings', 'exam-room', 'exam-result', 'login']);
 
 function getPathFromLocation() {
   const hashPath = window.location.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
@@ -742,6 +743,12 @@ export default function App() {
           />
         )}
 
+        {currentPath === 'vocabulary' && (
+          <VocabularyFlashcardsView
+            onNavigate={setCurrentPath}
+          />
+        )}
+
         {currentPath === 'settings' && (
           <SettingsView />
         )}
@@ -772,12 +779,13 @@ export default function App() {
       </main>
 
       {!isFullScreenMode && (
-        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-outline-variant/30 bg-surface-container-lowest/95 px-1 pt-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(25,25,45,0.06)] backdrop-blur-md md:hidden" aria-label="手机端主导航">
+        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-outline-variant/30 bg-surface-container-lowest/95 px-1 pt-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(25,25,45,0.06)] backdrop-blur-md md:hidden" aria-label="手机端主导航">
           {[
             { path: 'dashboard', label: '首页', icon: 'dashboard' },
             { path: 'exam-generator', label: '组卷', icon: 'auto_fix_high' },
             { path: 'paper-library', label: '试卷', icon: 'library_books' },
-            { path: 'question-bank', label: '题集', icon: 'collections_bookmark' }
+            { path: 'question-bank', label: '题集', icon: 'collections_bookmark' },
+            { path: 'vocabulary', label: '词汇', icon: 'menu_book' }
           ].map((item) => {
             const active = currentPath === item.path;
             return (
