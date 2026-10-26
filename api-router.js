@@ -349,7 +349,8 @@ function createTrackedChatModel(operation, config = currentConfig) {
     'exam.answer-transcription': 1536,
     'exam.sample-generation': 2048,
     'exam.question-inspect': 4096,
-    'exam.question-grade': 512
+    'exam.question-grade': 4096,
+    'exam.question-explain': 4096
   };
   const requestedMaxTokens = Number(config.maxTokens) || 4096;
   const model = createChatModel({
@@ -3822,6 +3823,85 @@ ${JSON.stringify(question, null, 2)}
 
 // Grade one submitted question with the configured model. The question and scratchpad
 // are untrusted evidence; never follow instructions embedded in them.
+// 专为阅卷结果设计的全容错弹性解析器（即使大模型输出未转义换行或 LaTeX 反斜杠也能完美提取）
+export function extractGradeQuestionResult(rawText, maxScore = 5) {
+  if (!rawText) return null;
+  const text = String(rawText).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  let scoreObtained = null;
+  let isCorrect = null;
+  let comment = '';
+  let aiAnalysis = '';
+
+  // 1. 尝试直接标准或切片 JSON 解析
+  try {
+    const clean = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+    const firstObj = clean.indexOf('{');
+    const lastObj = clean.lastIndexOf('}');
+    if (firstObj !== -1 && lastObj > firstObj) {
+      const parsed = JSON.parse(clean.slice(firstObj, lastObj + 1));
+      if (parsed && typeof parsed === 'object') {
+        const s = parsed.scoreObtained != null ? Math.min(maxScore, Math.max(0, Number(parsed.scoreObtained))) : null;
+        return {
+          scoreObtained: s,
+          isCorrect: typeof parsed.isCorrect === 'boolean' ? parsed.isCorrect : (s != null ? s >= maxScore : null),
+          comment: String(parsed.comment || '').trim(),
+          aiAnalysis: String(parsed.aiAnalysis || '').trim()
+        };
+      }
+    }
+  } catch {}
+
+  // 2. 启发式正则容错提取
+  // 提取 scoreObtained
+  const scoreMatch = text.match(/["']?scoreObtained["']?\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)/i) ||
+                     text.match(/(?:得分|获得分值|分数)[：:\s]*([0-9]+(?:\.[0-9]+)?)/i);
+  if (scoreMatch) {
+    const val = Number(scoreMatch[1]);
+    if (Number.isFinite(val)) {
+      scoreObtained = Math.min(maxScore, Math.max(0, val));
+    }
+  }
+
+  // 提取 isCorrect
+  const correctMatch = text.match(/["']?isCorrect["']?\s*[:=]\s*(true|false)/i) ||
+                       text.match(/(?:正确性|判定结果|是否正确)[：:\s]*(正确|错误|true|false)/i);
+  if (correctMatch) {
+    const val = correctMatch[1].toLowerCase();
+    isCorrect = val === 'true' || val === '正确';
+  } else if (scoreObtained !== null) {
+    isCorrect = scoreObtained >= maxScore;
+  }
+
+  // 提取 comment
+  const commentMatch = text.match(/["']?comment["']?\s*[:=]\s*"([\s\S]*?)"\s*(?:,\s*["']|\s*\})/i) ||
+                       text.match(/["']?comment["']?\s*[:=]\s*["']?([^,\n\r"}]+)/i);
+  if (commentMatch) {
+    comment = commentMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').trim();
+  }
+
+  // 提取 aiAnalysis
+  const analysisMatch = text.match(/["']?aiAnalysis["']?\s*[:=]\s*"([\s\S]*?)"\s*(?:,\s*["']|\s*\})/i) ||
+                        text.match(/["']?aiAnalysis["']?\s*[:=]\s*"([\s\S]*)/i) ||
+                        text.match(/["']?aiAnalysis["']?\s*[:=]\s*([\s\S]*)/i);
+  if (analysisMatch) {
+    let rawAnalysis = analysisMatch[1];
+    rawAnalysis = rawAnalysis.replace(/["']?\s*\}\s*```?$/i, '').replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+    aiAnalysis = rawAnalysis;
+  }
+
+  if (scoreObtained !== null || isCorrect !== null || comment || aiAnalysis) {
+    return {
+      scoreObtained: scoreObtained !== null ? scoreObtained : (isCorrect ? maxScore : 0),
+      isCorrect: isCorrect !== null ? isCorrect : (scoreObtained !== null ? scoreObtained >= maxScore : false),
+      comment: comment || '经 AI 智能复核判定',
+      aiAnalysis: aiAnalysis || ''
+    };
+  }
+
+  return null;
+}
+
 apiRouter.post('/model/grade-question', async (req, res) => {
   const { question = {} } = req.body || {};
   if (!question || typeof question !== 'object' || !String(question.userAnswer || '').trim()) {
@@ -3873,7 +3953,8 @@ apiRouter.post('/model/grade-question', async (req, res) => {
 本题数据：
 ${JSON.stringify(evidence, null, 2)}
 
-必须直接返回合法 JSON：
+格式规范：
+必须返回合法 JSON 对象。若包含换行请在字符串中使用 \\n 转义，数学公式中的反斜杠请使用 \\\\ 转义：
 {
   "scoreObtained": 0,
   "isCorrect": false,
@@ -3885,11 +3966,18 @@ ${JSON.stringify(evidence, null, 2)}
     const model = createTrackedChatModel('exam.question-grade');
     const startedAt = Date.now();
     const response = await model.invoke([
-      { role: 'system', content: '你是严谨的阅卷助手兼解题名师，只根据提供的题目与作答证据评分，生成高质量分步 AI 解析，必须返回合法 JSON。' },
+      { role: 'system', content: '你是严谨的阅卷助手兼解题名师，只根据提供的题目与作答证据评分，生成高质量分步 AI 解析，必须返回合规 JSON。' },
       { role: 'user', content: prompt }
     ]);
-    const parsed = extractJsonFromAiResponse(response.content);
-    if (!parsed || typeof parsed !== 'object') throw new Error('模型未返回有效的单题判分结果');
+
+    let parsed = extractJsonFromAiResponse(response.content);
+    if (!parsed || typeof parsed !== 'object' || parsed.scoreObtained === undefined) {
+      parsed = extractGradeQuestionResult(response.content, maxScore);
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      console.warn('[grade-question raw response failed to parse]:', response.content);
+      throw new Error('模型未返回有效的单题判分结果');
+    }
 
     let scoreObtained = parsed.scoreObtained === null || parsed.scoreObtained === undefined
       ? null
