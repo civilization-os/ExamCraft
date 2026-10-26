@@ -28,6 +28,7 @@ import {
 import { deduplicateQuestions } from './utils/questionTypes';
 import { inferPaperSubject } from './utils/paperSubject';
 import { mergeAnswersSmartly } from './stores/useExamSessionStore';
+import { DEFAULT_TEST_MATH_PAPER, DEFAULT_MOCK_PAPERS } from './data/mockPapers';
 
 const APP_PATHS = new Set(['dashboard', 'exam-generator', 'paper-library', 'question-bank', 'vocabulary', 'settings', 'exam-room', 'exam-result', 'login']);
 
@@ -219,8 +220,10 @@ export default function App() {
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return parsed.map((p) => {
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const hasMathMock = parsed.some((p) => p.id === DEFAULT_TEST_MATH_PAPER.id);
+          const fullList = hasMathMock ? parsed : [DEFAULT_TEST_MATH_PAPER, ...parsed];
+          return fullList.map((p) => {
             const clean = Array.isArray(p.questions) ? deduplicateQuestions(p.questions, p.title) : [];
             return {
               ...p,
@@ -232,20 +235,23 @@ export default function App() {
         }
       }
     } catch {}
-    return [];
+    try {
+      localStorage.setItem('examcraft_papers', JSON.stringify(DEFAULT_MOCK_PAPERS));
+    } catch {}
+    return DEFAULT_MOCK_PAPERS;
   });
   const [activePaper, setActivePaper] = useState(() => {
     const stored = readStoredObject('examcraft_active_paper');
-    if (!stored) return null;
-    const clean = Array.isArray(stored.questions) ? deduplicateQuestions(stored.questions, stored.title) : [];
+    const target = stored || DEFAULT_TEST_MATH_PAPER;
+    const clean = Array.isArray(target.questions) ? deduplicateQuestions(target.questions, target.title) : [];
     return {
-      ...stored,
-      subject: stored.subject || inferPaperSubject(stored),
+      ...target,
+      subject: target.subject || inferPaperSubject(target),
       questions: clean,
       questionCount: clean.length
     };
   });
-  const [questions, setQuestions] = useState(() => (activePaper?.questions || []));
+  const [questions, setQuestions] = useState(() => (activePaper?.questions || DEFAULT_TEST_MATH_PAPER.questions));
   const [activeSubmission, setActiveSubmission] = useState(() => readStoredObject('examcraft_active_submission'));
 
   // Initialize session and sync cloud data on load

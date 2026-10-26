@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { apiSavePaper, apiDeletePaper, getToken } from '../utils/auth';
 import { deduplicateQuestions } from '../utils/questionTypes';
 import { inferPaperSubject } from '../utils/paperSubject';
+import { DEFAULT_TEST_MATH_PAPER, DEFAULT_MOCK_PAPERS } from '../data/mockPapers';
 
 const STORAGE_KEY_PAPERS = 'examcraft_papers';
 const STORAGE_KEY_ACTIVE_PAPER = 'examcraft_active_paper';
@@ -10,10 +11,12 @@ const STORAGE_KEY_BACKUP_PAPERS = 'examcraft_local_backup_papers';
 function readLocalPapers() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PAPERS);
-    if (!raw) return [];
+    if (!raw) return DEFAULT_MOCK_PAPERS;
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.map((p) => {
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const hasMathMock = parsed.some((p) => p.id === DEFAULT_TEST_MATH_PAPER.id);
+      const fullList = hasMathMock ? parsed : [DEFAULT_TEST_MATH_PAPER, ...parsed];
+      return fullList.map((p) => {
         const clean = Array.isArray(p.questions) ? deduplicateQuestions(p.questions, p.title) : [];
         return {
           ...p,
@@ -24,13 +27,13 @@ function readLocalPapers() {
       });
     }
   } catch {}
-  return [];
+  return DEFAULT_MOCK_PAPERS;
 }
 
 function readLocalActivePaper() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_ACTIVE_PAPER);
-    if (!raw) return null;
+    if (!raw) return DEFAULT_TEST_MATH_PAPER;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
       const clean = Array.isArray(parsed.questions) ? deduplicateQuestions(parsed.questions, parsed.title) : [];
@@ -42,7 +45,7 @@ function readLocalActivePaper() {
       };
     }
   } catch {}
-  return null;
+  return DEFAULT_TEST_MATH_PAPER;
 }
 
 export const usePaperStore = create((set, get) => ({
