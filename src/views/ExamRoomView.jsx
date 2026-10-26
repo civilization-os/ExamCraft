@@ -1447,7 +1447,8 @@ export default function ExamRoomView({
               isCorrect: review.isCorrect === true,
               gradingStatus: 'ai-graded'
             } : { gradingStatus: 'manual-review' }),
-            aiInsight: typeof review.comment === 'string' ? review.comment.slice(0, 1200) : q.aiInsight
+            aiInsight: typeof review.comment === 'string' ? review.comment.slice(0, 1200) : q.aiInsight,
+            aiAnalysis: typeof review.aiAnalysis === 'string' && review.aiAnalysis.trim().length > 0 ? review.aiAnalysis : (q.aiAnalysis || '')
           };
           usageTotals.checked += 1;
           usageTotals.calls += Number(result.usage ? 1 : 0);

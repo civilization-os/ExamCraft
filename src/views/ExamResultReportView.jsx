@@ -62,6 +62,8 @@ export default function ExamResultReportView({
   const [expandedAll, setExpandedAll] = useState(false);
   const [expandedMap, setExpandedMap] = useState({});
   const [expandedScratchpadMap, setExpandedScratchpadMap] = useState({});
+  const [generatingAiAnalysisMap, setGeneratingAiAnalysisMap] = useState({});
+  const [showOfficialMap, setShowOfficialMap] = useState({});
 
   const toggleExpand = (qId) => {
     setExpandedMap(prev => ({ ...prev, [qId]: !prev[qId] }));
@@ -69,6 +71,37 @@ export default function ExamResultReportView({
 
   const toggleScratchpad = (qId) => {
     setExpandedScratchpadMap(prev => ({ ...prev, [qId]: !prev[qId] }));
+  };
+
+  const handleGenerateAiAnalysis = async (q, index) => {
+    setGeneratingAiAnalysisMap((prev) => ({ ...prev, [q.id]: true }));
+    try {
+      const res = await fetch('/api/model/explain-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: {
+            num: q.num,
+            type: q.type,
+            prompt: q.prompt,
+            options: q.options,
+            standardAnswer: q.standardAnswer
+          }
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.data?.aiAnalysis) {
+        const updatedQuestions = questions.map((item, i) =>
+          i === index ? { ...item, aiAnalysis: data.data.aiAnalysis } : item
+        );
+        const updatedSubmission = { ...submission, questions: updatedQuestions };
+        onUpdateSubmission?.(updatedSubmission);
+      }
+    } catch (e) {
+      console.warn('Generate AI analysis failed:', e);
+    } finally {
+      setGeneratingAiAnalysisMap((prev) => ({ ...prev, [q.id]: false }));
+    }
   };
 
   const formatDuration = (totalSec) => {
@@ -620,7 +653,7 @@ export default function ExamResultReportView({
               <span className="material-symbols-outlined text-[16px]">
                 {expandedAll ? 'unfold_less' : 'unfold_more'}
               </span>
-              <span>{expandedAll ? '全部收起解析' : '全部展开解析'}</span>
+              <span>{expandedAll ? '全部收起 AI 解析' : '全部展开 AI 深度解析'}</span>
             </button>
             <button
               type="button"
@@ -859,7 +892,7 @@ export default function ExamResultReportView({
                       <span className="material-symbols-outlined text-[18px]">
                         {isExpanded ? 'keyboard_arrow_up' : 'keyboard_arrow_down'}
                       </span>
-                      <span>{isExpanded ? '收起官方解析与 AI 错因归因' : '查看完整分步解析与考点精讲'}</span>
+                      <span>{isExpanded ? '收起本题 AI 深度解析' : '🤖 查看 AI 智能深度解析与阅卷点评'}</span>
                     </button>
 
                     {/* Toggle Button for Linked Scratchpad */}
@@ -962,30 +995,66 @@ export default function ExamResultReportView({
                     </div>
                   )}
 
-                  {/* Expandable Official Analysis & AI Insight */}
+                  {/* Expandable AI Deep Analysis & AI Insight */}
                   {isExpanded && (
-                    <div className="mt-space-sm p-space-md rounded-xl bg-surface-container-low border border-outline-variant/30 space-y-space-md animate-in fade-in duration-200">
-                      {/* Official Analysis */}
-                      <div className="space-y-1">
-                        <span className="font-sans text-[11px] text-primary font-semibold flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[15px]">lightbulb</span>
-                          官方分步推导解析:
-                        </span>
-                        <div className="text-body-md text-on-surface leading-relaxed pl-2 border-l-2 border-primary/40">
-                          <MathMarkdown content={q.analysis || '暂无官方详细解析'} />
+                    <div className="mt-space-sm p-4 rounded-2xl bg-surface-container-low/80 border border-primary/20 space-y-4 animate-in fade-in duration-200">
+                      {/* 1. 🤖 AI 智能名师深度解析 (绝对主角) */}
+                      <div className="p-4 rounded-xl bg-surface-container-lowest border border-primary/25 shadow-2xs space-y-2">
+                        <div className="flex items-center justify-between pb-2 border-b border-outline-variant/20 flex-wrap gap-2">
+                          <span className="font-sans text-xs text-primary font-bold flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+                            🤖 AI 名师深度解析 (分步精讲与核心考点)
+                          </span>
+                          <button
+                            type="button"
+                            disabled={generatingAiAnalysisMap[q.id]}
+                            onClick={() => handleGenerateAiAnalysis(q, idx)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-50"
+                            title="由 AI 重新深度推导本题解析"
+                          >
+                            <span className={`material-symbols-outlined text-[13px] ${generatingAiAnalysisMap[q.id] ? 'animate-spin' : ''}`}>
+                              {generatingAiAnalysisMap[q.id] ? 'progress_activity' : 'refresh'}
+                            </span>
+                            <span>{generatingAiAnalysisMap[q.id] ? 'AI 解析生成中...' : (q.aiAnalysis ? '重新生成 AI 解析' : '一键生成 AI 深度解析')}</span>
+                          </button>
+                        </div>
+
+                        <div className="text-body-md text-on-surface leading-relaxed pl-1 pt-1">
+                          <MathMarkdown content={q.aiAnalysis || q.analysis || '暂无解析，点击上方「一键生成 AI 深度解析」即刻推导'} />
                         </div>
                       </div>
 
-                      {/* AI Scribe / Master Insight */}
+                      {/* 2. 🎯 AI 针对作答诊断与踩分点评 (如有) */}
                       {q.aiInsight && (
-                        <div className="p-space-sm rounded-lg bg-surface-container-lowest border border-outline-variant/20 space-y-1">
-                          <span className="font-sans text-[11px] text-tertiary font-semibold flex items-center gap-1">
+                        <div className="p-3.5 rounded-xl bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/30 space-y-1">
+                          <span className="font-sans text-[11px] text-amber-800 dark:text-amber-300 font-bold flex items-center gap-1">
                             <span className="material-symbols-outlined text-[15px]">psychology</span>
-                            本题 AI 评语:
+                            🎯 AI 判卷评语与失分采分点剖析:
                           </span>
-                          <p className="text-body-sm text-on-surface-variant pl-2 font-sans">
+                          <p className="text-body-sm text-on-surface-variant pl-2 font-sans leading-relaxed">
                             {q.aiInsight}
                           </p>
+                        </div>
+                      )}
+
+                      {/* 3. 官方原始说明 (次要选看，若原题有且不同才可展开) */}
+                      {q.analysis && q.analysis !== q.aiAnalysis && (
+                        <div className="pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setShowOfficialMap(prev => ({ ...prev, [q.id]: !prev[q.id] }))}
+                            className="inline-flex items-center gap-1 text-[11px] text-outline hover:text-on-surface-variant transition-colors cursor-pointer"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">
+                              {showOfficialMap[q.id] ? 'expand_less' : 'expand_more'}
+                            </span>
+                            <span>{showOfficialMap[q.id] ? '收起试卷原始附带说明' : '📄 展开试卷原始附带说明（选看）'}</span>
+                          </button>
+                          {showOfficialMap[q.id] && (
+                            <div className="mt-2 p-3 rounded-lg bg-surface-container text-body-sm text-on-surface-variant leading-relaxed border border-outline-variant/20">
+                              <MathMarkdown content={q.analysis} />
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
