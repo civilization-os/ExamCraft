@@ -499,69 +499,74 @@ export default function MistakeNotebookView({ onStartExamWithMistakes }) {
                     </span>
                   </div>
 
-                  {/* Prompt & Formula */}
-                  <div className="space-y-1.5">
+                  {/* Prompt & Formula (Natural Flow, No Giant Empty Gray Box) */}
+                  <div className="space-y-2">
                     <MathMarkdown
                       content={item.fullPrompt || item.title}
-                      className="font-headline-sm text-headline-sm text-on-surface font-semibold"
+                      className="font-headline-sm text-headline-sm text-on-surface font-semibold leading-relaxed"
                     />
-                    {item.formula && (
-                      <div className="p-space-md bg-surface-container-low rounded-lg text-primary overflow-x-auto border border-outline-variant/20">
-                        <MathMarkdown
-                          content={item.formula.startsWith('$') ? item.formula : `$$${item.formula}$$`}
-                        />
+                    {/* Show standalone formula badge ONLY if not already in prompt and formula is valid */}
+                    {item.formula && !item.fullPrompt?.includes(item.formula.trim()) && (
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-primary/5 rounded-lg text-primary border border-primary/20 text-code-sm font-mono">
+                        <span className="text-[11px] font-semibold text-primary uppercase">核心公式:</span>
+                        <MathMarkdown content={item.formula.startsWith('$') ? item.formula : `$${item.formula}$`} />
                       </div>
                     )}
                   </div>
 
-
-                {/* Weak Point & Error Reason */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-space-sm">
-                  <div className="p-space-sm rounded-lg bg-surface-container-lowest border border-error-container/60 space-y-1">
-                    <div className="flex items-center gap-1 text-tertiary font-label-sm text-label-sm font-semibold">
-                      <span className="material-symbols-outlined text-[16px]">error</span>
-                      典型错因自核：
+                  {/* Visual Diff: Answer Comparison Strip */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 bg-surface-container-low/60 rounded-xl border border-outline-variant/30 text-code-sm">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-bold shrink-0 ${
+                        isCorrect
+                          ? 'bg-secondary-container text-secondary'
+                          : (isManualReview ? 'bg-primary-fixed text-primary' : 'bg-error-container text-error')
+                      }`}>
+                        {isCorrect ? '✅ 考生作答' : (isManualReview ? '⏳ 待复核' : (isUnanswered ? '⚪ 未作答' : '❌ 考生错解'))}
+                      </span>
+                      <span className="font-mono text-on-surface truncate font-medium">
+                        {item.userWrongAnswer || '未填写'}
+                      </span>
                     </div>
-                    <MathMarkdown content={item.errorReason} className="font-body-sm text-body-sm text-on-surface" />
-                  </div>
 
-                  <div className="p-space-sm rounded-lg bg-surface-container-lowest border border-outline-variant/30 space-y-1">
-                    <div className="flex items-center gap-1 text-primary font-label-sm text-label-sm font-semibold">
-                      <span className="material-symbols-outlined text-[16px]">school</span>
-                      关联知识点考纲：
+                    <div className="flex items-center gap-2 min-w-0 sm:border-l sm:border-surface-container sm:pl-3">
+                      <span className="px-2 py-0.5 rounded bg-secondary-container text-secondary text-[11px] font-bold shrink-0">
+                        🎯 标准标答
+                      </span>
+                      <span className="font-mono text-secondary font-bold truncate">
+                        {item.standardAnswer || '详见解析'}
+                      </span>
                     </div>
-                    <MathMarkdown content={item.weakPoint} className="font-body-sm text-body-sm text-on-surface" />
                   </div>
-                </div>
 
-                {/* Answer Comparison */}
-                <div className="p-space-md bg-surface-container-low rounded-xl space-y-space-xs text-code-sm border border-outline-variant/30">
-                  <div className="flex items-start gap-2">
-                    <span className={`px-1.5 py-0.5 rounded font-sans text-label-sm font-bold shrink-0 ${
-                      isCorrect
-                        ? 'bg-secondary-container/60 text-secondary'
-                        : (isManualReview ? 'bg-primary-fixed text-primary' : 'bg-error-container text-on-error-container')
-                    }`}>
-                      {isCorrect ? '考生作答 (达成)' : (isManualReview ? '待人工复核' : (isUnanswered ? '未作答' : '考生错解'))}
+                  {/* Weak Point & Key Pitfall (Deduplicated, No Blank Hole) */}
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <span className="text-[11px] font-bold text-on-surface-variant flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[15px] text-primary">school</span>
+                      考纲考点:
                     </span>
-                    <MathMarkdown content={item.userWrongAnswer} className="text-on-surface font-mono text-code-sm" />
-                  </div>
-                  <div className="flex items-start gap-2 pt-1 border-t border-surface-container">
-                    <span className="px-1.5 py-0.5 rounded bg-secondary-container text-on-secondary-container font-sans text-label-sm font-bold shrink-0">
-                      标准答案
+                    <span className="px-2.5 py-0.5 rounded-full bg-primary-fixed/30 text-primary text-[11px] font-semibold border border-primary/20">
+                      #{item.weakPoint?.trim() || (item.type?.includes('数学') ? '微积分综合考点' : (item.type || '核心综合真题考点'))}
                     </span>
-                    <MathMarkdown content={item.standardAnswer} className="text-secondary font-semibold font-mono text-code-sm" />
+                    <span className="px-2.5 py-0.5 rounded-full bg-surface-container text-on-surface-variant text-[11px] font-mono">
+                      分值: {item.score}分
+                    </span>
                   </div>
-                </div>
 
-                {/* AI Tutor In-depth Analysis */}
-                <div className="p-space-md bg-surface-container-high/40 rounded-xl space-y-1 border border-primary-fixed-dim">
-                  <div className="flex items-center gap-1.5 font-semibold text-primary text-label-md">
-                    <span className="material-symbols-outlined text-[18px]">psychology</span>
-                    <span>AI 命题组深度归因解析与提分建议：</span>
+                  {/* AI Tutor Diagnosis & Step Analysis (Deduplicated Content) */}
+                  <div className="p-3.5 bg-surface-container-low/40 rounded-xl border border-primary/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-semibold text-primary text-label-sm">
+                        <span className="material-symbols-outlined text-[18px]">psychology</span>
+                        <span>AI 名师深度诊断与提分点拨</span>
+                      </div>
+                      <span className="text-[11px] font-label-mono text-on-surface-variant">model_core 阅卷会诊</span>
+                    </div>
+
+                    <div className="text-body-sm text-on-surface leading-relaxed">
+                      <MathMarkdown content={item.aiInsight || item.errorReason || '请对照标准解题步骤自核知识盲区。'} />
+                    </div>
                   </div>
-                  <MathMarkdown content={item.aiInsight} className="text-body-sm text-on-surface leading-relaxed" />
-                </div>
 
                 {/* Action Buttons */}
                 <div className="flex items-center justify-end gap-space-sm pt-1">

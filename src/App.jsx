@@ -780,6 +780,7 @@ export default function App() {
               else setCurrentPath('paper-library');
             }}
             onOpenNotebook={() => setCurrentPath('question-bank')}
+            onOpenVocabulary={() => setCurrentPath('vocabulary')}
           />
         )}
       </main>

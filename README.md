@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.4.0"><img src="https://img.shields.io/badge/Release-v1.4.0-blue.svg?logo=github" alt="Release v1.4.0"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.5.0"><img src="https://img.shields.io/badge/Release-v1.5.0-blue.svg?logo=github" alt="Release v1.5.0"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Publish CI"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub Container Registry"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -25,6 +25,21 @@
 ---
 
 ## 🌟 Key Features
+
+### 0. In-Exam AI Vocab Lookup & Anti-Spoiler Dual-Switch System (v1.5.0) 🆕
+- **Anti-Spoiler Dual-Switch Framework**:
+  - Global Header toggle allows learners to choose between pure marking capsule mode and instant lookup mode;
+  - Local card-level toggle enables quick `[ 👁️ View Meaning / 🙈 Collapse ]` switches on demand;
+  - Zero sentence spoiler: removes full-sentence translations during active exams, preserving examination integrity.
+- **Structured POS-Meaning Layout (`pos - meaning;` with line breaks)**:
+  - Formats multi-part-of-speech definitions into clean, distinct lines (e.g., `v. - ...; \n n. - ...;`), eliminating cramped text and ellipsis truncations;
+  - Surfaces AI-driven mnemonic roots and authentic exam collocations.
+- **Typographic Apostrophe Normalization & Lemmatization**:
+  - Seamlessly handles curly typographic apostrophes (`’`, `‘`) from real exam passages;
+  - Automatically isolates possessives (e.g. `people’s` $\to$ `people`) to yield dictionary-grade phonetic symbols and base definitions.
+- **Smart Viewport Avoidance & Mobile Drawer**:
+  - Places PC popovers beneath selections to avoid overlapping native browser mini-menus;
+  - Responsive docked bottom drawer on mobile devices with instant un-focus dismissal.
 
 ### 1. Triple-Engine Exam Paper Generator
 - **Engine 1 · 1:1 Precision Exam Cloning (PDF / Docx / TeX / Markdown)**

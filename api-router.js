@@ -4133,4 +4133,247 @@ apiRouter.post('/model/evaluate-exam', async (req, res) => {
   }
 });
 
+// POST /api/model/batch-enrich-words
+// 批量为考场划词标记的生词补充词性、音标、释义、例句翻译、词根联想助记与同义替换辨析
+apiRouter.post('/model/batch-enrich-words', async (req, res) => {
+  const { words = [], paperTitle = '真题考场' } = req.body;
+  if (!Array.isArray(words) || words.length === 0) {
+    return res.status(400).json({ success: false, error: '请提供待补全的生词列表' });
+  }
+
+  const buildFallbackWord = (item, idx) => ({
+    word: item.word,
+    phoneticUk: item.phoneticUk || `/${item.word}/`,
+    phoneticUs: item.phoneticUs || `/${item.word}/`,
+    pos: item.pos || 'n./adj.',
+    definition: item.definition || '考研真题核心词汇',
+    examFrequency: 4,
+    examSource: paperTitle,
+    contextSlice: {
+      source: `${paperTitle} 第 ${item.qNum || idx + 1} 题`,
+      difficulty: 3,
+      sentence: item.sentence || `${item.word} in context.`,
+      highlightWord: item.word,
+      translation: item.sentence ? '该词在考研真题长难句语境中的切片考点。' : ''
+    },
+    morphologyMnemonic: {
+      title: 'DeepSeek 构词与联想记忆',
+      analysis: `词根与构词特征解析：关注核心词根词缀变化与高频真题搭配。`
+    },
+    synonymsComparison: {
+      title: '考研同义替换高频辨析',
+      items: [`同义考点：考研真题常考替换词及微语境辨析。`]
+    }
+  });
+
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.json({
+      success: true,
+      data: words.map((w, i) => buildFallbackWord(w, i)),
+      fallback: true
+    });
+  }
+
+  try {
+    const model = createTrackedChatModel('vocab.enrich');
+    const prompt = `你是一位精通考研英语命题、语料库分析与词汇学的专家。
+考生在做考研英语试卷《${paperTitle}》时，标记了以下生词及其考场真题句子上下文：
+${JSON.stringify(words.map((w, idx) => ({
+  index: idx,
+  word: w.word,
+  sentence: w.sentence || '',
+  qNum: w.qNum || ''
+})), null, 2)}
+
+请严格结合给出的真题语境句子，为每一个单词输出深度学习卡片数据，必须返回合法的 JSON 数组，格式如下：
+[
+  {
+    "index": 0,
+    "word": "单词原形",
+    "phoneticUk": "/英音音标/",
+    "phoneticUs": "/美音音标/",
+    "pos": "词性(如 adj. / vt. / n.)",
+    "definition": "结合该真题语境的精准中文释义",
+    "sentenceTranslation": "该真题例句的通顺中文翻译",
+    "mnemonic": "词根词缀深度剖析或自然联想记忆法（1-2句点透）",
+    "synonyms": ["同义替换词1: 辨析简注", "同义替换词2: 辨析简注"]
+  }
+]
+注意：严格只返回合法 JSON，禁止包含额外的 markdown 标记或非 JSON 字符。`;
+
+    const response = await model.invoke([
+      { role: 'system', content: '你是一个专业的考研英语词汇专家，必须输出合法的 JSON 数组。' },
+      { role: 'user', content: prompt }
+    ]);
+
+    let parsed = extractJsonFromAiResponse(response.content);
+    if (!Array.isArray(parsed)) {
+      if (parsed && Array.isArray(parsed.words)) parsed = parsed.words;
+      else if (parsed && Array.isArray(parsed.data)) parsed = parsed.data;
+    }
+
+    if (!Array.isArray(parsed)) {
+      return res.json({
+        success: true,
+        data: words.map((w, i) => buildFallbackWord(w, i)),
+        fallback: true
+      });
+    }
+
+    const enriched = words.map((item, idx) => {
+      const aiItem = parsed.find(p => p.index === idx || p.word?.toLowerCase() === item.word?.toLowerCase()) || parsed[idx] || {};
+      return {
+        word: item.word,
+        phoneticUk: aiItem.phoneticUk || `/${item.word}/`,
+        phoneticUs: aiItem.phoneticUs || `/${item.word}/`,
+        pos: aiItem.pos || 'adj.',
+        definition: aiItem.definition || '考研核心真题词汇',
+        examFrequency: 5,
+        examSource: paperTitle,
+        contextSlice: {
+          source: `${paperTitle} 第 ${item.qNum || idx + 1} 题`,
+          difficulty: 3,
+          sentence: item.sentence || '',
+          highlightWord: item.word,
+          translation: aiItem.sentenceTranslation || '真题例句切片'
+        },
+        morphologyMnemonic: {
+          title: 'DeepSeek 构词与联想记忆',
+          analysis: aiItem.mnemonic || '词根词缀联想记忆'
+        },
+        synonymsComparison: {
+          title: '考研同义替换高频辨析',
+          items: Array.isArray(aiItem.synonyms) && aiItem.synonyms.length > 0
+            ? aiItem.synonyms
+            : ['考研常考同义替换整理中']
+        }
+      };
+    });
+
+    res.json({
+      success: true,
+      data: enriched
+    });
+  } catch (err) {
+    console.warn('[vocab enrich fallback]:', err.message);
+    res.json({
+      success: true,
+      data: words.map((w, i) => buildFallbackWord(w, i)),
+      fallback: true
+    });
+  }
+});
+
+// POST /api/model/lookup-word
+// 单个生词 AI 深度解析：结合长难句真题语境，输出精准音标、词性、结合语境释义、整句中文翻译与考点点拨
+apiRouter.post('/model/lookup-word', async (req, res) => {
+  const { word, sentence = '', qNum = '' } = req.body || {};
+  if (!word || typeof word !== 'string' || !word.trim()) {
+    return res.status(400).json({ success: false, error: '请提供待查询的英文单词' });
+  }
+
+  const cleanWord = word.trim().toLowerCase();
+
+  // 若无可用 API Key，返回智能本地降级
+  if (!currentConfig.apiKey || !currentConfig.apiKey.trim()) {
+    return res.json({
+      success: true,
+      data: {
+        word: cleanWord,
+        phoneticUk: `/${cleanWord}/`,
+        phoneticUs: `/${cleanWord}/`,
+        pos: '考研核心',
+        definition: '考研英语真题高频核心词汇',
+        contextTranslation: sentence ? '该词在真题句子语境中的核心考察切片。' : '',
+        examInsight: '结合当前真题长难句语境把握其核心派生词与常见搭配。',
+        examFrequency: 4
+      },
+      fallback: true
+    });
+  }
+
+  try {
+    const model = createTrackedChatModel('vocab.lookup');
+    const prompt = `请精准解析考研英文单词【${cleanWord}】的准确单词意思与构词：
+真题例句语境参考：
+"${sentence || cleanWord}"
+
+必须遵循以下要求：
+1. 输出该单词在考研真题中最准确、具体的中文字典释义。如果该单词有多个词性（如 mark 既是动词 v. 也是名词 n.），必须在 items 数组中按词性分别拆为不同条目，严禁混杂！
+2. 若划选的词含有所有格（如 people's）或屈折变化，必须以其词元原形（如 people）为主输出其考研真题核心词性与精准释义，并在音标中给出原词音标，搭配中兼顾所有格或相关短语。
+3. 每个词性的释义中，多个意思请用中文分号“；”分隔。
+4. 输出真实的国际英音音标与美音音标。
+5. 输出词根词缀构词助记（如：psycho- 心理 + -logist 专家学者）。
+6. 输出 1~2 个考研真题常考搭配或核心短语。
+7. 返回合法的单个 JSON 对象，不要包含 markdown 标记代码块：
+{
+  "word": "${cleanWord}",
+  "phoneticUk": "/英音音标/",
+  "phoneticUs": "/美音音标/",
+  "items": [
+    { "pos": "v.", "meaning": "标记，标注；在...上做记号；给...评分" },
+    { "pos": "n.", "meaning": "记号，标记；分数，成绩" }
+  ],
+  "mnemonic": "词根词缀助记",
+  "collocation": "真题核心搭配",
+  "examFrequency": 4
+}`;
+
+    const response = await model.invoke([
+      { role: 'system', content: '你是一位精通考研英语词汇与词典学的权威专家。请针对考生划选的生词，输出地道标准的国际音标、规范的词性与条理分明的中文字典释义，多词性条目分明，严禁输出无意义套话。' },
+      { role: 'user', content: prompt }
+    ]);
+    let parsed = extractJsonFromAiResponse(response.content);
+    if (!parsed || (!parsed.items && !parsed.definition)) {
+      throw new Error('Invalid AI response JSON');
+    }
+
+    // 格式化 items 与兜底 definition
+    const items = Array.isArray(parsed.items) && parsed.items.length > 0
+      ? parsed.items.map(it => ({
+          pos: (it.pos || '释义').trim(),
+          meaning: (it.meaning || it.def || it.definition || '').trim()
+        })).filter(it => it.meaning)
+      : [];
+
+    const definition = items.length > 0
+      ? items.map(it => `${it.pos} - ${it.meaning}`).join('\n')
+      : (parsed.definition || '精准中文词义');
+
+    const primaryPos = items.length > 0 ? items.map(it => it.pos).join('; ') : (parsed.pos || 'n.');
+
+    res.json({
+      success: true,
+      data: {
+        word: cleanWord,
+        phoneticUk: parsed.phoneticUk || `/${cleanWord}/`,
+        phoneticUs: parsed.phoneticUs || `/${cleanWord}/`,
+        pos: primaryPos,
+        items: items,
+        definition: definition,
+        mnemonic: parsed.mnemonic || '',
+        collocation: parsed.collocation || '',
+        examFrequency: parsed.examFrequency || 4
+      }
+    });
+  } catch (err) {
+    console.warn('[vocab lookup error]:', err.message);
+    res.json({
+      success: true,
+      data: {
+        word: cleanWord,
+        phoneticUk: `/${cleanWord}/`,
+        phoneticUs: `/${cleanWord}/`,
+        pos: '考研词汇',
+        items: [{ pos: '考研词汇', meaning: '真题高频核心词汇' }],
+        definition: '考研真题核心词汇',
+        mnemonic: '',
+        collocation: '',
+        examFrequency: 4
+      },
+      fallback: true
+    });
+  }
+});
+
 

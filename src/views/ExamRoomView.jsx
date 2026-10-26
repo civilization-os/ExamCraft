@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import ScratchpadCanvas from '../components/ScratchpadCanvas';
 import MathDerivationDock from '../components/MathDerivationDock';
 import ExamTimerReminderModal from '../components/ExamTimerReminderModal';
+import EnglishVocabPopover from '../components/EnglishVocabPopover';
+import { cleanSelectedWord, lookupWordInLexicon, extractContextSentenceFromSelection } from '../utils/englishLexicon';
 import { getQuestionDifficulty } from '../utils/paperMetrics';
 import { getQuestionTypeClass, normalizeQuestionType, stripAnswerMaterial, healQuestionOptions, deduplicateQuestions } from '../utils/questionTypes';
 import {
@@ -253,9 +255,39 @@ export default function ExamRoomView({
   }, [baseExamQuestions, activePaper?.id]);
 
   // Exam Lifecycle Status: 考试中 vs 已封卷 (围棋封盘)
-  const isInitiallySealed = activePaper?.status === '已封卷';
+  const isInitiallySealed = (() => {
+    if (activePaper?.status === '已封卷') return true;
+    if (activePaper?.id) {
+      try {
+        const sessionRaw = localStorage.getItem(`examcraft_session_${activePaper.id}`);
+        if (sessionRaw) {
+          const session = JSON.parse(sessionRaw);
+          if (session?.status === '已封卷') return true;
+        }
+        const papersRaw = localStorage.getItem('examcraft_papers');
+        if (papersRaw) {
+          const papers = JSON.parse(papersRaw);
+          const found = papers.find((p) => p.id === activePaper.id);
+          if (found?.status === '已封卷') return true;
+        }
+      } catch {}
+    }
+    return false;
+  })();
   const [isSealed, setIsSealed] = useState(isInitiallySealed);
-  const [sealedAt, setSealedAt] = useState(activePaper?.sealedAt || '');
+  const [sealedAt, setSealedAt] = useState(() => {
+    if (activePaper?.sealedAt) return activePaper.sealedAt;
+    if (activePaper?.id) {
+      try {
+        const sessionRaw = localStorage.getItem(`examcraft_session_${activePaper.id}`);
+        if (sessionRaw) {
+          const session = JSON.parse(sessionRaw);
+          if (session?.sealedAt) return session.sealedAt;
+        }
+      } catch {}
+    }
+    return '';
+  });
 
   // Auto-mark paper as '考试中' if not already sealed or completed
   useEffect(() => {
@@ -263,6 +295,7 @@ export default function ExamRoomView({
       const updated = { ...activePaper, status: '考试中' };
       if (onUpdatePaper) onUpdatePaper(updated);
       try {
+        localStorage.setItem('examcraft_active_paper', JSON.stringify(updated));
         const raw = localStorage.getItem('examcraft_papers');
         if (raw) {
           const list = JSON.parse(raw);
@@ -448,6 +481,187 @@ export default function ExamRoomView({
   const [passageInputText, setPassageInputText] = useState('');
   const [isMobileAnswerDrawerOpen, setIsMobileAnswerDrawerOpen] = useState(false);
   const [isShortcutsHelpOpen, setIsShortcutsHelpOpen] = useState(false);
+
+  // English paper recognition & Vocabulary highlight/marking system
+  const isEnglishPaper = useMemo(() => {
+    return /英语|English/i.test(activePaper?.subject || activePaper?.title || '') ||
+      questionList.some((q) => /完形|阅读|cloze|reading|translation|英语新题型/i.test(q.type || q.section || ''));
+  }, [activePaper, questionList]);
+
+  const [markedVocabList, setMarkedVocabList] = useState(() => {
+    if (!activePaper?.id) return [];
+    try {
+      const raw = localStorage.getItem(`examcraft_marked_vocab_${activePaper.id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    if (activePaper?.id) {
+      try {
+        localStorage.setItem(`examcraft_marked_vocab_${activePaper.id}`, JSON.stringify(markedVocabList));
+      } catch {}
+    }
+  }, [markedVocabList, activePaper?.id]);
+
+  const [vocabSelectionPopover, setVocabSelectionPopover] = useState(null); // { word, sentence, rect, qNum }
+  const [vocabDrawerOpen, setVocabDrawerOpen] = useState(false);
+  const [vocabToast, setVocabToast] = useState('');
+  const [manualWordInput, setManualWordInput] = useState('');
+
+  // 英语选词查词模式：false = 考场防剧透模式 (只标不查，纤薄胶囊，默认推荐)；true = 精读查词模式 (显示音标与释义)
+  const [isVocabLookupMode, setIsVocabLookupMode] = useState(() => {
+    try {
+      return localStorage.getItem('examcraft_vocab_lookup_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleVocabLookupMode = () => {
+    setIsVocabLookupMode((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('examcraft_vocab_lookup_mode', String(next)); } catch {}
+      showExamToast(
+        next ? '📖 已开启【精读查词模式】：划词时将即时解析音标与中文释义' : '🔕 已切回【考场防剧透模式】：划词只标记不剧透释义，交卷后统一复盘',
+        next ? 'info' : 'warn'
+      );
+      return next;
+    });
+  };
+
+  // 智能划选与双击词汇捕获 (支持阅读材料、长难句与题干选项)
+  const handleProcessTextSelection = useCallback((customRect = null, forcedWord = null) => {
+    if (!isEnglishPaper) return;
+
+    // 1. 如果是直接点击了已高亮的生词元素 (<mark class="exam-vocab-highlight">)
+    if (forcedWord && customRect) {
+      const clean = cleanSelectedWord(forcedWord);
+      if (!clean) return;
+      const sentence = currentQ?.prompt || '';
+      setVocabSelectionPopover({
+        word: clean,
+        sentence,
+        rect: customRect,
+        qNum: currentQ?.num || currentQIndex + 1
+      });
+      return;
+    }
+
+    // 2. 正常选区划词或双击单词
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      // 选区已折叠（用户点击了空白处或其他文本），立即关闭单词板
+      setVocabSelectionPopover(null);
+      return;
+    }
+
+    const rawText = selection.toString();
+    const clean = cleanSelectedWord(rawText);
+    if (!clean) {
+      // 选中的内容非有效英文词汇，立即关闭单词板
+      setVocabSelectionPopover(null);
+      return;
+    }
+
+    try {
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+
+      // 递归向上查找最近块级容器，精准切分长难句
+      const sentence = extractContextSentenceFromSelection(selection, clean) || currentQ?.prompt?.slice(0, 180) || '';
+
+      setVocabSelectionPopover({
+        word: clean,
+        sentence,
+        rect: {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height
+        },
+        qNum: currentQ?.num || currentQIndex + 1
+      });
+    } catch (e) {
+      console.warn('Text selection processing failed:', e);
+    }
+  }, [isEnglishPaper, currentQ, currentQIndex]);
+
+  // 点击文章或题干内已标记的生词时自动呼出词卡
+  useEffect(() => {
+    if (!isEnglishPaper) return;
+    const handlePassageClick = (e) => {
+      const target = e.target.closest('.exam-vocab-highlight');
+      if (target) {
+        e.preventDefault();
+        e.stopPropagation();
+        const word = target.getAttribute('data-vocab') || target.textContent;
+        const rect = target.getBoundingClientRect();
+        handleProcessTextSelection(rect, word);
+      }
+    };
+    document.addEventListener('click', handlePassageClick, true);
+    return () => document.removeEventListener('click', handlePassageClick, true);
+  }, [isEnglishPaper, handleProcessTextSelection]);
+
+  // 切换题目时自动清空浮动词卡与折叠选区
+  useEffect(() => {
+    setVocabSelectionPopover(null);
+  }, [currentQIndex]);
+
+  // 一键切换生词标记状态（添加 / 移除）
+  const handleToggleMarkVocab = (word, sentence, lexiconInfo = null) => {
+    if (!word || !word.trim()) return;
+    const lower = word.trim().toLowerCase();
+    const existingIndex = markedVocabList.findIndex((item) => item.word.toLowerCase() === lower);
+
+    if (existingIndex >= 0) {
+      // 已在生词本，执行移除
+      setMarkedVocabList((prev) => prev.filter((_, idx) => idx !== existingIndex));
+      setVocabToast(`已从生词清单移除【${word}】`);
+      setTimeout(() => setVocabToast(''), 2200);
+      return;
+    }
+
+    // 未在生词本，预置精准词典信息并加入清单
+    const info = lexiconInfo || lookupWordInLexicon(lower);
+    const newEntry = {
+      id: `mv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      word: lower,
+      sentence: sentence || `${word} in context.`,
+      phoneticUk: info?.phoneticUk || `/${lower}/`,
+      phoneticUs: info?.phoneticUs || `/${lower}/`,
+      pos: info?.pos || '考研词汇',
+      definition: info?.definition || '考研真题关键核心词',
+      qNum: currentQ?.num || currentQIndex + 1,
+      qPrompt: currentQ?.prompt ? currentQ.prompt.slice(0, 80) : '',
+      markedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    };
+    setMarkedVocabList((prev) => [newEntry, ...prev]);
+    setVocabToast(`✨ 已成功收录生词【${word}】至真题词本`);
+    setTimeout(() => setVocabToast(''), 2400);
+  };
+
+  const handleMarkVocabWord = (word, sentence) => {
+    handleToggleMarkVocab(word, sentence);
+  };
+
+  const handleRemoveMarkedWord = (id) => {
+    setMarkedVocabList((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleAddManualWord = () => {
+    if (!manualWordInput.trim()) return;
+    handleMarkVocabWord(manualWordInput.trim(), currentQ?.prompt ? currentQ.prompt.slice(0, 150) : '');
+    setManualWordInput('');
+  };
 
   const handleSavePassageToPaper = () => {
     if (!passageInputText.trim() || !activePaper) return;
@@ -886,6 +1100,25 @@ export default function ExamRoomView({
     }
   };
 
+  const handleSelectOption = (optionKey, targetQuestion = currentQ, targetIndex = currentQIndex) => {
+    if (!targetQuestion) return;
+    const isMultiChoice = /多选|多项选择/i.test(targetQuestion.type || targetQuestion.section || '');
+    const currentAnswer = String(targetQuestion.userAnswer || '').trim().toUpperCase();
+    const cleanKey = String(optionKey || '').trim().toUpperCase();
+
+    let nextAnswer = '';
+    if (isMultiChoice) {
+      if (currentAnswer.includes(cleanKey)) {
+        nextAnswer = currentAnswer.replace(new RegExp(cleanKey, 'g'), '').split('').sort().join('');
+      } else {
+        nextAnswer = [...currentAnswer, cleanKey].sort().join('');
+      }
+    } else {
+      nextAnswer = currentAnswer === cleanKey ? '' : cleanKey;
+    }
+    handleUpdateAnswer(nextAnswer, targetIndex);
+  };
+
   // 全局考场作答键盘快捷键支持 (上一题/下一题/选项填涂/标记复查/草稿纸)
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -1198,6 +1431,7 @@ export default function ExamRoomView({
       storeSealExam(activePaper.id, nowStr);
     }
     try {
+      localStorage.setItem('examcraft_active_paper', JSON.stringify(updated));
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
         const list = JSON.parse(raw);
@@ -1226,6 +1460,7 @@ export default function ExamRoomView({
       storeUnsealExam(activePaper.id);
     }
     try {
+      localStorage.setItem('examcraft_active_paper', JSON.stringify(updated));
       const raw = localStorage.getItem('examcraft_papers');
       if (raw) {
         const list = JSON.parse(raw);
@@ -1522,6 +1757,19 @@ export default function ExamRoomView({
         const aiScore = hasSuggestedScore
           ? Math.min(maxScore, Math.max(0, Number(review.scoreObtained)))
           : question.scoreObtained;
+
+        // 保留逐题 AI 复核的高精度分步解析，避免被全卷诊断短评粗暴覆盖
+        const existingDetailInsight = (question.aiInsight && question.aiInsight.trim()) ? question.aiInsight.trim() : '';
+        const reviewComment = (typeof review.comment === 'string' && review.comment.trim()) ? review.comment.trim().slice(0, 1200) : '';
+        let mergedInsight = existingDetailInsight;
+        if (reviewComment) {
+          if (!existingDetailInsight) {
+            mergedInsight = reviewComment;
+          } else if (!existingDetailInsight.includes(reviewComment)) {
+            mergedInsight = `${reviewComment}\n\n【逐题深度诊断】\n${existingDetailInsight}`;
+          }
+        }
+
         return {
           ...question,
           ...(hasSuggestedScore ? {
@@ -1529,7 +1777,7 @@ export default function ExamRoomView({
             isCorrect: aiScore >= maxScore && maxScore > 0,
             gradingStatus: 'ai-graded'
           } : {}),
-          aiInsight: typeof review.comment === 'string' ? review.comment.slice(0, 1200) : question.aiInsight
+          aiInsight: mergedInsight
         };
       });
       calculatedScore = gradedQuestions.reduce((sum, question) => sum + (Number(question.scoreObtained) || 0), 0);
@@ -1555,6 +1803,7 @@ export default function ExamRoomView({
       id: 'sub-' + Date.now(),
       paperId: activePaper?.id || 'paper-custom',
       paperTitle: activePaper?.title || '全真模拟试卷',
+      subject: activePaper?.subject || (isEnglishPaper ? '英语' : ''),
       source: activePaper?.source || '智能模考',
       submitTime: submitTimeString,
       durationSpent,
@@ -1563,7 +1812,8 @@ export default function ExamRoomView({
       accuracy,
       questions: gradedQuestions,
       aiOverallReview: aiReviewData,
-      aiGradingUsage: { ...usageTotals, estimatedCostCny: usageTotals.costKnown ? usageTotals.estimatedCostCny : null }
+      aiGradingUsage: { ...usageTotals, estimatedCostCny: usageTotals.costKnown ? usageTotals.estimatedCostCny : null },
+      markedVocabList: markedVocabList || []
     };
 
     // Save to localStorage history
@@ -1576,12 +1826,27 @@ export default function ExamRoomView({
       // Update activePaper status to '已完成' and clear in-progress answers cache
       if (activePaper?.id) {
         localStorage.removeItem(`examcraft_answers_${activePaper.id}`);
+        localStorage.removeItem(`examcraft_marked_vocab_${activePaper.id}`);
+        localStorage.removeItem(`examcraft_question_marks_${activePaper.id}`);
+        localStorage.removeItem(`examcraft_session_${activePaper.id}`);
+
+        // 彻底清理当前试卷每题的临时草稿画布与元素缓存，防止 LocalStorage 容量溢出
+        (questionList || []).forEach((question, index) => {
+          const key = question?.id || `q_${question?.num || index}`;
+          const textKey = `examcraft_scratchpad_${activePaper.id}_${key}`;
+          const canvasKey = `examcraft_scratchpad_canvas_${activePaper.id}_${key}`;
+          [textKey, canvasKey, `${canvasKey}_elements`, `${canvasKey}_recovery`].forEach((storageKey) => {
+            try { localStorage.removeItem(storageKey); } catch {}
+          });
+        });
+
         const updatedPaper = {
           ...activePaper,
           status: `已完成 (得分 ${calculatedScore}/${totalPaperScore})`,
           score: calculatedScore
         };
         if (onUpdatePaper) onUpdatePaper(updatedPaper);
+        try { localStorage.setItem('examcraft_active_paper', JSON.stringify(updatedPaper)); } catch {}
         const rawPapers = localStorage.getItem('examcraft_papers');
         if (rawPapers) {
           const list = JSON.parse(rawPapers);
@@ -1945,6 +2210,44 @@ export default function ExamRoomView({
             <span>全屏专注</span>
           </button>
 
+          {/* English Vocabulary Marking Hub */}
+          {isEnglishPaper && (
+            <div className="inline-flex items-center rounded-lg border border-outline-variant/40 bg-surface-container-low p-0.5 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setVocabDrawerOpen(true)}
+                className="inline-flex items-center space-x-1 px-2 py-1 text-on-surface text-[11px] sm:text-[12px] font-sans font-medium rounded-md hover:bg-surface-container transition-all active:scale-95 cursor-pointer"
+                title="查看/管理当前试卷标记的生词清单（交卷后可同步到生词本）"
+              >
+                <span className="material-symbols-outlined text-[15px] text-secondary">bookmark_border</span>
+                <span className="hidden sm:inline">生词</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-secondary text-on-secondary text-[10px] font-mono font-bold">
+                  {markedVocabList.length}
+                </span>
+              </button>
+
+              <span className="h-3.5 w-px bg-outline-variant/40 mx-0.5" />
+
+              <button
+                type="button"
+                onClick={toggleVocabLookupMode}
+                className={`inline-flex items-center space-x-1 px-2 py-1 rounded-md text-[11px] font-sans font-semibold transition-all active:scale-95 cursor-pointer ${
+                  isVocabLookupMode
+                    ? 'bg-amber-500/15 text-amber-800 dark:text-amber-200 hover:bg-amber-500/25'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
+                }`}
+                title={isVocabLookupMode ? '当前为【精读查词模式】（划词显示释义），点击切回【考场防剧透模式】' : '当前为【考场防剧透模式】（推荐：划词只标记不剧透），点击开启查词'}
+              >
+                <span className="material-symbols-outlined text-[14px]">
+                  {isVocabLookupMode ? 'menu_book' : 'visibility_off'}
+                </span>
+                <span className="hidden md:inline">
+                  {isVocabLookupMode ? '查词开启' : '防剧透'}
+                </span>
+              </button>
+            </div>
+          )}
+
           {/* Reset Entire Exam Button */}
           <button
             type="button"
@@ -2104,7 +2407,12 @@ export default function ExamRoomView({
         </section>
 
         <div ref={splitWorkspaceRef} className={`${isSplitWorkspace ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,var(--answer-ratio))_12px_minmax(360px,1fr)] items-start' : 'flex flex-col'} gap-space-md xl:gap-space-lg min-w-0`} style={isSplitWorkspace ? { '--answer-ratio': `${splitRatio * 100}%` } : undefined}>
-        <div className="min-w-0 space-y-space-md">
+        <div 
+          className="min-w-0 space-y-space-md select-text" 
+          onMouseUp={() => handleProcessTextSelection()} 
+          onDoubleClick={() => handleProcessTextSelection()}
+          onTouchEnd={() => setTimeout(() => handleProcessTextSelection(), 80)}
+        >
         <section className="bg-surface-container-lowest rounded-xl p-3 sm:p-space-xl shadow-sm border border-outline-variant/40 flex flex-col space-y-space-md min-w-0">
           <div className="flex items-center justify-between gap-3 pb-space-xs border-b border-surface-container">
             <div className="flex items-center gap-space-sm min-w-0">
@@ -2146,6 +2454,22 @@ export default function ExamRoomView({
                   )}
                   <button
                     type="button"
+                    onClick={toggleVocabLookupMode}
+                    className={`px-2 py-0.5 rounded text-[11px] font-sans transition-colors cursor-pointer flex items-center gap-1 border ${
+                      isVocabLookupMode
+                        ? 'text-amber-800 dark:text-amber-200 bg-amber-500/15 border-amber-500/30 font-semibold'
+                        : 'text-on-surface-variant hover:text-primary hover:bg-surface-container border-outline-variant/30'
+                    }`}
+                    title={isVocabLookupMode ? '当前为【精读查词模式】（划词显示释义），点击切回【考场防剧透】' : '当前为【考场防剧透模式】（推荐：只标不查），点击开启即时查词'}
+                  >
+                    <span className="material-symbols-outlined text-[13px]">
+                      {isVocabLookupMode ? 'menu_book' : 'visibility_off'}
+                    </span>
+                    <span className="hidden sm:inline">{isVocabLookupMode ? '精读查词中' : '考场防剧透'}</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => {
                       setPassageInputText(resolvedPassage);
                       setIsPassageModalOpen(true);
@@ -2159,7 +2483,10 @@ export default function ExamRoomView({
                 </div>
               </div>
               <div className="exam-english-passage max-h-80 overflow-y-auto p-space-sm sm:px-4 sm:py-3 bg-surface-container-lowest rounded-lg text-on-surface border border-outline-variant/20 text-[13.5px] leading-relaxed">
-                <MathMarkdown content={resolvedPassage.replace(/\{\{\s*(\d+)\s*\}\}/g, '**($1) ______**').replace(/\[(\d+)\]/g, '**[$1] ______**')} />
+                <MathMarkdown 
+                  content={resolvedPassage.replace(/\{\{\s*(\d+)\s*\}\}/g, '**($1) ______**').replace(/\[(\d+)\]/g, '**[$1] ______**')} 
+                  highlightWords={isEnglishPaper ? markedVocabList : []}
+                />
               </div>
             </div>
           ) : isClozeQuestion ? (
@@ -2185,7 +2512,11 @@ export default function ExamRoomView({
             </div>
           ) : null}
           {!isMultiQuestionPassage && <div className="py-space-md min-w-0 overflow-x-auto">
-            <MathMarkdown content={currentQ.prompt || (isClozeQuestion ? `请根据上下文，选择最佳词汇填入第 (${currentQ.num}) 空空白处。` : '')} className="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm font-semibold" />
+            <MathMarkdown 
+              content={currentQ.prompt || (isClozeQuestion ? `请根据上下文，选择最佳词汇填入第 (${currentQ.num}) 空空白处。` : '')} 
+              highlightWords={isEnglishPaper ? markedVocabList : []}
+              className="font-headline-md text-headline-md text-on-surface tracking-tight mb-space-sm font-semibold" 
+            />
             {currentQ.mathExpression && (
               <div className="bg-surface-container-low px-space-xl py-space-lg rounded-lg border-l-4 border-primary overflow-x-auto my-2">
                 <MathMarkdown content={currentQ.mathExpression.startsWith('$') ? currentQ.mathExpression : `$$${currentQ.mathExpression}$$`} className="text-headline-md" />
@@ -2204,14 +2535,17 @@ export default function ExamRoomView({
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {question.options.map((option, optionIndex) => {
-                      const selected = question.userAnswer === option.key;
+                      const isMulti = /多选|多项选择/i.test(question.type || question.section || '');
+                      const selected = isMulti
+                        ? String(question.userAnswer || '').includes(option.key)
+                        : question.userAnswer === option.key;
                       return (
                         <button
                           key={`${question.id || index}-${option.key || optionIndex}`}
                           type="button"
-                          onClick={() => handleUpdateAnswer(selected ? '' : option.key, index)}
+                          onClick={() => handleSelectOption(option.key, question, index)}
                           aria-pressed={selected}
-                          className={`flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${selected ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary/30' : 'border-outline-variant/30 bg-surface-container-low text-on-surface hover:border-primary/40 hover:bg-primary/[0.03]'}`}
+                          className={`flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer active:scale-98 ${selected ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary/30' : 'border-outline-variant/30 bg-surface-container-low text-on-surface hover:border-primary/40 hover:bg-primary/[0.03]'}`}
                         >
                           <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${selected ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}>{option.key}</span>
                           <MathMarkdown content={option.text} className="min-w-0 flex-1 text-body-sm" />
@@ -2226,11 +2560,23 @@ export default function ExamRoomView({
         </section>
         {!isMultiQuestionPassage && currentQ.options?.length > 0 && (
           <section className="bg-surface-container-lowest rounded-xl p-space-xl shadow-sm border border-outline-variant/40 space-y-space-md min-w-0">
-            <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">候选项选择：</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold">
+                {/多选|多项选择/i.test(currentQ.type || currentQ.section || '') ? '多项选择题（支持选择多个选项）：' : '候选项选择：'}
+              </h3>
+              {/多选|多项选择/i.test(currentQ.type || currentQ.section || '') && (
+                <span className="px-2 py-0.5 rounded-full bg-secondary-container text-secondary text-[11px] font-mono font-bold">
+                  多选模式 · 已选: {currentQ.userAnswer || '未选'}
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
               {currentQ.options.map((opt, optIdx) => {
-                const isSelected = currentQ.userAnswer === opt.key;
-                return <button key={`opt_${opt.key || 'k'}_${optIdx}`} type="button" onClick={() => handleUpdateAnswer(isSelected ? '' : opt.key)} aria-pressed={isSelected} className={`flex items-center gap-space-md p-space-md rounded-xl border text-left transition-all cursor-pointer min-w-0 ${isSelected ? 'bg-primary/5 border-primary ring-2 ring-primary text-primary font-semibold' : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'}`}>
+                const isMulti = /多选|多项选择/i.test(currentQ.type || currentQ.section || '');
+                const isSelected = isMulti
+                  ? String(currentQ.userAnswer || '').includes(opt.key)
+                  : currentQ.userAnswer === opt.key;
+                return <button key={`opt_${opt.key || 'k'}_${optIdx}`} type="button" onClick={() => handleSelectOption(opt.key, currentQ, currentQIndex)} aria-pressed={isSelected} className={`flex items-center gap-space-md p-space-md rounded-xl border text-left transition-all cursor-pointer min-w-0 active:scale-98 ${isSelected ? 'bg-primary/5 border-primary ring-2 ring-primary text-primary font-semibold' : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'}`}>
                   <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-label-md shrink-0 ${isSelected ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}>{opt.key}</span>
                   <MathMarkdown content={opt.text} className="font-body-md text-body-md min-w-0" />
                 </button>;
@@ -3230,6 +3576,125 @@ export default function ExamRoomView({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modern Floating Word Popover for English Exam & Reading */}
+      {vocabSelectionPopover && isEnglishPaper && (
+        <EnglishVocabPopover
+          popoverData={vocabSelectionPopover}
+          isMarked={markedVocabList.some((item) => item.word.toLowerCase() === vocabSelectionPopover.word.toLowerCase())}
+          globalAutoLookup={isVocabLookupMode}
+          onToggleMark={handleToggleMarkVocab}
+          onClose={() => setVocabSelectionPopover(null)}
+        />
+      )}
+
+      {/* Floating Vocab Toast Notification */}
+      {vocabToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[10000] px-4 py-2 rounded-xl bg-on-surface text-surface text-body-sm font-medium shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <span className="material-symbols-outlined text-secondary text-[18px]">check_circle</span>
+          <span>{vocabToast}</span>
+        </div>
+      )}
+
+      {/* Side Drawer for Exam Marked Vocab List */}
+      {vocabDrawerOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex justify-end animate-in fade-in duration-150">
+          <div className="w-full max-w-md bg-surface-container-lowest h-full shadow-2xl border-l border-outline-variant/30 flex flex-col animate-in slide-in-from-right duration-200">
+            {/* Header */}
+            <div className="p-4 border-b border-surface-container flex items-center justify-between bg-surface-container-low/50">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[22px]">menu_book</span>
+                <div>
+                  <h3 className="text-title-sm font-bold text-on-surface">本卷标记生词清单</h3>
+                  <p className="text-[11px] text-on-surface-variant">划选英文单词直接标记，交卷后可同步到生词本</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVocabDrawerOpen(false)}
+                className="p-1 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Manual input */}
+            <div className="p-3 bg-surface-container-low/30 border-b border-surface-container flex items-center gap-2">
+              <input
+                type="text"
+                value={manualWordInput}
+                onChange={(e) => setManualWordInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddManualWord()}
+                placeholder="手动输入生词后按回车添加..."
+                className="flex-1 px-3 py-1.5 bg-surface-container-lowest rounded-lg border border-outline-variant/30 text-body-sm focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+              />
+              <button
+                type="button"
+                onClick={handleAddManualWord}
+                disabled={!manualWordInput.trim()}
+                className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-container text-on-primary text-[12px] font-medium disabled:opacity-40 cursor-pointer"
+              >
+                添加
+              </button>
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {markedVocabList.length === 0 ? (
+                <div className="py-16 text-center text-on-surface-variant space-y-2">
+                  <span className="material-symbols-outlined text-[36px] text-outline">bookmark_border</span>
+                  <p className="text-body-sm font-medium">当前试卷尚未标记任何生词</p>
+                  <p className="text-[12px] text-outline max-w-xs mx-auto">
+                    在阅读文章、题干或选项时，用鼠标划选不认识的英文单词，即可弹出“📌 标记生词”快捷气泡。
+                  </p>
+                </div>
+              ) : (
+                markedVocabList.map((item, idx) => (
+                  <div key={item.id || idx} className="p-3 bg-surface-container-low rounded-xl border border-outline-variant/20 flex flex-col gap-1.5 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-primary font-mono text-[14px]">{item.word}</span>
+                        {item.phoneticUk && (
+                          <span className="text-[11px] font-mono text-on-surface-variant">
+                            {item.phoneticUk}
+                          </span>
+                        )}
+                        <span className="px-1.5 py-0.2 rounded bg-surface-container text-on-surface-variant text-[10px] font-mono">
+                          题号 {item.qNum}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMarkedWord(item.id)}
+                        className="text-outline hover:text-error p-1 rounded hover:bg-error/10 cursor-pointer transition-colors"
+                        title="移除此生词"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">delete</span>
+                      </button>
+                    </div>
+                    {item.definition && (
+                      <div className="text-[11.5px] text-on-surface font-medium line-clamp-1">
+                        {item.pos && <span className="text-primary italic mr-1 font-semibold">{item.pos}</span>}
+                        <span>{item.definition}</span>
+                      </div>
+                    )}
+                    {item.sentence && (
+                      <p className="text-[12px] text-on-surface-variant font-serif line-clamp-2 leading-relaxed bg-surface-container-lowest p-2 rounded-lg border border-outline-variant/10 italic">
+                        "{item.sentence}"
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 bg-surface-container-low border-t border-surface-container text-center text-[11px] text-outline">
+              共标记 <span className="font-bold text-primary">{markedVocabList.length}</span> 个生词 · 交卷后将提示一键或部分同步至单词本
             </div>
           </div>
         </div>

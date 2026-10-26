@@ -43,6 +43,11 @@ export default function VocabularyFlashcardsView({ onNavigate }) {
   const activeFolder = folders.find((f) => f.id === activeFolderId) || folders[0];
   const currentWord = filteredWords[currentIndex] || filteredWords[0];
 
+  // 切换单词或分类时自动重置翻面至正面
+  useEffect(() => {
+    setIsFlipped(false);
+  }, [currentIndex, activeFolderId, activeCategory]);
+
   // 音频发音 (Web Speech API)
   const playPronunciation = useCallback((text, langType = 'us') => {
     if (!text || !window.speechSynthesis) return;

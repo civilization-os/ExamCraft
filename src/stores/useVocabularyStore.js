@@ -370,44 +370,75 @@ export const useVocabularyStore = create((set, get) => ({
     const { words, folders, activeFolderId } = get();
     const destFolder = targetFolderId || activeFolderId || 'folder-default';
 
-    const prepared = newWordsList.map((item, idx) => ({
-      id: `vocab-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-      word: item.word || '',
-      phoneticUk: item.phoneticUk || item.phonetic || '',
-      phoneticUs: item.phoneticUs || item.phonetic || '',
-      pos: item.pos || 'n.',
-      definition: item.definition || '',
-      examFrequency: item.examFrequency || 4,
-      examFrequencyCount: item.examFrequencyCount || 5,
-      examSource: item.examSource || 'AI智能提取',
-      folderId: destFolder,
-      tags: ['kaoyan_core', 'ebbinghaus_due', 'ai_extracted'],
-      contextSlice: item.contextSlice || {
-        source: '真题切片与语境例句',
-        difficulty: 3,
-        sentence: item.sentence || '',
-        highlightWord: item.word || '',
-        translation: item.translation || ''
-      },
-      morphologyMnemonic: item.morphologyMnemonic || {
-        title: 'DeepSeek 构词与联想记忆',
-        analysis: item.mnemonic || '词根构词分析与自然联想拓展。'
-      },
-      synonymsComparison: item.synonymsComparison || {
-        title: '考研同义替换高频辨析',
-        items: Array.isArray(item.synonyms) ? item.synonyms : ['近义词替换分析整理中']
-      },
-      ebbinghausStage: 1,
-      mastered: false,
-      reviewCount: 0,
-      lastReviewedAt: null
-    }));
+    let addedCount = 0;
+    const currentWordsMap = new Map();
+    words.forEach((w) => currentWordsMap.set((w.word || '').toLowerCase(), w));
 
-    const nextWords = [...words, ...prepared];
+    const nextWords = [...words];
+
+    newWordsList.forEach((item, idx) => {
+      const lower = (item.word || '').trim().toLowerCase();
+      if (!lower) return;
+
+      const existingIndex = nextWords.findIndex(
+        (w) => (w.word || '').toLowerCase() === lower && (w.folderId === destFolder || !targetFolderId)
+      );
+
+      const wordPayload = {
+        id: `vocab-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        word: item.word || '',
+        phoneticUk: item.phoneticUk || item.phonetic || '',
+        phoneticUs: item.phoneticUs || item.phonetic || '',
+        pos: item.pos || 'n.',
+        definition: item.definition || '',
+        examFrequency: item.examFrequency || 4,
+        examFrequencyCount: item.examFrequencyCount || 5,
+        examSource: item.examSource || 'AI智能提取',
+        folderId: destFolder,
+        tags: ['kaoyan_core', 'ebbinghaus_due', 'ai_extracted'],
+        contextSlice: item.contextSlice || {
+          source: '真题切片与语境例句',
+          difficulty: 3,
+          sentence: item.sentence || '',
+          highlightWord: item.word || '',
+          translation: item.translation || ''
+        },
+        morphologyMnemonic: item.morphologyMnemonic || {
+          title: 'DeepSeek 构词与联想记忆',
+          analysis: item.mnemonic || '词根构词分析与自然联想拓展。'
+        },
+        synonymsComparison: item.synonymsComparison || {
+          title: '考研同义替换高频辨析',
+          items: Array.isArray(item.synonyms) ? item.synonyms : ['近义词替换分析整理中']
+        },
+        ebbinghausStage: 1,
+        mastered: false,
+        reviewCount: 0,
+        lastReviewedAt: null
+      };
+
+      if (existingIndex >= 0) {
+        // Upsert: preserve progress, update context and definition
+        const old = nextWords[existingIndex];
+        nextWords[existingIndex] = {
+          ...old,
+          definition: wordPayload.definition || old.definition,
+          phoneticUk: wordPayload.phoneticUk || old.phoneticUk,
+          phoneticUs: wordPayload.phoneticUs || old.phoneticUs,
+          contextSlice: wordPayload.contextSlice.sentence ? wordPayload.contextSlice : old.contextSlice,
+          morphologyMnemonic: wordPayload.morphologyMnemonic.analysis ? wordPayload.morphologyMnemonic : old.morphologyMnemonic,
+          synonymsComparison: wordPayload.synonymsComparison.items?.length ? wordPayload.synonymsComparison : old.synonymsComparison
+        };
+      } else {
+        nextWords.unshift(wordPayload);
+        addedCount += 1;
+      }
+    });
+
     // 更新 folder count
     const nextFolders = folders.map((f) => {
       if (f.id === destFolder) {
-        return { ...f, count: f.count + prepared.length };
+        return { ...f, count: (f.count || 0) + addedCount };
       }
       return f;
     });

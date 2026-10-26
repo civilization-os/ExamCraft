@@ -34,13 +34,30 @@ const hasChoiceOptions = (question) => {
 export function normalizeQuestionType(question, examTitle = '') {
   if (!question) return '综合计算与解答题';
   const rawType = String(question.type || '').trim();
-  const title = `${examTitle} ${question.section || ''}`;
+  const section = String(question.section || '').trim();
+  const title = `${examTitle} ${section}`;
   const num = Number.parseInt(String(question.num || question.id || '').replace(/\D/g, ''), 10);
   const prompt = String(question.prompt || '');
   const hasOptions = hasChoiceOptions(question);
   const blankCue = /_{2,}|＿{2,}|…{2,}|\.{4,}|\(\s{2,}\)|（\s{2,}）|填入.*?空|空格|横线处/.test(prompt);
 
-  // If options exist, distinguish choice types
+  // 1. If original rawType is already a specific meaningful type, preserve it
+  if (rawType && !/^(?:选择题|客观题|试题|考题|题目)$/.test(rawType)) {
+    // If it says choice but has no options, don't force choice unless explicitly stated
+    if (/选择/.test(rawType) && !hasOptions && !blankCue) {
+      // Keep going to inference
+    } else {
+      return rawType;
+    }
+  }
+
+  // 2. If section has explicit cues, trust section
+  if (/选择/.test(section) && hasOptions) return /多选/.test(section) ? '多项选择题' : '单项选择题';
+  if (/填空/.test(section) || blankCue || /填空/.test(rawType)) return '填空题';
+  if (/解答|计算|证明|综合/.test(section)) return '综合解答题';
+  if (/分析|论述|材料/.test(section)) return '分析题';
+
+  // 3. If options exist, distinguish choice types
   if (hasOptions) {
     if (/英语|English/i.test(title) && num >= 1 && num <= 20) return '完形填空';
     if (/英语|English/i.test(title) && num >= 21 && num <= 40) return '阅读理解';
@@ -49,36 +66,25 @@ export function normalizeQuestionType(question, examTitle = '') {
     return /多项选择|多选/.test(rawType) ? '多项选择题' : '单项选择题';
   }
 
-  // Explicit blank marker
-  if (blankCue || /填空/.test(rawType)) return '填空题';
-
-  // Standard exam structures by discipline
+  // 4. Standard exam structures by discipline (only when not choice)
   if (/408|计算机/.test(title)) {
-    if (num >= 1 && num <= 40) return '单项选择题';
     if (num >= 41) return '综合应用题';
   }
   if (/数学/.test(title)) {
-    if (num >= 1 && num <= 10) return '单项选择题';
     if (num >= 11 && num <= 16) return '填空题';
     if (num >= 17) return '解答题';
   }
   if (/政治/.test(title)) {
-    if (num >= 1 && num <= 16) return '单项选择题';
-    if (num >= 17 && num <= 33) return '多项选择题';
     if (num >= 34) return '分析题';
   }
   if (/英语|English/i.test(title)) {
-    if (num >= 1 && num <= 20) return '完形填空';
-    if (num >= 21 && num <= 40) return '阅读理解';
-    if (num >= 41 && num <= 45) return '英语新题型';
     if (num === 46) return '英译汉翻译';
     if (num >= 47) return '写作题';
   }
 
   if (rawType && !/^(?:选择题|客观题|试题|考题)$/.test(rawType)) return rawType;
   if (/分析|论述|材料/.test(title)) return '分析题';
-  if (/选择/.test(title)) return '单项选择题';
-  return rawType || '综合计算与解答题';
+  return '综合解答题';
 }
 
 export function getQuestionInputKind(question) {

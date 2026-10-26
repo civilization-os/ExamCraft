@@ -1,7 +1,7 @@
 # ExamCraft AI Workbench (多模态智能组卷与在线考练工作台)
 
 <p align="center">
-  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.4.0"><img src="https://img.shields.io/badge/Release-v1.4.0-blue.svg?logo=github" alt="Release v1.4.0"></a>
+  <a href="https://github.com/civilization-os/ExamCraft/releases/tag/v1.5.0"><img src="https://img.shields.io/badge/Release-v1.5.0-blue.svg?logo=github" alt="Release v1.5.0"></a>
   <a href="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml"><img src="https://github.com/civilization-os/ExamCraft/actions/workflows/docker-publish.yml/badge.svg" alt="Docker 发布状态"></a>
   <a href="https://github.com/users/civilization-os/packages?repo_name=ExamCraft"><img src="https://img.shields.io/badge/GHCR-Docker%20Package-2496ED?logo=docker&logoColor=white" alt="GitHub 容器镜像"></a>
   <a href="https://github.com/civilization-os/ExamCraft/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="开源协议: MIT"></a>
@@ -23,6 +23,30 @@
 ---
 
 ## 🌟 核心功能特色
+
+### 0. 考场英语 AI 智能划词、防剧透双层开关与单词本深度联动 (v1.5.0) 🆕
+- **防剧透双层开关体系 (Anti-Spoiler Dual-Switch Framework)**：
+  - **顶层 Header 全局模式开关**：考场顶栏配置全局查词开关，控制划词时默认是“纯净防剧透只标不查（仅胶囊）”还是“划词默认解析”；
+  - **单点卡片随手切换**：词卡支持随时点击 `[ 👁️ 看意思 / 🙈 收起 ]`，自主控制是否提前查看词义；
+  - **做题考场模式坚决不剧透句子翻译**：在考场答题阶段彻底剥离整篇长难句中文全译，杜绝题目核心句意被直接剧透，整句精读仅保留至考后评卷复盘；
+- **词性与中文释义规范分行排版（词性 - 意思; 自动换行）**：
+  - 严格规范多词性条目排版：每个词性独占一行，格式为 `v. - 做记号；标记；评分;`，遇到多个词性（如 `mark` 兼具动词与名词）自动换行；
+  - 彻底解除行数截断（取消 `line-clamp-2`），所有考研关键释义完整展开；
+  - 结构化整合「词根词缀构词助记」（如 `psycho- 心理 + -logist 专家学者`）与「真题核心搭配」（如 `clinical psychologists 临床心理学家`）；
+- **印刷体单引号归一化与所有格智能词形还原 (Lemmatization)**：
+  - 自动识别并归一化真题排版中的各类印刷体弯单引号（`’` `‘` \u2019 等）；
+  - 划选名词所有格（如 `people’s`、`children’s`）时，自动剥离所有格还原词元原形，精准获取原词音标与字典级释义，并在助记和搭配中兼顾所有格说明；
+- **智能视口避让与移动端沉浸适配**：
+  - **PC 端避让 Edge 浏览器原生菜单**：默认优先停靠在选区正下方（`placement = 'bottom'`），与 Edge 原生右上角小菜单错开，互不遮挡；
+  - **移动端底部抽屉 (Bottom Docked Sheet)**：屏幕 `< 640px` 时自动吸附至屏幕底部居中，绝不遮挡手指选区与文章；
+  - **Un-focus 与外部点击秒级关闭**：捕获阶段监听 `pointerdown`、`selectionchange`、`Escape` 键与窗口失焦，点击空白处立即顺滑退场；
+- **交卷复盘报告一键 / 部分同步至单词本**：
+  - 交卷后，复盘报告页顶部自动浮现【考场真题生词捕获】成果横幅与【📥 同步至生词本】快捷入口；
+  - 弹窗支持**一键全选**，或**自由勾选部分生词（部分同步）**；
+  - 支持存入“默认生词本”、已有专项生词本或现场新建自定义单词本文件夹；
+- **AI 深度补齐释义与艾宾浩斯抗遗忘记忆联动**：
+  - 开启 `model_core` AI 深度补齐，结合本次真题语境自动输出双音标、词性、精准释义、真题句子翻译、DeepSeek 词根联想助记与考研同义替换辨析；
+  - 同步完成后可直接一键跳转至「背单词」模块，启动艾宾浩斯 4 级抗遗忘复习流。
 
 ### 1. 三入口多模态智能组卷工作台 (Triple-Engine Generator)
 - **入口一：完整真题 PDF 1:1 原样精确克隆**

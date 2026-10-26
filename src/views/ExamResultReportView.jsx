@@ -2,13 +2,15 @@ import React, { useState } from 'react';
 import MathMarkdown from '../components/MathMarkdown';
 import SelectMenu from '../components/SelectMenu';
 import { getQuestionTypeClass, isPseudoPassage } from '../utils/questionTypes';
+import { useVocabularyStore } from '../stores/useVocabularyStore';
 
 export default function ExamResultReportView({
   submission,
   onUpdateSubmission,
   onBackToLibrary,
   onRetakeExam,
-  onOpenNotebook
+  onOpenNotebook,
+  onOpenVocabulary
 }) {
   if (!submission) {
     return (
@@ -57,6 +59,83 @@ export default function ExamResultReportView({
   const [isRetryingDiagnosis, setIsRetryingDiagnosis] = useState(false);
   const [diagnosisRetryMessage, setDiagnosisRetryMessage] = useState('');
   const [isActionPlanExpanded, setIsActionPlanExpanded] = useState(false);
+
+  // Vocabulary sync state
+  const markedVocabList = submission.markedVocabList || [];
+  const [isVocabModalOpen, setIsVocabModalOpen] = useState(false);
+  const [selectedWordIds, setSelectedWordIds] = useState(() => markedVocabList.map(w => w.id));
+  const [targetVocabFolderMode, setTargetVocabFolderMode] = useState('existing'); // 'existing' | 'new'
+  const vocabFolders = useVocabularyStore((s) => s.folders) || [];
+  const [existingVocabFolderId, setExistingVocabFolderId] = useState(() => {
+    return vocabFolders[0]?.id || 'folder-default';
+  });
+  const [newVocabFolderName, setNewVocabFolderName] = useState(`${paperTitle} 考场生词`);
+  const [enableAiEnrichVocab, setEnableAiEnrichVocab] = useState(true);
+  const [isEnrichingVocab, setIsEnrichingVocab] = useState(false);
+  const [vocabSyncSuccessMessage, setVocabSyncSuccessMessage] = useState('');
+
+  const handleToggleSelectAllWords = () => {
+    if (selectedWordIds.length === markedVocabList.length) {
+      setSelectedWordIds([]);
+    } else {
+      setSelectedWordIds(markedVocabList.map(w => w.id));
+    }
+  };
+
+  const handleToggleWord = (id) => {
+    setSelectedWordIds(prev =>
+      prev.includes(id) ? prev.filter(wId => wId !== id) : [...prev, id]
+    );
+  };
+
+  const handleConfirmSyncVocab = async () => {
+    if (selectedWordIds.length === 0) {
+      alert('请至少勾选一个生词以同步至生词本。');
+      return;
+    }
+
+    const wordsToSync = markedVocabList.filter(w => selectedWordIds.includes(w.id));
+    setIsEnrichingVocab(true);
+
+    try {
+      let finalTargetFolderId = existingVocabFolderId;
+      if (targetVocabFolderMode === 'new') {
+        const folderName = newVocabFolderName.trim() || `${paperTitle} 考场生词`;
+        useVocabularyStore.getState().addFolder(folderName);
+        const updatedFolders = useVocabularyStore.getState().folders;
+        const createdFolder = updatedFolders[updatedFolders.length - 1];
+        if (createdFolder) finalTargetFolderId = createdFolder.id;
+      }
+
+      let payloadWords = wordsToSync;
+
+      if (enableAiEnrichVocab) {
+        try {
+          const res = await fetch('/api/model/batch-enrich-words', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              words: wordsToSync,
+              paperTitle
+            })
+          });
+          const resData = await res.json();
+          if (resData.success && Array.isArray(resData.data) && resData.data.length > 0) {
+            payloadWords = resData.data;
+          }
+        } catch (enrichErr) {
+          console.warn('AI word enrich warning:', enrichErr);
+        }
+      }
+
+      useVocabularyStore.getState().addWords(payloadWords, finalTargetFolderId);
+      setVocabSyncSuccessMessage(`🎉 成功同步 ${payloadWords.length} 个考场生词至生词本！`);
+    } catch (err) {
+      alert(`同步生词失败: ${err.message}`);
+    } finally {
+      setIsEnrichingVocab(false);
+    }
+  };
 
   // Expand / collapse all analyses toggle
   const [expandedAll, setExpandedAll] = useState(false);
@@ -387,6 +466,20 @@ export default function ExamResultReportView({
         </div>
 
         <div className="flex w-full sm:w-auto items-center justify-end space-x-1 sm:space-x-space-md">
+          {markedVocabList.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setVocabSyncSuccessMessage('');
+                setIsVocabModalOpen(true);
+              }}
+              className="inline-flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 bg-secondary-container/80 hover:bg-secondary-container text-on-secondary-container text-[11px] sm:font-label-md sm:text-label-md rounded-lg border border-secondary/40 shadow-xs transition-all active:scale-95 cursor-pointer font-medium"
+              title="将本次考试标记的生词同步至单词本"
+            >
+              <span className="material-symbols-outlined text-[17px] text-secondary">menu_book</span>
+              <span>生词本 ({markedVocabList.length})</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setIsExportModalOpen(true)}
@@ -578,6 +671,56 @@ export default function ExamResultReportView({
             </div>
           </div>
         </section>
+
+        {/* English Vocabulary Capture Banner */}
+        {markedVocabList && markedVocabList.length > 0 && (
+          <section className="bg-surface-container-lowest rounded-2xl p-4 sm:p-5 border border-secondary/40 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative overflow-hidden">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-secondary-container/60 text-secondary flex items-center justify-center shrink-0 border border-secondary/20">
+                <span className="material-symbols-outlined text-[24px]">menu_book</span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-title-sm font-bold text-on-surface">考场真题生词捕获</h3>
+                  <span className="px-2 py-0.5 rounded-full bg-secondary text-on-secondary text-[11px] font-bold font-mono">
+                    共标记 {markedVocabList.length} 词
+                  </span>
+                  <span className="text-[12px] text-on-surface-variant font-label-mono">
+                    来源：《{paperTitle}》
+                  </span>
+                </div>
+                <p className="text-body-sm text-on-surface-variant leading-relaxed">
+                  已自动提取考场真题长难句切片语境。您可以一键全部同步或挑选部分生词同步至单词本，开启艾宾浩斯抗遗忘记忆。
+                </p>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {markedVocabList.slice(0, 10).map((w, i) => (
+                    <span key={i} className="px-2 py-0.5 bg-surface-container-low text-on-surface font-mono text-[11px] rounded-md border border-outline-variant/30">
+                      {w.word}
+                    </span>
+                  ))}
+                  {markedVocabList.length > 10 && (
+                    <span className="text-[11px] text-outline self-center">
+                      等共 {markedVocabList.length} 个单词
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 w-full md:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setVocabSyncSuccessMessage('');
+                  setIsVocabModalOpen(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-secondary hover:bg-secondary/90 text-on-secondary font-label-md font-semibold flex items-center gap-1.5 shadow-xs active:scale-95 transition-all cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">bookmark_add</span>
+                <span>同步至生词本 (可部分选择)</span>
+              </button>
+            </div>
+          </section>
+        )}
 
         {/* 3. Filter Pill Bar & Question Mini-Map Matrix */}
         <section className="min-w-0 bg-surface-container-lowest rounded-xl p-3 sm:p-space-md shadow-sm border border-outline-variant/30 flex flex-col md:flex-row md:items-center justify-between gap-space-md">
@@ -1256,6 +1399,223 @@ export default function ExamResultReportView({
                   className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-container text-on-primary font-label-md font-semibold shadow-sm cursor-pointer"
                 >
                   确认归档收录 ({selectedQIds.length} 题)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Modal: Sync Marked Vocabulary to Vocabulary Notebook */}
+      {isVocabModalOpen && (
+        <div className="fixed inset-0 z-50 bg-on-background/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-2xl w-full p-space-xl shadow-2xl border border-outline-variant/40 space-y-space-md animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-space-xs border-b border-surface-container shrink-0">
+              <div className="flex items-center space-x-2">
+                <span className="material-symbols-outlined text-[24px] text-secondary">menu_book</span>
+                <div>
+                  <h3 className="font-headline-sm text-headline-sm font-semibold text-on-surface">
+                    同步考场生词至生词本
+                  </h3>
+                  <p className="text-[12px] text-on-surface-variant">
+                    收录自《{paperTitle}》考场真题长难句切片，支持挑选部分同步
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVocabModalOpen(false)}
+                className="text-outline hover:text-on-surface p-1 rounded hover:bg-surface-container cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Quick Selection Toolbar */}
+            <div className="flex items-center justify-between py-1 px-1 shrink-0">
+              <label className="flex items-center space-x-2 text-label-sm font-semibold text-on-surface cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={selectedWordIds.length === markedVocabList.length && markedVocabList.length > 0}
+                  onChange={handleToggleSelectAllWords}
+                  className="rounded text-secondary focus:ring-secondary w-4 h-4 cursor-pointer"
+                />
+                <span>全选所有已标生词 (已勾选 {selectedWordIds.length} / {markedVocabList.length} 词)</span>
+              </label>
+
+              <div className="text-[11px] text-outline">
+                点击复选框可自由增删待同步词汇
+              </div>
+            </div>
+
+            {/* Word List Scroll Container */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-64 border border-outline-variant/30 rounded-xl p-space-sm bg-surface-container-low/30">
+              {markedVocabList.length === 0 ? (
+                <div className="text-center py-8 text-on-surface-variant text-body-sm">
+                  未检测到标记生词。
+                </div>
+              ) : (
+                markedVocabList.map((item) => {
+                  const isChecked = selectedWordIds.includes(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => handleToggleWord(item.id)}
+                      className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+                        isChecked
+                          ? 'bg-surface-container-lowest border-secondary/50 shadow-2xs'
+                          : 'bg-surface-container-low/50 border-outline-variant/20 opacity-70 hover:opacity-100'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {}}
+                        className="mt-1 rounded text-secondary focus:ring-secondary w-4 h-4 cursor-pointer shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-on-surface font-mono text-[14px]">
+                            {item.word}
+                          </span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-container text-on-surface-variant shrink-0">
+                            题号 {item.qNum}
+                          </span>
+                        </div>
+                        {item.sentence && (
+                          <p className="text-[12px] text-on-surface-variant mt-1 font-sans line-clamp-2 leading-relaxed">
+                            "{item.sentence}"
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Target Folder Setting */}
+            <div className="space-y-space-xs pt-space-xs border-t border-surface-container shrink-0">
+              <span className="text-label-sm font-semibold text-on-surface block">
+                归档目标生词本文件夹:
+              </span>
+              
+              <div className="flex items-center space-x-4">
+                <label className="flex items-center space-x-1.5 text-body-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="targetVocabFolder"
+                    checked={targetVocabFolderMode === 'existing'}
+                    onChange={() => setTargetVocabFolderMode('existing')}
+                    className="text-secondary"
+                  />
+                  <span>存入已有生词本</span>
+                </label>
+                <label className="flex items-center space-x-1.5 text-body-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="targetVocabFolder"
+                    checked={targetVocabFolderMode === 'new'}
+                    onChange={() => setTargetVocabFolderMode('new')}
+                    className="text-secondary"
+                  />
+                  <span>新建生词本文件夹</span>
+                </label>
+              </div>
+
+              {targetVocabFolderMode === 'new' ? (
+                <input
+                  type="text"
+                  value={newVocabFolderName}
+                  onChange={(e) => setNewVocabFolderName(e.target.value)}
+                  placeholder="输入生词本名称，例如：2026考研英语 · 真题核心生词"
+                  className="w-full px-3 py-2 bg-surface-container-low rounded-lg text-body-md border border-outline-variant/40 focus:outline-none focus:border-secondary font-sans"
+                />
+              ) : (
+                <SelectMenu
+                  ariaLabel="选择目标生词本"
+                  value={existingVocabFolderId}
+                  onChange={setExistingVocabFolderId}
+                  options={vocabFolders.map((f) => ({
+                    value: f.id,
+                    label: `${f.name} (${f.count || 0} 词)`
+                  }))}
+                  className="w-full"
+                  buttonClassName="inline-flex w-full items-center justify-between gap-3 rounded-lg border border-outline-variant/40 bg-surface-container-low px-3 py-2 text-left text-body-md text-on-surface hover:border-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary"
+                />
+              )}
+
+              {/* AI Enrich Checkbox */}
+              <label className="flex items-center space-x-2 pt-1 text-[12px] text-on-surface cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={enableAiEnrichVocab}
+                  onChange={(e) => setEnableAiEnrichVocab(e.target.checked)}
+                  className="rounded text-secondary focus:ring-secondary w-3.5 h-3.5"
+                />
+                <span>开启 AI 深度补齐释义、音标、真题例句翻译与构词助记 (model_core)</span>
+              </label>
+            </div>
+
+            {/* Success message banner */}
+            {vocabSyncSuccessMessage && (
+              <div className="p-3 bg-secondary-container/40 border border-secondary text-secondary rounded-xl text-body-sm font-medium flex items-center justify-between animate-in fade-in">
+                <span>{vocabSyncSuccessMessage}</span>
+                {onOpenVocabulary && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsVocabModalOpen(false);
+                      onOpenVocabulary();
+                    }}
+                    className="px-3 py-1 rounded-lg bg-secondary text-on-secondary text-[12px] font-semibold cursor-pointer shadow-xs active:scale-95"
+                  >
+                    前往背单词 &gt;
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-2 border-t border-surface-container shrink-0">
+              {onOpenVocabulary ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsVocabModalOpen(false);
+                    onOpenVocabulary();
+                  }}
+                  className="text-label-sm text-secondary hover:underline font-semibold cursor-pointer"
+                >
+                  前往背单词模块 &gt;
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsVocabModalOpen(false)}
+                  className="px-4 py-2 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md cursor-pointer"
+                >
+                  {vocabSyncSuccessMessage ? '关闭' : '取消'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isEnrichingVocab || selectedWordIds.length === 0}
+                  onClick={handleConfirmSyncVocab}
+                  className="px-5 py-2 rounded-lg bg-secondary hover:bg-secondary/90 text-on-secondary font-label-md font-semibold shadow-sm cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isEnrichingVocab && (
+                    <span className="material-symbols-outlined text-[16px] animate-spin">
+                      progress_activity
+                    </span>
+                  )}
+                  <span>
+                    {isEnrichingVocab
+                      ? 'AI 补齐词义并同步中...'
+                      : `确认同步至生词本 (${selectedWordIds.length} 词)`}
+                  </span>
                 </button>
               </div>
             </div>

@@ -10,7 +10,7 @@ import katex from 'katex';
  * - Callouts (::: info ... :::)
  * - Bold (**text**), inline code (`code`), links, clean typography
  */
-export default function MathMarkdown({ content, className = '' }) {
+export default function MathMarkdown({ content, className = '', highlightWords = [] }) {
   if (!content) return null;
 
   const renderContent = (rawText) => {
@@ -76,6 +76,22 @@ export default function MathMarkdown({ content, className = '' }) {
     // 8. Line breaks & paragraph spacing
     str = str.replace(/\n\n/g, '<div class="h-2"></div>');
     str = str.replace(/\n/g, '<br/>');
+
+    // 8.1 Highlight vocabulary words if provided (e.g. marked words in English exams)
+    if (Array.isArray(highlightWords) && highlightWords.length > 0) {
+      const validWords = highlightWords
+        .map((w) => (typeof w === 'string' ? w : w?.word))
+        .filter((w) => typeof w === 'string' && w.trim().length >= 2)
+        .map((w) => w.trim().toLowerCase());
+
+      if (validWords.length > 0) {
+        // Sort descending by length so longer phrases match first
+        const sortedWords = [...new Set(validWords)].sort((a, b) => b.length - a.length);
+        const escaped = sortedWords.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const vocabRegex = new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi');
+        str = str.replace(vocabRegex, '<mark class="exam-vocab-highlight" data-vocab="$1">$1</mark>');
+      }
+    }
 
     // 9. Restore display math with KaTeX
     str = str.replace(/@@@DISPLAY_MATH_(\d+)@@@/g, (match, idx) => {
