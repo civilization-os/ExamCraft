@@ -5,6 +5,38 @@ import { lookupWordInLexicon } from '../utils/englishLexicon';
 // 全局内存缓存，防止重复请求相同单词
 const globalAiWordCache = new Map();
 
+const VOCAB_STORAGE_PREFIX = 'examcraft_word_ai_';
+const MAX_CACHED_WORDS = 250;
+
+/**
+ * 安全持久化词汇解析缓存，带有自动容量配额防护与 LRU 清理
+ */
+function safeStoreWordAiData(wordKey, data) {
+  if (!wordKey || !data) return;
+  const storageKey = `${VOCAB_STORAGE_PREFIX}${wordKey}`;
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(data));
+  } catch (err) {
+    // 捕获 QuotaExceededError 或容量异常，清理旧缓存
+    try {
+      const keysToClean = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(VOCAB_STORAGE_PREFIX)) {
+          keysToClean.push(k);
+        }
+      }
+      if (keysToClean.length > 0) {
+        const half = Math.ceil(keysToClean.length / 2);
+        for (let i = 0; i < half; i++) {
+          localStorage.removeItem(keysToClean[i]);
+        }
+        localStorage.setItem(storageKey, JSON.stringify(data));
+      }
+    } catch {}
+  }
+}
+
 /**
  * 规范化解析多词性释义条目
  * 保证输出标准结构：[{ pos: 'v.', meaning: '在…上做记号；标记；给…评分' }, { pos: 'n.', meaning: '记号，标记；分数' }]
@@ -19,7 +51,36 @@ function parseVocabEntries(info) {
         meaning: (it.meaning || it.def || it.definition || '').trim()
       }))
       .filter((it) => it.meaning);
-    if (list.length > 0) return list;
+    if (list.length > 0) {
+      // 增强：检测组合词性 (如 'prep./conj.' 或 'n./v.') 并拆分为清晰的单行
+      const expandedList = [];
+      for (const item of list) {
+        if (item.pos.includes('/') || item.pos.includes(';')) {
+          const subMatches = [
+            ...item.meaning.matchAll(
+              /(?:^|\n|[\s;；。]+)(v\.|n\.|adj\.|adv\.|prep\.|conj\.|pron\.|art\.|vi\.|vt\.)\s*/gi
+            )
+          ];
+          if (subMatches.length > 1) {
+            for (let i = 0; i < subMatches.length; i++) {
+              const cur = subMatches[i];
+              const curPos = cur[1].toLowerCase();
+              const sIdx = cur.index + cur[0].length;
+              const eIdx = i + 1 < subMatches.length ? subMatches[i + 1].index : item.meaning.length;
+              let m = item.meaning
+                .substring(sIdx, eIdx)
+                .trim()
+                .replace(/^[-\s:：]+/, '')
+                .replace(/[;；。]+$/, '');
+              if (m) expandedList.push({ pos: curPos, meaning: m });
+            }
+            continue;
+          }
+        }
+        expandedList.push(item);
+      }
+      return expandedList;
+    }
   }
 
   const pos = (info.pos || '').trim();
@@ -175,9 +236,7 @@ export default function EnglishVocabPopover({
         if (isCancelled) return;
         if (json.success && json.data) {
           globalAiWordCache.set(wordKey, json.data);
-          try {
-            localStorage.setItem(`examcraft_word_ai_${wordKey}`, JSON.stringify(json.data));
-          } catch {}
+          safeStoreWordAiData(wordKey, json.data);
           setAiData(json.data);
         }
       })

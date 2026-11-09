@@ -196,6 +196,29 @@ export function lookupWordInLexicon(word) {
 }
 
 /**
+ * 智能切分英文文本为自然句，并妥善保护常见缩写（如 Dr., U.S., e.g., Prof., et al. 等）
+ */
+export function splitEnglishSentences(text) {
+  if (!text || typeof text !== 'string') return [];
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+
+  // 1. 保护常见英文头衔、地名、缩写中的句点，防止错误断句
+  const abbrevRegex = /\b(Dr|Mr|Mrs|Ms|Prof|Sr|Jr|vs|etc|e\.g|i\.e|U\.S|U\.K|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Oct|Nov|Dec|al|approx|dept|est|fig|inc|no)\./gi;
+  let protectedText = trimmed.replace(abbrevRegex, (match) => match.replace(/\./g, '\uE000'));
+  // 保护如 U.S.A.、单字母缩写点 A. B. C.
+  protectedText = protectedText.replace(/\b([A-Z])\./g, '$1\uE000');
+
+  // 2. 按照真实的句末标点 [.?!;] 切分
+  const rawSentences = protectedText.split(/(?<=[.?!;])\s+|\n+/);
+
+  // 3. 还原占位符并过滤空字符串
+  return rawSentences
+    .map((s) => s.replace(/\uE000/g, '.').trim())
+    .filter(Boolean);
+}
+
+/**
  * 递归向上查找包含选区的最近块级容器，并精准切分捕获长难句
  */
 export function extractContextSentenceFromSelection(selection, targetWord) {
@@ -229,8 +252,8 @@ export function extractContextSentenceFromSelection(selection, targetWord) {
     const fullText = (bestBlock?.innerText || bestBlock?.textContent || '').trim();
     if (!fullText) return '';
 
-    // 按照英文句末标点 [.?!] 切分自然句
-    const sentences = fullText.split(/(?<=[.?!;])\s+|\n+/);
+    // 按照智能保护缩写算法切分自然句
+    const sentences = splitEnglishSentences(fullText);
     const searchTarget = (targetWord || '').toLowerCase();
 
     // 优先匹配包含完整单词的句子
